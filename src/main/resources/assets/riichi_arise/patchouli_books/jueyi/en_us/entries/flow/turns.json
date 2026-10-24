@@ -1,0 +1,33 @@
+{
+  "name": "Draws, Discards and Wins",
+  "icon": "riichi_arise:mahjong_tile",
+  "category": "riichi_arise:flow",
+  "sortnum": 1,
+  "pages": [
+    {
+      "type": "patchouli:text",
+      "title": "Draw and Discard",
+      "text": "The dealer discards one tile from their 14, then each player in turn draws one tile from the live wall and discards one. A full round is one $(thing)go-around$(0).$(br2)Discards are laid face up in front of you, six per row, in the $(thing)pond$(0). After a call or a kan replacement draw you must also discard. Tiles in melds and concealed kans cannot be discarded."
+    },
+    {
+      "type": "patchouli:text",
+      "title": "Winning Requirements",
+      "text": "A win requires all of the following:$(li)a complete hand: four sets plus a pair, or a special shape such as seven pairs or thirteen orphans;$(li)at least 1 han of $(thing)yaku$(0); dora add han but never count as yaku themselves;$(li)you are not furiten, or you win by self-draw.$(br2)Winning on your own draw is $(thing)tsumo$(0); winning on a discard is $(thing)ron$(0). Chankan is normally scored as ron."
+    },
+    {
+      "type": "patchouli:text",
+      "title": "Exhaustive Draw",
+      "text": "If the live wall runs out with no winner, the hand is an $(thing)exhaustive draw$(0). Tenpai players reveal their hands and the noten players pay 3000 points in total: 3000 to one tenpai player, 1500 each to two, or 1000 each to three. If everyone or nobody is tenpai, nothing is paid.$(br2)Yaku-less tenpai and dead waits still count as tenpai."
+    },
+    {
+      "type": "patchouli:text",
+      "title": "Abortive Draws",
+      "text": "Some situations end the hand immediately: the dealer repeats, honba increases and riichi sticks stay on the table. Common cases:$(li)$(thing)nine terminals$(0): nine or more different terminal/honor tiles in the deal, declared before discarding;$(li)$(thing)four winds$(0): all four players discard the same wind on the first go-around;$(li)$(thing)four riichi$(0);$(li)$(thing)four kans$(0): four kans by all players combined;$(li)$(thing)triple ron$(0)."
+    },
+    {
+      "type": "patchouli:text",
+      "title": "Tenpai and Furiten",
+      "text": "$(thing)Tenpai$(0): one tile away from a complete hand.$(br2)$(thing)Furiten$(0): if your own discards include any of your winning tiles, you may not win by ron (tsumo is still allowed). Passing on a winning discard causes temporary furiten; after riichi it lasts until the hand ends.$(br2)A yaku-less tenpai or a dead wait still counts as tenpai for draw payments."
+    }
+  ]
+}

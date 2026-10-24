@@ -42,6 +42,10 @@ public class MahjongItems {
 	public static final DeferredHolder<Item, Item> FENG_PAN_SMALL =
 			REGISTRY.register("fengpan_small", () -> new net.minecraft.world.item.BlockItem(MahjongBlocks.FENG_PAN_SMALL.get(), new Item.Properties()));
 
+	/** 《雀魂绝艺总纲》：帕秋莉手册联动手册（右键开书） */
+	public static final DeferredHolder<Item, Item> JUEYI_MANUAL =
+			REGISTRY.register("jueyi_manual", () -> new JueyiManualItem(new Item.Properties().stacksTo(1)));
+
 	public static final List<DeferredHolder<Item, Item>> ITEMS = IDS.stream()
 			.map(id -> REGISTRY.register(id, () -> {
 				Item.Properties props = new Item.Properties();

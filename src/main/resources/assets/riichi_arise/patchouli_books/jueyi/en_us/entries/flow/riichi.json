@@ -1,0 +1,23 @@
+{
+  "name": "Riichi and Dora",
+  "icon": "riichi_arise:mahjong_stick_1000",
+  "category": "riichi_arise:flow",
+  "sortnum": 3,
+  "pages": [
+    {
+      "type": "patchouli:text",
+      "title": "Declaring Riichi",
+      "text": "If your hand is closed and tenpai, you may declare $(thing)riichi$(0): pay a 1000-point stick and, from then on, discard whatever you draw (concealed kans are restricted) until you win or the hand is drawn.$(br2)Riichi adds 1 han and unlocks $(thing)ura dora$(0). A declaration cannot be taken back; the stick stays on the table and goes to the winner."
+    },
+    {
+      "type": "patchouli:text",
+      "title": "Ippatsu and Double Riichi",
+      "text": "$(li)$(thing)Ippatsu$(0): win within one go-around of riichi with no intervening call, +1 han;$(li)$(thing)Double riichi$(0): declare on your first discard, worth 2 han;$(li)$(thing)Furiten riichi$(0): you are in furiten, so you may only win by self-draw;$(li)a concealed kan after riichi must not change your wait."
+    },
+    {
+      "type": "patchouli:text",
+      "title": "Dora",
+      "text": "The tile $(thing)after$(0) the dora indicator is dora: numbers wrap within their suit, winds go East-South-West-North, dragons go White-Green-Red.$(br2)$(li)$(thing)Visible dora$(0): the indicator flipped at the deal;$(li)$(thing)Kan dora$(0): one more indicator per kan;$(li)$(thing)Ura dora$(0): indicators under the flipped ones, readable only by a riichi winner;$(li)$(thing)Red fives$(0): one red 5 per suit in many rules.$(br2)Each dora adds 1 han, but dora alone is not a yaku."
+    }
+  ]
+}

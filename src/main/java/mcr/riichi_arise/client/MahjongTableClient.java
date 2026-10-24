@@ -86,6 +86,8 @@ public final class MahjongTableClient {
 	private static final Map<Avatar, Boolean> AVATAR_GROUND = new HashMap<>();
 	/** 假玩家客户端实体 id 计数（负数且递减，与服务端实体 id 区间隔离） */
 	private static int nextAvatarEntityId = -1_000_000;
+	/** 角色皮肤是否细手臂（slim）的解析缓存（贴图 → slim） */
+	private static final Map<net.minecraft.resources.ResourceLocation, Boolean> SLIM_CACHE = new HashMap<>();
 
 	/** AI 座位假玩家记录：实体 + 隐形骑乘载具（站姿模式为 null，直接钉位）+ 角色 id + 档案 UUID + 是否站姿 */
 	private record Avatar(RemotePlayer player,
@@ -478,6 +480,7 @@ public final class MahjongTableClient {
 	/**
 	 * 角色本地皮肤（{@code assets/riichi_arise/textures/entity/ai/<角色 id>.png}）；
 	 * 默认角色或贴图缺失时返回 null（由原版玩家渲染器使用档案/默认皮肤）。
+	 * 手臂模型按贴图自动判定（{@link #isSlimSkin}）：细手臂皮肤 4px 展开区只画 3px，最右两列透明。
 	 */
 	private static net.minecraft.client.resources.PlayerSkin localSkin(String form) {
 		var tex = mcr.riichi_arise.game.riichi.AiCharacters.skin(form);
@@ -486,8 +489,36 @@ public final class MahjongTableClient {
 		Minecraft mc = Minecraft.getInstance();
 		if (mc.getResourceManager() == null || mc.getResourceManager().getResource(tex).isEmpty())
 			return null;
+		var model = isSlimSkin(tex)
+				? net.minecraft.client.resources.PlayerSkin.Model.SLIM
+				: net.minecraft.client.resources.PlayerSkin.Model.WIDE;
 		return new net.minecraft.client.resources.PlayerSkin(tex, "",
-				null, null, net.minecraft.client.resources.PlayerSkin.Model.WIDE, false);
+				null, null, model, false);
+	}
+
+	/** 皮肤是否为细手臂（slim）：64×64 且手臂展开区最右两列（x=54/55）透明；旧版 64×32 皮肤一律经典手臂。 */
+	private static boolean isSlimSkin(net.minecraft.resources.ResourceLocation tex) {
+		return SLIM_CACHE.computeIfAbsent(tex, t -> {
+			Minecraft mc = Minecraft.getInstance();
+			if (mc.getResourceManager() == null)
+				return false;
+			var res = mc.getResourceManager().getResource(t);
+			if (res.isEmpty())
+				return false;
+			try (var in = res.get().open()) {
+				com.mojang.blaze3d.platform.NativeImage img = com.mojang.blaze3d.platform.NativeImage.read(in);
+				try {
+					if (img.getWidth() != 64 || img.getHeight() != 64)
+						return false;
+					// getPixelRGBA 为内存 RGBA 字节序（小端）→ alpha 在最高字节
+					return (img.getPixelRGBA(54, 20) >>> 24) == 0 && (img.getPixelRGBA(55, 20) >>> 24) == 0;
+				} finally {
+					img.close();
+				}
+			} catch (java.io.IOException e) {
+				return false;
+			}
+		});
 	}
 
 	/**

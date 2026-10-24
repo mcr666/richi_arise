@@ -36,3 +36,11 @@ description="When Riichi Arise"
     versionRange="*"
     ordering="AFTER"
     side="BOTH"
+
+# Patchouli（帕秋莉手册）联动（软依赖）：《雀魂绝艺总纲》手册；未安装时物品只提示、不开书
+[[dependencies.riichi_arise]]
+    modId="patchouli"
+    type="optional"
+    versionRange="*"
+    ordering="AFTER"
+    side="BOTH"

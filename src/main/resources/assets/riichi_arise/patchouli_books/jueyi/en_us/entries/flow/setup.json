@@ -1,0 +1,23 @@
+{
+  "name": "Wall, Deal and Dead Wall",
+  "icon": "riichi_arise:mahjong_tile",
+  "category": "riichi_arise:flow",
+  "sortnum": 0,
+  "pages": [
+    {
+      "type": "patchouli:text",
+      "title": "Building the Wall",
+      "text": "All tiles are shuffled and stacked face down in front of each player: 17 stacks of two tiles each, forming the $(thing)wall$(0) around the table.$(br2)An automatic table does this for you."
+    },
+    {
+      "type": "patchouli:text",
+      "title": "Breaking the Wall",
+      "text": "The dealer rolls two dice; counting counter-clockwise from the dealer, the indicated player breaks the wall in front of them, counting stacks from the right edge.$(br2)The two stacks left of the break (4 tiles) go to the dealer, then 4 each to South, West and North. A second round gives everyone 4 more, for 12 tiles each.$(br2)Finally the dealer takes 2 tiles (14) and each other player 1 tile (13)."
+    },
+    {
+      "type": "patchouli:text",
+      "title": "Dead Wall",
+      "text": "The 7 stacks (14 tiles) to the right of the break form the $(thing)dead wall$(0). It is never drawn from normally; it supplies replacement tiles for kans and holds the dora indicators.$(br2)$(li)$(thing)Replacement tiles$(0): the 2 stacks nearest the break, 4 tiles in all;$(li)$(thing)Dora indicator$(0): the top tile of the 3rd stack from the break is flipped.$(br2)All other tiles are the $(thing)live wall$(0). With only 4 replacement tiles, a hand allows at most 4 kans."
+    }
+  ]
+}

@@ -46,6 +46,12 @@ public final class TableLayout {
 	public static final double TILE_LONG = 16 * (2.5 / 12.0) / 16;
 	/** 手牌行离桌边距离（格） */
 	public static final double EDGE_INSET = 0.35;
+	/** 小型风盘手牌/副露区额外外移量（格，3 个模型单位 = 3/16 格） */
+	public static final double SMALL_OUTWARD = 3.0 / 16.0;
+	/** 小型风盘手牌区整体向玩家左侧（沿 lefts）偏移量（格，2 个模型单位 = 2/16 格） */
+	public static final double SMALL_HAND_LEFT_SHIFT = 2.0 / 16.0;
+	/** 小型风盘副露区外缘与桌沿（3×3 桌半宽 1.5）之间保留的间隙（格，1 个模型单位） */
+	public static final double SMALL_MELD_EDGE_GAP = 1.0 / 16.0;
 	/** 手牌相邻牌间距（格）——牌宽 12px×s/16≈0.15625，紧贴（+0.0007 防共面闪烁） */
 	public static final double TILE_GAP = 0.157;
 	/** 副露行向桌心内收距离（格）——与手牌行错开 z 带，避免占用同一条线 */
@@ -76,9 +82,9 @@ public final class TableLayout {
 	/** 桌面几何：桌心 + f/r 方向 + 各家行中心/切线/朝外/左手方向 + 是否小型风盘（紧凑 3×3 布局） */
 	public record Geom(Vec3 center, Vec3 f, Vec3 r, Vec3[] rows, Vec3[] tangents, Vec3[] outs, Vec3[] lefts,
 			boolean small) {
-		/** 手牌行中心距桌心（正常 1.65 / 小型 3×3 = 1.5−EDGE_INSET = 1.15） */
+		/** 手牌行中心距桌心（正常 1.65 / 小型 3×3 = 1.5−EDGE_INSET+SMALL_OUTWARD = 1.3375） */
 		public double edge() {
-			return (small ? 1.5 : 2.0) - EDGE_INSET;
+			return edgeFor(small);
 		}
 
 		/** 座位站位距桌心（正常 3.5 / 小型 2.5） */
@@ -86,14 +92,14 @@ public final class TableLayout {
 			return small ? 2.5 : SEAT_DISTANCE;
 		}
 
-		/** 牌河最靠桌心一排行中心距桌心（小型收窄，保证副露行与牌河外排不重叠） */
+		/** 牌河最靠桌心一排行中心距桌心（与大风盘一致，小型不再收窄） */
 		public double riverDist() {
-			return small ? 0.28 : RIVER_DIST;
+			return RIVER_DIST;
 		}
 
-		/** 副露区外缘上限（小型按表宽等比收窄，防相邻两家副露重叠） */
+		/** 副露区外缘上限（小型按表宽等比收窄，防相邻两家副露重叠；3×3 桌半宽 1.5 只留 1 个模型单位） */
 		public double meldEdgeCap() {
-			return small ? 1.05 : MELD_EDGE_CAP;
+			return small ? 1.5 - SMALL_MELD_EDGE_GAP : MELD_EDGE_CAP;
 		}
 
 		/** 第 rowIdx 排（内排 0 = 最靠玩家）行中心距桌心：内排增大即向桌心推进；第 RIVER_ROWS 排起为溢出行，置于最外内排外侧 */
@@ -114,6 +120,11 @@ public final class TableLayout {
 			int seat, int index, int delay) {
 	}
 
+	/** 手牌行中心距桌心（格）：正常 4×4 尺度 1.65 / 小型 3×3 桌 1.15 再外移 SMALL_OUTWARD */
+	private static double edgeFor(boolean small) {
+		return (small ? 1.5 + SMALL_OUTWARD : 2.0) - EDGE_INSET;
+	}
+
 	/** 由方块状态+桌角原点推桌面几何（家序 0=東（远侧）→1=南（右侧）→2=西（近侧）→3=北（左侧）） */
 	public static Geom of(BlockGetter level, BlockPos origin) {
 		BlockState anyState = level.getBlockState(origin);
@@ -129,7 +140,7 @@ public final class TableLayout {
 						origin.getX() + (forward.getStepX() + right.getStepX() + 1) / 2.0,
 						origin.getY(),
 						origin.getZ() + (forward.getStepZ() + right.getStepZ() + 1) / 2.0);
-		double edge = (small ? 1.5 : 2.0) - EDGE_INSET; // 行中心距桌心：正常 1.65（4×4 尺度）/ 小型 1.15（3×3 桌）
+		double edge = edgeFor(small); // 行中心距桌心：正常 1.65 / 小型 1.3375（3×3 桌手牌/副露外移 3/16 格）
 		Vec3[] rows = { center.subtract(f.scale(edge)), center.add(r.scale(edge)),
 				center.add(f.scale(edge)), center.subtract(r.scale(edge)) };
 		Vec3[] tangents = { r, f, r, f }; // 行中心沿 f/r 偏移，牌列沿切线（另一轴）展开
@@ -154,6 +165,8 @@ public final class TableLayout {
 	/** 同上（drawnGap = 该张为刚摸的牌：有副露时摸牌 index &lt; 13，由调用方按 drawnSeat 判定） */
 	public static Vec3 handTarget(Geom geom, int seat, int index, boolean drawnGap) {
 		double offset = (HAND_SIZE - 1) / 2.0 * TILE_GAP - index * TILE_GAP - (drawnGap ? 0.2 : 0);
+		if (geom.small())
+			offset += SMALL_HAND_LEFT_SHIFT; // 小型风盘：整排手牌再向玩家左侧偏移 2 个模型单位
 		return geom.rows()[seat].add(geom.lefts()[seat].scale(offset));
 	}
 
@@ -225,7 +238,7 @@ public final class TableLayout {
 		Vec3 center = geom.center();
 		Vec3 f = geom.f();
 		Vec3 r = geom.r();
-		double edge = geom.edge(); // 手牌行中心距桌心（与 of() 一致：正常 1.65 / 小型 1.15）
+		double edge = geom.edge(); // 手牌行中心距桌心（与 of() 一致：正常 1.65 / 小型 1.3375）
 		double flatStep = 0.17;         // 平躺牌间距
 		Vec3[] rows = geom.rows();
 		Vec3[] tangents = geom.tangents();

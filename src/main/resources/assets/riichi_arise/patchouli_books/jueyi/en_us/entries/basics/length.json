@@ -1,0 +1,23 @@
+{
+  "name": "Hands, Hanchan and Endings",
+  "icon": "minecraft:clock",
+  "category": "riichi_arise:basics",
+  "sortnum": 1,
+  "pages": [
+    {
+      "type": "patchouli:text",
+      "title": "Hands and Honba",
+      "text": "The smallest unit is a $(thing)hand$(0), named East/South/West/North plus 1-4, such as East 2 or South 4. The dealer stays the same for the whole hand.$(br2)If the dealer wins, or is tenpai at an exhaustive draw, the dealer $(thing)repeats$(0): honba increases by one and the next hand is called \"East 2, 3 honba\"."
+    },
+    {
+      "type": "patchouli:text",
+      "title": "Common Game Lengths",
+      "text": "$(li)$(thing)Hanchan$(0): East and South rounds, 8 hands in total; after East 4 the game enters South.$(li)$(thing)Tonpuusen$(0): East only, East 1 to East 4.$(li)$(thing)Iichan$(0): a hanchan that continues into West and North, 16 hands.$(li)$(thing)Single-hand settlement$(0): points are paid out after every hand.$(br2)Agree on the format before the game."
+    },
+    {
+      "type": "patchouli:text",
+      "title": "All Last and Bust",
+      "text": "The final hand of a hanchan (usually South 4) is called $(thing)oorasu$(0) (All Last). Some rules allow the dealer to repeat there, or extend the game unless everyone has reached 30000 points.$(br2)If a player's points fall below zero after a hand, the game ends immediately and that player is $(thing)busted$(0)."
+    }
+  ]
+}

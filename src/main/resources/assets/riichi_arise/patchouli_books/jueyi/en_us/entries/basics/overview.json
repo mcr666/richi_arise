@@ -1,0 +1,23 @@
+{
+  "name": "Overview",
+  "icon": "minecraft:book",
+  "category": "riichi_arise:basics",
+  "sortnum": 0,
+  "pages": [
+    {
+      "type": "patchouli:text",
+      "title": "Riichi Mahjong",
+      "text": "Riichi mahjong is a four-player Japanese mahjong game played with 136 tiles, two dice and point sticks.$(br2)A hand starts with the deal. Players draw and discard in turn, and the first to complete a winning hand and declare it wins. If nobody wins, the hand ends in an exhaustive draw.$(br2)When the game ends, the player with the most points wins."
+    },
+    {
+      "type": "patchouli:text",
+      "title": "Tile Types",
+      "text": "There are three groups of tiles:$(li)$(thing)number tiles$(0): man, pin and sou from 1 to 9, four of each;$(li)$(thing)wind tiles$(0): east, south, west, north;$(li)$(thing)dragon tiles$(0): white, green, red.$(br2)Winds and dragons are $(thing)honor tiles$(0). The 1s, 9s and all honors are $(thing)terminal/honor tiles$(0); the rest are simples."
+    },
+    {
+      "type": "patchouli:text",
+      "title": "Dealer and Seats",
+      "text": "Each hand has one $(thing)dealer$(0) and three non-dealers. The dealer is East, then South, West and North counter-clockwise; these names are seat order, not the physical direction you face.$(br2)Your left-hand neighbour is the $(thing)player above$(0), your right-hand neighbour is the $(thing)player below$(0), and the player opposite is across from you."
+    }
+  ]
+}

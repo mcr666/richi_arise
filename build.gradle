@@ -1,0 +1,132 @@
+plugins {
+    // 注意：不能加 'eclipse' 插件——MDG2 的 EclipseIntegration 会据此把 dev 运行时
+    // 的 mod 目录指到 bin/main（Eclipse 输出目录），残留旧类导致崩溃/启动失败
+    id 'net.neoforged.moddev' version '2.0.141'
+}
+
+version = '1.0.0'
+base.archivesName = "riichi_arise"
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+
+repositories {
+    maven {
+        // 命名以隔离 Gradle 的模块缺失缓存
+        name = 'localMaven'
+        // 本地仓库：TLM jar（网络不通时的离线兜底，取自 MurmolMod local-maven）
+        url = uri("file:///D:/Code/MurmolMod/local-maven/")
+    }
+    maven {
+        // 阿里云公共镜像：优先走国内节点拉取依赖
+        url = "https://maven.aliyun.com/repository/public"
+    }
+    maven {
+        // Maven Central：jlayer（mp3 解码，天凤式角色语音用 Java Sound 播放）
+        url = "https://repo1.maven.org/maven2"
+    }
+    maven {
+        // TLM（Touhou Little Maid）软依赖
+        url = "https://api.modrinth.com/maven"
+    }
+    maven {
+        // JitPack：Mahjong4j（日麻和牌判定库）
+        url = "https://jitpack.io/"
+    }
+    maven {
+        // Patchouli（帕秋莉手册）：手册联动的编译期 API 与开发环境运行时
+        url = "https://maven.blamejared.com/"
+    }
+}
+
+dependencies {
+    // Mahjong4j：和牌/役种判定（纯 Java 库，打包时并入 mod JAR）
+    // 其 POM 误把 maven-gpg-plugin 声明为依赖，拖进整条 maven 2.2.1 依赖链；
+    // 其中 maven-artifact-manager 与 FML 运行期需要的 maven-artifact 构成 JPMS 分裂包
+    // （org/apache/maven/artifact/resolver 同时存在于两个 jar），导致开发环境启动崩溃，全部排除
+    implementation("com.github.mahjong4j:mahjong4j:0.3.2") {
+        exclude group: 'org.apache.maven.plugins'
+        exclude group: 'org.apache.maven'
+    }
+
+    // jlayer：mp3 解码（天凤式角色语音用 Java Sound 直播；纯库，打包并入 mod JAR）
+    implementation "com.googlecode.soundlibs:jlayer:1.0.1.4"
+
+    // Patchouli（帕秋莉手册）：软依赖。compileOnly 提供 PatchouliAPI，
+    // runtimeOnly 仅供开发环境实际翻阅手册；都不打包进 JAR，正式游玩由玩家自行安装
+    compileOnly "vazkii.patchouli:Patchouli:1.21.1-93-NEOFORGE"
+    runtimeOnly "vazkii.patchouli:Patchouli:1.21.1-93-NEOFORGE"
+
+    // TLM（Touhou Little Maid）：编译用 API（软依赖），运行时由用户自行安装；JAR 打包排除 TLM 类
+    // 网络不通时直接引用本地 jar（版本号含 '+'，maven 仓库解析在此环境下不可靠）
+    // 注意：不能放进 compileOnly —— MDG2 会把 compile classpath 上的 mod jar 带进 dev 运行时，
+    // FML 的 UserdevLocator 会扫描 classpath 并加载它。这里改为仅挂到 compileJava 任务上（见下方）。
+
+    // FML 的 MavenVersionAdapter 运行期需要 maven-artifact（解析 mods.toml 版本区间），
+    // dev 运行 classpath 上的 maven-artifact 由 mahjong4j 的 POM 传递提供（见 runs.configureEach 的排除规则）。
+}
+
+// TLM 仅参与编译：挂到 compileJava 的 classpath 上（detached 配置不会进入 sourceSets.compileClasspath，
+// 因此不会出现在 dev 运行时 classpath，也就不会被 FML 加载）
+tasks.named('compileJava', JavaCompile).configure {
+    classpath += files("D:/Code/MurmolMod/local-maven/maven/modrinth/touhou-little-maid/1.5.3-neoforge+mc1.21.1/touhou-little-maid-1.5.3-neoforge+mc1.21.1.jar")
+}
+
+neoForge {
+    version = "21.1.232"
+
+    runs {
+        client {
+            client()
+
+            def mcreatorJvmOptions = System.getenv('MCREATOR_JVM_OPTIONS')
+            if (mcreatorJvmOptions) {
+                mcreatorJvmOptions.split("\\s+").findAll { it.trim() }.each { arg ->
+                    jvmArgument(arg)
+                }
+            }
+        }
+        server {
+            server()
+        }
+
+        configureEach {
+            systemProperty 'forge.logging.markers', 'REGISTRIES'
+            logLevel = org.slf4j.event.Level.DEBUG
+            // 纯库依赖需显式加入 dev 运行时 classpath（MDG 默认不把 runtimeClasspath 写入 legacyClasspath）
+            def addRuntimeDep = { String notation ->
+                additionalRuntimeClasspathConfiguration.dependencies.add(dependencies.create(notation))
+            }
+            addRuntimeDep "com.github.mahjong4j:mahjong4j:0.3.2"
+            addRuntimeDep "com.googlecode.soundlibs:jlayer:1.0.1.4"
+            // mahjong4j 的 POM 误引 maven-gpg-plugin，拖进 maven-artifact-manager-2.2.1，
+            // 其 org/apache/maven/artifact/resolver 包与 maven-artifact 构成 JPMS 分裂包，
+            // 导致 FML 的 MavenVersionAdapter 加载类失败（启动崩溃），排除之
+            additionalRuntimeClasspathConfiguration.exclude group: 'org.apache.maven', module: 'maven-artifact-manager'
+            additionalRuntimeClasspathConfiguration.exclude group: 'org.apache.maven.plugins', module: 'maven-gpg-plugin'
+        }
+    }
+
+    mods {
+        mcreator {
+            sourceSet sourceSets.main
+        }
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8' // Use the UTF-8 charset for Java compilation
+}
+
+tasks.named('jar', Jar).configure {
+    // TLM 类不打进 JAR（软依赖，由用户自装 TLM）
+    exclude 'com/github/tartaricacid/**'
+    // 并入 Mahjong4j + jlayer（纯库，无类冲突风险，直接展开进 mod JAR）
+    from {
+        configurations.runtimeClasspath.filter { it.name.startsWith('mahjong4j') }.collect { zipTree(it) }
+    }
+    from {
+        configurations.runtimeClasspath.filter { it.name.startsWith('jlayer') }.collect { zipTree(it) }
+    }
+}
+
+apply from: 'mcreator.gradle'

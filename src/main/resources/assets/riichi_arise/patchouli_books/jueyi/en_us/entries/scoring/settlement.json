@@ -1,0 +1,23 @@
+{
+  "name": "Settlement and Rule Variants",
+  "icon": "minecraft:gold_ingot",
+  "category": "riichi_arise:scoring",
+  "sortnum": 1,
+  "pages": [
+    {
+      "type": "patchouli:text",
+      "title": "Final Settlement",
+      "text": "Games usually start at 25000 points and return 30000, with agreed $(thing)uma$(0) (placement points).$(br2)The player with the most points at the end wins. If someone is busted (negative points), the game ends immediately and settlement still applies."
+    },
+    {
+      "type": "patchouli:text",
+      "title": "Common Variants",
+      "text": "Rules differ from table to table:$(li)multiple ron: head bump or triple-ron draw;$(li)how strict kuikae is;$(li)how many red fives;$(li)whether 13+ han counts as a counted yakuman;$(li)whether nagashi mangan or nine terminals are used;$(li)whether four riichi, four winds or four kans abort the hand;$(li)whether the dealer may repeat at All Last and when the game extends.$(br2)Confirm before playing."
+    },
+    {
+      "type": "patchouli:text",
+      "title": "Pao (Liability)",
+      "text": "$(thing)Pao$(0): if your call lets an opponent reach a yakuman that is clearly one tile away (such as daisangen or suukantsu), you may have to pay all or part of their win.$(br2)Whether pao applies, and how much it covers, depends on the table's rules; agree on it beforehand."
+    }
+  ]
+}

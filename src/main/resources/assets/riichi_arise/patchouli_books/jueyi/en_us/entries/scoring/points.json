@@ -1,0 +1,23 @@
+{
+  "name": "Fu and Points",
+  "icon": "minecraft:emerald",
+  "category": "riichi_arise:scoring",
+  "sortnum": 0,
+  "pages": [
+    {
+      "type": "patchouli:text",
+      "title": "Fu",
+      "text": "$(thing)Fu$(0) is the sum of:$(li)base 20;$(li)+10 for a closed ron;$(li)+2 for tsumo;$(li)+2 if the pair is a value pair (+4 for a double-wind pair);$(li)+2 for an edge, closed or pair wait;$(li)sets: open triplet 2, closed triplet 4, open kan 8, closed kan 16, doubled for terminals and honors.$(br2)Round the total up to the next 10."
+    },
+    {
+      "type": "patchouli:text",
+      "title": "Basic Points",
+      "text": "$(thing)Basic points$(0) = fu x 2^(2 + han).$(br2)A non-dealer ron receives 4x basic points, a dealer ron 6x; on tsumo each player pays 2x (the dealer also collects 2x from each). Round payments up to the next 100.$(br2)5 han, or 4 han 40 fu, or 3 han 70 fu is $(thing)mangan$(0); above that come haneman, baiman, sanbaiman and yakuman."
+    },
+    {
+      "type": "patchouli:text",
+      "title": "Honba and Sticks",
+      "text": "$(thing)Honba$(0): for each honba, the discarder pays 300 extra on ron, or every player pays 100 extra on tsumo.$(br2)$(thing)Riichi sticks$(0): each stick on the table is worth 1000 points and goes to the winner.$(br2)On a draw, sticks remain for the next winner; noten penalties follow the exhaustive-draw rules."
+    }
+  ]
+}

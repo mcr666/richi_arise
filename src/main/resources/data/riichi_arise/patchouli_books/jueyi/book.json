@@ -1,0 +1,8 @@
+{
+  "name": "book.riichi_arise.jueyi.title",
+  "landing_text": "book.riichi_arise.jueyi.landing",
+  "model": "riichi_arise:jueyi_manual",
+  "version": "1",
+  "creative_tab": "riichi_arise:mahjong",
+  "use_resource_pack": true
+}

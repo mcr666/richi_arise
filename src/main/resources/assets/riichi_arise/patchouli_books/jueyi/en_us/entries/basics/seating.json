@@ -1,0 +1,18 @@
+{
+  "name": "Seats and First Dealer",
+  "icon": "minecraft:compass",
+  "category": "riichi_arise:basics",
+  "sortnum": 2,
+  "pages": [
+    {
+      "type": "patchouli:text",
+      "title": "Choosing Seats",
+      "text": "A common method: take one wind tile each of East, South, West and North, shuffle them face down and let everyone draw. East picks a seat first, then South, West and North.$(br2)Some tables include the 1-pin and 2-pin tiles, or roll dice to decide the draw order before seating by the drawn wind."
+    },
+    {
+      "type": "patchouli:text",
+      "title": "First Dealer",
+      "text": "The player in the East seat rolls two dice; counting counter-clockwise from that player, the indicated player becomes the $(thing)temporary dealer$(0). That player rolls again, and the player indicated this time is the dealer of the first hand.$(br2)Simpler rules let the East seat deal, or decide with a single roll."
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "name": "Melds and Kans",
+  "icon": "riichi_arise:mahjong_tile",
+  "category": "riichi_arise:flow",
+  "sortnum": 2,
+  "pages": [
+    {
+      "type": "patchouli:text",
+      "title": "Chi, Pon and Kan",
+      "text": "$(thing)Chi$(0): claim the player-above's discard to make a run. $(thing)Pon$(0): claim any discard to make a triplet. $(thing)Kan$(0): four identical tiles.$(br2)Claiming opens your hand into $(thing)melds$(0); an unclaimed hand is $(thing)closed$(0). An open hand cannot declare riichi, and most yaku lose 1 han."
+    },
+    {
+      "type": "patchouli:text",
+      "title": "Types of Kan",
+      "text": "$(li)$(thing)Concealed kan$(0): four tiles from your hand; the two middle tiles stay face down.$(li)$(thing)Open kan$(0): made from another player's discard.$(li)$(thing)Added kan$(0): add the fourth tile to your own pon.$(br2)After a kan, draw a replacement tile from the dead wall, flip a new $(thing)kan dora$(0) indicator, then discard. An added kan can be robbed by $(thing)chankan$(0)."
+    },
+    {
+      "type": "patchouli:text",
+      "title": "Priority and Multiple Ron",
+      "text": "Priority is $(thing)ron > pon/kan > chi$(0); ties go counter-clockwise from the discarder.$(br2)$(thing)Kuikae$(0): after chi you may not immediately discard the tile you just called; some rules also restrict pon.$(br2)For multiple ron, the common rule is $(thing)head bump$(0): only the closest player in turn order wins. Other tables treat a triple ron as an abortive draw."
+    }
+  ]
+}
