@@ -1,0 +1,41 @@
+{
+  "mod_elements": [],
+  "variable_elements": [],
+  "sound_elements": [],
+  "tag_elements": {},
+  "tab_element_order": {},
+  "language_map": {
+    "en_us": {}
+  },
+  "metadata": {
+    "files": [
+      "src/main/resources/META-INF/neoforge.mods.toml",
+      "src/main/resources/pack.mcmeta",
+      "src/main/resources/META-INF/accesstransformer.cfg",
+      "src/main/java/mcr/richi/RichiiAriseMod.java"
+    ]
+  },
+  "foldersRoot": {
+    "name": "~",
+    "children": []
+  },
+  "workspaceSettings": {
+    "modid": "richii_arise",
+    "modName": "Richi Arise",
+    "version": "1.0.0",
+    "description": "When Richi Arise",
+    "author": "Maocry",
+    "websiteURL": "https://mcreator.net",
+    "license": "MIT License",
+    "serverSideOnly": false,
+    "modPicture": "head",
+    "requiredMods": [],
+    "dependencies": [],
+    "dependants": [],
+    "mcreatorDependencies": [],
+    "currentGenerator": "neoforge-1.21.1",
+    "credits": "deepseek",
+    "modElementsPackage": "mcr.richi"
+  },
+  "mcreatorVersion": 202600233518
+}

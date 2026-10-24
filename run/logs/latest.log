@@ -1,0 +1,58 @@
+[2410月2026 15:07:04.191] [main/INFO] [cpw.mods.modlauncher.Launcher/MODLAUNCHER]: ModLauncher running: args [--launchTarget, forgeclientdev, --version, 21.1.232, --assetIndex, 17, --assetsDir, C:\\Users\\User\\.mcreator\\gradle\\caches\\neoformruntime\\assets, --gameDir, ., --fml.fmlVersion, 4.0.42, --fml.mcVersion, 1.21.1, --fml.neoForgeVersion, 21.1.232, --fml.neoFormVersion, 20240808.144430]
+[2410月2026 15:07:04.200] [main/INFO] [cpw.mods.modlauncher.Launcher/MODLAUNCHER]: JVM identified as Oracle Corporation Java HotSpot(TM) 64-Bit Server VM 21.0.10+8-LTS-217
+[2410月2026 15:07:04.203] [main/INFO] [cpw.mods.modlauncher.Launcher/MODLAUNCHER]: ModLauncher 11.0.5+main.901c6ea8 starting: java version 21.0.10 by Oracle Corporation; OS Windows 10 arch amd64 version 10.0
+[2410月2026 15:07:05.088] [main/INFO] [Sodium-GraphicsAdapterProbe/]: Searching for graphics cards...
+[2410月2026 15:07:05.305] [main/INFO] [Sodium-GraphicsAdapterProbe/]: Found graphics adapter: AdapterInfo{vendor=AMD, description='Radeon RX 560 Series', adapterType=0x0000030B, openglIcdFilePath='C:\Windows\System32\DriverStore\FileRepository\u0405470.inf_amd64_2e71ce0e27c179e1\B404884\atig6pxx.dll', openglIcdVersion=31.0.21916.2}
+[2410月2026 15:07:05.315] [main/WARN] [Sodium-Workarounds/]: Sodium has applied one or more workarounds to prevent crashes or other issues on your system: [AMD_GAME_OPTIMIZATION_BROKEN]
+[2410月2026 15:07:05.316] [main/WARN] [Sodium-Workarounds/]: This is not necessarily an issue, but it may result in certain features or optimizations being disabled. You can sometimes fix these issues by upgrading your graphics driver.
+[2410月2026 15:07:05.317] [main/INFO] [Sodium-AmdWorkarounds/]: Modifying process environment to apply workarounds for the AMD graphics driver...
+[2410月2026 15:07:05.321] [main/INFO] [net.neoforged.fml.loading.ImmediateWindowHandler/]: Loading ImmediateWindowProvider fmlearlywindow
+[2410月2026 15:07:05.433] [main/INFO] [EARLYDISPLAY/]: Trying GL version 4.6
+[2410月2026 15:07:05.670] [main/INFO] [EARLYDISPLAY/]: Requested GL version 4.6 got version 4.6
+[2410月2026 15:07:05.801] [main/INFO] [CustomSkinLoader Bootstrap/]: Loaded CustomSkinLoader Bootstrap transformation service with 3 other service(s)
+[2410月2026 15:07:05.972] [main/INFO] [mixin/]: SpongePowered MIXIN Subsystem Version=0.8.7 Source=union:/C:/Users/User/.mcreator/gradle/caches/modules-2/files-2.1/net.fabricmc/sponge-mixin/0.15.2+mixin.0.8.7/2af2f021d8e02a0220dc27a7a72b4666d66d44ca/sponge-mixin-0.15.2+mixin.0.8.7.jar%23139!/ Service=ModLauncher Env=CLIENT
+[2410月2026 15:07:06.037] [main/INFO] [CustomSkinLoader Bootstrap/]: Initializing CustomSkinLoader Bootstrap transformation service
+[2410月2026 15:07:06.078] [main/INFO] [CustomSkinLoader Bootstrap/]: Initializing customskinloader-locator for official mappings in D:\Code\richi_arise\run
+[2410月2026 15:07:06.083] [main/INFO] [CustomSkinLoader Bootstrap/]: Releasing CustomSkinLoader Common jar to D:\Code\richi_arise\run\CustomSkinLoader\Core\CustomSkinLoader-Common.jar
+[2410月2026 15:07:06.512] [pool-2-thread-1/INFO] [EARLYDISPLAY/]: GL info: Radeon RX 560 Series GL version 4.6.0 Core Profile Context 24.7.1.240618, ATI Technologies Inc.
+[2410月2026 15:07:06.543] [main/INFO] [CustomSkinLoader Bootstrap/]: Initialized customskinloader-locator with mod folder D:\Code\richi_arise\run\CustomSkinLoader\Core and Common jar D:\Code\richi_arise\run\CustomSkinLoader\Core\CustomSkinLoader-Common.jar
+[2410月2026 15:07:07.432] [main/ERROR] [net.neoforged.fml.loading.moddiscovery.ModDiscoverer/SCAN]: Skipping jar. File d:\Code\richi_arise\build\jc is not a valid mod file
+[2410月2026 15:07:08.456] [main/INFO] [net.neoforged.fml.loading.moddiscovery.locators.JarInJarDependencyLocator/]: Found 6 dependencies adding them to mods collection
+[2410月2026 15:07:08.463] [main/INFO] [net.neoforged.fml.loading.moddiscovery.ModDiscoverer/]: 
+     Mod List:
+		Name Version (Mod Id)
+
+		AppleSkin 3.0.9+mc1.21 (appleskin)
+		CustomSkinLoader 15.0.1 (customskinloader)
+		Forgified Fabric API Base 0.4.42+d1308ded19 (fabric_api_base)
+		Forgified Fabric BlockView API (v2) 1.0.10+9afaaf8c19 (fabric_block_view_api_v2)
+		Forgified Fabric Renderer API (v1) 3.4.1+9125b6dc19 (fabric_renderer_api_v1)
+		Forgified Fabric Rendering Data Attachment (v1) 0.3.48+73761d2e19 (fabric_rendering_data_attachment_v1)
+		Jade 15.10.5+neoforge (jade)
+		Just Enough Items 19.56.0.441 (jei)
+		MezzConfig 0.5.6 (mezz_config)
+		Minecraft 1.21.1 (minecraft)
+		Modern UI 3.13.0.1 (modernui)
+		NeoForge 21.1.232 (neoforge)
+		Patchouli 1.21.1-93-NEOFORGE (patchouli)
+		Richi Arise 1.0.0 (richii_arise)
+		Sodium 0.8.12+mc1.21.1 (sodium)
+		Sodium Extra 0.9.3+mc1.21.1 (sodium_extra)
+[2410月2026 15:07:08.513] [main/ERROR] [net.neoforged.fml.loading.moddiscovery.ModFile/LOADING]: Access transformer file accesstransformer.cfg provided by mod sodium_extra does not exist!
+[2410月2026 15:07:08.679] [main/ERROR] [net.neoforged.fml.loading.ModSorter/LOADING]: Missing or unsupported mandatory dependencies:
+	Mod ID: 'neoforge', Requested by: 'jei', Expected range: '[21.1.238,)', Actual version: '21.1.232'
+[2410月2026 15:07:08.997] [main/INFO] [CustomSkinLoader Bootstrap/]: Loaded 4 CustomSkinLoader bootstrap transformer(s) for official mappings
+[2410月2026 15:07:08.998] [main/INFO] [CustomSkinLoader Bootstrap/]: Loading CustomSkinLoader bootstrap mappings for official
+[2410月2026 15:07:09.050] [main/INFO] [CustomSkinLoader Bootstrap/]: Loaded 2 CustomSkinLoader bootstrap class mapping(s) for official
+[2410月2026 15:07:09.051] [main/INFO] [CustomSkinLoader Bootstrap/]: Collected 12 CustomSkinLoader bootstrap target class(es) for official mappings
+[2410月2026 15:07:09.067] [main/INFO] [CustomSkinLoader Bootstrap/]: Provided 12 CustomSkinLoader ModLauncher transformer(s)
+[2410月2026 15:07:12.088] [main/INFO] [cpw.mods.modlauncher.LaunchServiceHandler/MODLAUNCHER]: Launching target 'forgeclientdev' with arguments [--version, 21.1.232, --gameDir, ., --assetsDir, C:\Users\User\.mcreator\gradle\caches\neoformruntime\assets, --assetIndex, 17]
+[2410月2026 15:07:13.206] [main/INFO] [CustomSkinLoader Bootstrap/]: Transformed net/minecraft/resources/ResourceLocation with [customskinloader:interface-patch]
+[2410月2026 15:07:13.206] [main/INFO] [CustomSkinLoader Bootstrap/]: Transformed ModLauncher target net/minecraft/resources/ResourceLocation with [customskinloader:interface-patch]
+[2410月2026 15:07:16.830] [main/WARN] [oshi.driver.windows.perfmon.PerfmonDisabled/]: Invalid registry value type detected for PerfOS counters. Should be REG_DWORD. Ignoring: HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\PerfOS\Performance\Disable Performance Counters.
+[2410月2026 15:07:16.921] [Datafixer Bootstrap/INFO] [com.mojang.datafixers.DataFixerBuilder/]: 229 Datafixer optimizations took 1704 milliseconds
+[2410月2026 15:07:16.934] [pool-6-thread-1/INFO] [MixinExtras|Service/]: Initializing MixinExtras via com.llamalad7.mixinextras.service.MixinExtrasServiceImpl(version=0.5.3).
+[2410月2026 15:07:28.310] [pool-6-thread-1/INFO] [CustomSkinLoader Bootstrap/]: Transformed net/minecraft/server/packs/resources/ResourceManager with [customskinloader:interface-patch]
+[2410月2026 15:07:28.311] [pool-6-thread-1/INFO] [CustomSkinLoader Bootstrap/]: Transformed ModLauncher target net/minecraft/server/packs/resources/ResourceManager with [customskinloader:interface-patch]
+[2410月2026 15:07:28.882] [main/INFO] [CustomSkinLoader Bootstrap/]: Transformed net/minecraft/server/packs/resources/ResourceManager with [customskinloader:interface-patch]
+[2410月2026 15:07:28.883] [main/INFO] [CustomSkinLoader Bootstrap/]: Transformed ModLauncher target net/minecraft/server/packs/resources/ResourceManager with [customskinloader:interface-patch]

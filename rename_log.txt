@@ -1,0 +1,28 @@
+﻿JAVA MahjongCommands.java
+JAVA MahjongItems.java
+JAVA MahjongTabs.java
+JAVA MahjongTicker.java
+JAVA MahjongTileItem.java
+JAVA RichiiAriseMod.java
+JAVA FengPanBlock.java
+JAVA FengPanMusicClient.java
+JAVA MahjongHud.java
+JAVA MahjongLobbyScreen.java
+JAVA MahjongPointDeltaScreen.java
+JAVA MahjongSettlementScreen.java
+JAVA MahjongTableClient.java
+JAVA PaipuListScreen.java
+JAVA PaipuLocal.java
+JAVA PaipuLocalScreen.java
+JAVA PaipuReplay.java
+JAVA VoiceSettingsScreen.java
+JAVA MahjongLobby.java
+JAVA RiichiBot.java
+JAVA RiichiGame.java
+JAVA VoiceCache.java
+JAVA_CHANGED=22
+MOVED assets/richi
+MOVED data/richi
+MOVED head.png
+REMOVED assets/richii_arise
+RES_CHANGED=103

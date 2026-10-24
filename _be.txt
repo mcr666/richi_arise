@@ -1,0 +1,27 @@
+﻿Compiled from "BossEvent.java"
+public abstract class net.minecraft.world.BossEvent {
+  private final java.util.UUID id;
+  protected net.minecraft.network.chat.Component name;
+  protected float progress;
+  protected net.minecraft.world.BossEvent$BossBarColor color;
+  protected net.minecraft.world.BossEvent$BossBarOverlay overlay;
+  protected boolean darkenScreen;
+  protected boolean playBossMusic;
+  protected boolean createWorldFog;
+  public net.minecraft.world.BossEvent(java.util.UUID, net.minecraft.network.chat.Component, net.minecraft.world.BossEvent$BossBarColor, net.minecraft.world.BossEvent$BossBarOverlay);
+  public java.util.UUID getId();
+  public net.minecraft.network.chat.Component getName();
+  public void setName(net.minecraft.network.chat.Component);
+  public float getProgress();
+  public void setProgress(float);
+  public net.minecraft.world.BossEvent$BossBarColor getColor();
+  public void setColor(net.minecraft.world.BossEvent$BossBarColor);
+  public net.minecraft.world.BossEvent$BossBarOverlay getOverlay();
+  public void setOverlay(net.minecraft.world.BossEvent$BossBarOverlay);
+  public boolean shouldDarkenScreen();
+  public net.minecraft.world.BossEvent setDarkenScreen(boolean);
+  public boolean shouldPlayBossMusic();
+  public net.minecraft.world.BossEvent setPlayBossMusic(boolean);
+  public net.minecraft.world.BossEvent setCreateWorldFog(boolean);
+  public boolean shouldCreateWorldFog();
+}

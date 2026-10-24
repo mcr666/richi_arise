@@ -1,0 +1,92 @@
+plugins {
+    id 'eclipse'
+    id 'net.neoforged.moddev' version '2.0.141'
+}
+
+version = '1.0'
+base.archivesName = "modid"
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+
+repositories {
+    maven {
+        // 本地仓库：TLM jar（网络不通时的离线兜底，取自 MurmolMod local-maven）
+        url = uri("D:/Code/MurmolMod/local-maven")
+    }
+    maven {
+        // 阿里云公共镜像：优先走国内节点拉取依赖
+        url = "https://maven.aliyun.com/repository/public"
+    }
+    maven {
+        // Maven Central：jlayer（mp3 解码，天凤式角色语音用 Java Sound 播放）
+        url = "https://repo1.maven.org/maven2"
+    }
+    maven {
+        // TLM（Touhou Little Maid）软依赖
+        url = "https://api.modrinth.com/maven"
+    }
+    maven {
+        // JitPack：Mahjong4j（日麻和牌判定库）
+        url = "https://jitpack.io/"
+    }
+}
+
+dependencies {
+    // Mahjong4j：和牌/役种判定（纯 Java 库，打包时并入 mod JAR）
+    implementation "com.github.mahjong4j:mahjong4j:0.3.2"
+
+    // jlayer：mp3 解码（天凤式角色语音用 Java Sound 直播；纯库，打包并入 mod JAR）
+    implementation "com.googlecode.soundlibs:jlayer:1.0.1.4"
+
+    // TLM（Touhou Little Maid）：编译用 API（软依赖），运行时由用户自行安装；JAR 打包排除 TLM 类
+    compileOnly "maven.modrinth:touhou-little-maid:1.5.3-neoforge+mc1.21.1"
+}
+
+neoForge {
+    version = "21.1.232"
+
+    runs {
+        client {
+            client()
+
+            def mcreatorJvmOptions = System.getenv('MCREATOR_JVM_OPTIONS')
+            if (mcreatorJvmOptions) {
+                mcreatorJvmOptions.split("\\s+").findAll { it.trim() }.each { arg ->
+                    jvmArgument(arg)
+                }
+            }
+        }
+        server {
+            server()
+        }
+
+        configureEach {
+            systemProperty 'forge.logging.markers', 'REGISTRIES'
+            logLevel = org.slf4j.event.Level.DEBUG
+        }
+    }
+
+    mods {
+        mcreator {
+            sourceSet sourceSets.main
+        }
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8' // Use the UTF-8 charset for Java compilation
+}
+
+tasks.named('jar', Jar).configure {
+    // TLM 类不打进 JAR（软依赖，由用户自装 TLM）
+    exclude 'com/github/tartaricacid/**'
+    // 并入 Mahjong4j + jlayer（纯库，无类冲突风险，直接展开进 mod JAR）
+    from {
+        configurations.runtimeClasspath.filter { it.name.startsWith('mahjong4j') }.collect { zipTree(it) }
+    }
+    from {
+        configurations.runtimeClasspath.filter { it.name.startsWith('jlayer') }.collect { zipTree(it) }
+    }
+}
+
+apply from: 'mcreator.gradle'

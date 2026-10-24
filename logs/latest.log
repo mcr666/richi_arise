@@ -1,0 +1,204 @@
+[2410月2026 15:37:36.715] [main/INFO] [cpw.mods.modlauncher.Launcher/MODLAUNCHER]: ModLauncher running: args [--launchTarget, forgeclientdev, --version, 21.1.232, --assetIndex, 17, --assetsDir, C:\\Users\\User\\.mcreator\\gradle\\caches\\neoformruntime\\assets, --gameDir, ., --fml.fmlVersion, 4.0.42, --fml.mcVersion, 1.21.1, --fml.neoForgeVersion, 21.1.232, --fml.neoFormVersion, 20240808.144430]
+[2410月2026 15:37:36.725] [main/INFO] [cpw.mods.modlauncher.Launcher/MODLAUNCHER]: JVM identified as Oracle Corporation Java HotSpot(TM) 64-Bit Server VM 21.0.10+8-LTS-217
+[2410月2026 15:37:36.729] [main/INFO] [cpw.mods.modlauncher.Launcher/MODLAUNCHER]: ModLauncher 11.0.5+main.901c6ea8 starting: java version 21.0.10 by Oracle Corporation; OS Windows 10 arch amd64 version 10.0
+[2410月2026 15:37:37.052] [main/INFO] [net.neoforged.fml.loading.ImmediateWindowHandler/]: Loading ImmediateWindowProvider fmlearlywindow
+[2410月2026 15:37:37.470] [main/INFO] [EARLYDISPLAY/]: Trying GL version 4.6
+[2410月2026 15:37:37.660] [main/INFO] [EARLYDISPLAY/]: Requested GL version 4.6 got version 4.6
+[2410月2026 15:37:37.893] [main/INFO] [mixin/]: SpongePowered MIXIN Subsystem Version=0.8.7 Source=union:/C:/Users/User/.mcreator/gradle/caches/modules-2/files-2.1/net.fabricmc/sponge-mixin/0.15.2+mixin.0.8.7/2af2f021d8e02a0220dc27a7a72b4666d66d44ca/sponge-mixin-0.15.2+mixin.0.8.7.jar%23139!/ Service=ModLauncher Env=CLIENT
+[2410月2026 15:37:38.331] [pool-2-thread-1/INFO] [EARLYDISPLAY/]: GL info: Radeon RX 560 Series GL version 4.6.0 Core Profile Context 24.7.1.240618, ATI Technologies Inc.
+[2410月2026 15:37:38.786] [main/INFO] [net.neoforged.fml.loading.moddiscovery.locators.JarInJarDependencyLocator/]: Found 2 dependencies adding them to mods collection
+[2410月2026 15:37:38.790] [main/INFO] [net.neoforged.fml.loading.moddiscovery.ModDiscoverer/]: 
+     Mod List:
+		Name Version (Mod Id)
+
+		Minecraft 1.21.1 (minecraft)
+		NeoForge 21.1.232 (neoforge)
+		立直浮现之时 1.0.0 (riichi_arise)
+[2410月2026 15:37:42.240] [main/INFO] [mixin/]: Compatibility level set to JAVA_21
+[2410月2026 15:37:42.257] [main/INFO] [cpw.mods.modlauncher.LaunchServiceHandler/MODLAUNCHER]: Launching target 'forgeclientdev' with arguments [--version, 21.1.232, --gameDir, ., --assetsDir, C:\Users\User\.mcreator\gradle\caches\neoformruntime\assets, --assetIndex, 17]
+[2410月2026 15:37:46.800] [Datafixer Bootstrap/INFO] [com.mojang.datafixers.DataFixerBuilder/]: 229 Datafixer optimizations took 1463 milliseconds
+[2410月2026 15:37:46.833] [main/WARN] [oshi.driver.windows.perfmon.PerfmonDisabled/]: Invalid registry value type detected for PerfOS counters. Should be REG_DWORD. Ignoring: HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\PerfOS\Performance\Disable Performance Counters.
+[2410月2026 15:37:46.932] [pool-7-thread-1/INFO] [MixinExtras|Service/]: Initializing MixinExtras via com.llamalad7.mixinextras.service.MixinExtrasServiceImpl(version=0.5.3).
+[2410月2026 15:37:57.723] [main/WARN] [net.minecraft.commands.Commands/]: Ambiguity between arguments [teleport, location] and [teleport, destination] with inputs: [0.1 -0.5 .9, 0 0 0]
+[2410月2026 15:37:57.727] [main/WARN] [net.minecraft.commands.Commands/]: Ambiguity between arguments [teleport, location] and [teleport, targets] with inputs: [0.1 -0.5 .9, 0 0 0]
+[2410月2026 15:37:57.734] [main/WARN] [net.minecraft.commands.Commands/]: Ambiguity between arguments [teleport, destination] and [teleport, targets] with inputs: [Player, 0123, @e, dd12be42-52a9-4a91-a8a1-11c01849e498]
+[2410月2026 15:37:57.739] [main/WARN] [net.minecraft.commands.Commands/]: Ambiguity between arguments [teleport, targets] and [teleport, destination] with inputs: [Player, 0123, dd12be42-52a9-4a91-a8a1-11c01849e498]
+[2410月2026 15:37:57.742] [main/WARN] [net.minecraft.commands.Commands/]: Ambiguity between arguments [teleport, targets, location] and [teleport, targets, destination] with inputs: [0.1 -0.5 .9, 0 0 0]
+[2410月2026 15:37:58.098] [Render thread/WARN] [net.minecraft.server.packs.VanillaPackResourcesBuilder/]: Assets URL 'union:/D:/Code/richi_arise/build/moddev/artifacts/neoforge-21.1.232-merged.jar%23191!/assets/.mcassetsroot' uses unexpected schema
+[2410月2026 15:37:58.100] [Render thread/WARN] [net.minecraft.server.packs.VanillaPackResourcesBuilder/]: Assets URL 'union:/D:/Code/richi_arise/build/moddev/artifacts/neoforge-21.1.232-merged.jar%23191!/data/.mcassetsroot' uses unexpected schema
+[2410月2026 15:37:58.156] [Render thread/INFO] [com.mojang.authlib.yggdrasil.YggdrasilAuthenticationService/]: Environment: Environment[sessionHost=https://sessionserver.mojang.com, servicesHost=https://api.minecraftservices.com, name=PROD]
+[2410月2026 15:37:58.175] [Render thread/INFO] [net.minecraft.client.Minecraft/]: Setting user: Dev
+[2410月2026 15:37:58.356] [Render thread/INFO] [net.minecraft.client.Minecraft/]: Backend library: LWJGL version 3.3.3+5
+[2410月2026 15:37:58.481] [Download-1/WARN] [com.mojang.authlib.yggdrasil.YggdrasilMinecraftSessionService/]: Couldn't look up profile properties for 380df991-f603-344c-a090-369bad2a924a
+com.mojang.authlib.exceptions.MinecraftClientException: Failed to read from https://sessionserver.mojang.com/session/minecraft/profile/380df991f603344ca090369bad2a924a?unsigned=false due to Socket operation on nonsocket: socket
+	at MC-BOOTSTRAP/authlib@6.0.54/com.mojang.authlib.minecraft.client.MinecraftClient.readInputStream(MinecraftClient.java:108) ~[authlib-6.0.54.jar%23119!/:?]
+	at MC-BOOTSTRAP/authlib@6.0.54/com.mojang.authlib.minecraft.client.MinecraftClient.get(MinecraftClient.java:57) ~[authlib-6.0.54.jar%23119!/:?]
+	at MC-BOOTSTRAP/authlib@6.0.54/com.mojang.authlib.yggdrasil.YggdrasilMinecraftSessionService.fetchProfileUncached(YggdrasilMinecraftSessionService.java:201) ~[authlib-6.0.54.jar%23119!/:?]
+	at MC-BOOTSTRAP/authlib@6.0.54/com.mojang.authlib.yggdrasil.YggdrasilMinecraftSessionService.fetchProfile(YggdrasilMinecraftSessionService.java:171) ~[authlib-6.0.54.jar%23119!/:?]
+	at TRANSFORMER/minecraft@1.21.1/net.minecraft.client.Minecraft.lambda$new$1(Minecraft.java:426) ~[neoforge-21.1.232-merged.jar%23191!/:?]
+	at java.base/java.util.concurrent.CompletableFuture$AsyncSupply.run(CompletableFuture.java:1768) ~[?:?]
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1144) ~[?:?]
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:642) ~[?:?]
+	at java.base/java.lang.Thread.run(Thread.java:1583) [?:?]
+Caused by: java.net.SocketException: Socket operation on nonsocket: socket
+	at java.base/sun.nio.ch.Net.socket0(Native Method) ~[?:?]
+	at java.base/sun.nio.ch.Net.socket(Net.java:542) ~[?:?]
+	at java.base/sun.nio.ch.Net.socket(Net.java:536) ~[?:?]
+	at java.base/sun.nio.ch.NioSocketImpl.create(NioSocketImpl.java:466) ~[?:?]
+	at java.base/java.net.DelegatingSocketImpl.create(DelegatingSocketImpl.java:74) ~[?:?]
+	at java.base/java.net.Socket.getImpl(Socket.java:599) ~[?:?]
+	at java.base/java.net.Socket.connect(Socket.java:751) ~[?:?]
+	at java.base/sun.security.ssl.SSLSocketImpl.connect(SSLSocketImpl.java:304) ~[?:?]
+	at java.base/sun.net.NetworkClient.doConnect(NetworkClient.java:178) ~[?:?]
+	at java.base/sun.net.www.http.HttpClient.openServer(HttpClient.java:531) ~[?:?]
+	at java.base/sun.net.www.http.HttpClient.openServer(HttpClient.java:636) ~[?:?]
+	at java.base/sun.net.www.protocol.https.HttpsClient.<init>(HttpsClient.java:264) ~[?:?]
+	at java.base/sun.net.www.protocol.https.HttpsClient.New(HttpsClient.java:377) ~[?:?]
+	at java.base/sun.net.www.protocol.https.AbstractDelegateHttpsURLConnection.getNewHttpClient(AbstractDelegateHttpsURLConnection.java:193) ~[?:?]
+	at java.base/sun.net.www.protocol.http.HttpURLConnection.plainConnect0(HttpURLConnection.java:1298) ~[?:?]
+	at java.base/sun.net.www.protocol.http.HttpURLConnection.plainConnect(HttpURLConnection.java:1139) ~[?:?]
+	at java.base/sun.net.www.protocol.https.AbstractDelegateHttpsURLConnection.connect(AbstractDelegateHttpsURLConnection.java:179) ~[?:?]
+	at java.base/sun.net.www.protocol.http.HttpURLConnection.getInputStream0(HttpURLConnection.java:1691) ~[?:?]
+	at java.base/sun.net.www.protocol.http.HttpURLConnection.getInputStream(HttpURLConnection.java:1615) ~[?:?]
+	at java.base/java.net.HttpURLConnection.getResponseCode(HttpURLConnection.java:531) ~[?:?]
+	at java.base/sun.net.www.protocol.https.HttpsURLConnectionImpl.getResponseCode(HttpsURLConnectionImpl.java:307) ~[?:?]
+	at MC-BOOTSTRAP/authlib@6.0.54/com.mojang.authlib.minecraft.client.MinecraftClient.readInputStream(MinecraftClient.java:84) ~[authlib-6.0.54.jar%23119!/:?]
+	... 8 more
+[2410月2026 15:37:58.481] [Yggdrasil Key Fetcher/ERROR] [com.mojang.authlib.yggdrasil.YggdrasilServicesKeyInfo/]: Failed to request yggdrasil public key
+com.mojang.authlib.exceptions.MinecraftClientException: Failed to read from https://api.minecraftservices.com/publickeys due to Socket operation on nonsocket: socket
+	at MC-BOOTSTRAP/authlib@6.0.54/com.mojang.authlib.minecraft.client.MinecraftClient.readInputStream(MinecraftClient.java:108) ~[authlib-6.0.54.jar%23119!/:?]
+	at MC-BOOTSTRAP/authlib@6.0.54/com.mojang.authlib.minecraft.client.MinecraftClient.get(MinecraftClient.java:57) ~[authlib-6.0.54.jar%23119!/:?]
+	at MC-BOOTSTRAP/authlib@6.0.54/com.mojang.authlib.yggdrasil.YggdrasilServicesKeyInfo.fetch(YggdrasilServicesKeyInfo.java:114) ~[authlib-6.0.54.jar%23119!/:?]
+	at MC-BOOTSTRAP/authlib@6.0.54/com.mojang.authlib.yggdrasil.YggdrasilServicesKeyInfo$1.run(YggdrasilServicesKeyInfo.java:89) ~[authlib-6.0.54.jar%23119!/:?]
+	at java.base/java.util.concurrent.Executors$RunnableAdapter.call(Executors.java:572) ~[?:?]
+	at java.base/java.util.concurrent.FutureTask.run(FutureTask.java:317) ~[?:?]
+	at java.base/java.util.concurrent.ScheduledThreadPoolExecutor$ScheduledFutureTask.run(ScheduledThreadPoolExecutor.java:304) ~[?:?]
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1144) ~[?:?]
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:642) ~[?:?]
+	at java.base/java.lang.Thread.run(Thread.java:1583) [?:?]
+Caused by: java.net.SocketException: Socket operation on nonsocket: socket
+	at java.base/sun.nio.ch.Net.socket0(Native Method) ~[?:?]
+	at java.base/sun.nio.ch.Net.socket(Net.java:542) ~[?:?]
+	at java.base/sun.nio.ch.Net.socket(Net.java:536) ~[?:?]
+	at java.base/sun.nio.ch.NioSocketImpl.create(NioSocketImpl.java:466) ~[?:?]
+	at java.base/java.net.DelegatingSocketImpl.create(DelegatingSocketImpl.java:74) ~[?:?]
+	at java.base/java.net.Socket.getImpl(Socket.java:599) ~[?:?]
+	at java.base/java.net.Socket.connect(Socket.java:751) ~[?:?]
+	at java.base/sun.security.ssl.SSLSocketImpl.connect(SSLSocketImpl.java:304) ~[?:?]
+	at java.base/sun.net.NetworkClient.doConnect(NetworkClient.java:178) ~[?:?]
+	at java.base/sun.net.www.http.HttpClient.openServer(HttpClient.java:531) ~[?:?]
+	at java.base/sun.net.www.http.HttpClient.openServer(HttpClient.java:636) ~[?:?]
+	at java.base/sun.net.www.protocol.https.HttpsClient.<init>(HttpsClient.java:264) ~[?:?]
+	at java.base/sun.net.www.protocol.https.HttpsClient.New(HttpsClient.java:377) ~[?:?]
+	at java.base/sun.net.www.protocol.https.AbstractDelegateHttpsURLConnection.getNewHttpClient(AbstractDelegateHttpsURLConnection.java:193) ~[?:?]
+	at java.base/sun.net.www.protocol.http.HttpURLConnection.plainConnect0(HttpURLConnection.java:1298) ~[?:?]
+	at java.base/sun.net.www.protocol.http.HttpURLConnection.plainConnect(HttpURLConnection.java:1139) ~[?:?]
+	at java.base/sun.net.www.protocol.https.AbstractDelegateHttpsURLConnection.connect(AbstractDelegateHttpsURLConnection.java:179) ~[?:?]
+	at java.base/sun.net.www.protocol.http.HttpURLConnection.getInputStream0(HttpURLConnection.java:1691) ~[?:?]
+	at java.base/sun.net.www.protocol.http.HttpURLConnection.getInputStream(HttpURLConnection.java:1615) ~[?:?]
+	at java.base/java.net.HttpURLConnection.getResponseCode(HttpURLConnection.java:531) ~[?:?]
+	at java.base/sun.net.www.protocol.https.HttpsURLConnectionImpl.getResponseCode(HttpsURLConnectionImpl.java:307) ~[?:?]
+	at MC-BOOTSTRAP/authlib@6.0.54/com.mojang.authlib.minecraft.client.MinecraftClient.readInputStream(MinecraftClient.java:84) ~[authlib-6.0.54.jar%23119!/:?]
+	... 9 more
+[2410月2026 15:37:58.827] [modloading-worker-0/INFO] [net.neoforged.neoforge.common.NeoForgeMod/NEOFORGE-MOD]: NeoForge mod loading, version 21.1.232, for MC 1.21.1
+[2410月2026 15:38:00.962] [Render thread/INFO] [net.neoforged.neoforge.gametest.GameTestHooks/]: Enabled Gametest Namespaces: []
+[2410月2026 15:38:01.347] [Render thread/INFO] [net.minecraft.server.packs.resources.ReloadableResourceManager/]: Reloading ResourceManager: vanilla, mod_resources, mod/neoforge, mod/riichi_arise
+[2410月2026 15:38:01.545] [Worker-Main-5/INFO] [net.minecraft.client.gui.font.providers.UnihexProvider/]: Found unifont_all_no_pua-15.1.05.hex, loading
+[2410月2026 15:38:01.657] [Worker-Main-2/ERROR] [net.minecraft.Util/]: Invalid path in pack: riichi_arise:sounds/voice/README.txt, ignoring
+[2410月2026 15:38:02.209] [Worker-Main-1/INFO] [net.minecraft.client.gui.font.providers.UnihexProvider/]: Found unifont_jp_patch-15.1.05.hex, loading
+[2410月2026 15:38:02.426] [Worker-Main-6/WARN] [net.minecraft.client.renderer.texture.SpriteLoader/]: Texture riichi_arise:item/mahjong/1000 with size 192x30 limits mip level from 4 to 1
+[2410月2026 15:38:05.842] [Render thread/WARN] [net.minecraft.client.sounds.SoundEngine/]: Missing sound for event: minecraft:item.goat_horn.play
+[2410月2026 15:38:05.842] [Render thread/WARN] [net.minecraft.client.sounds.SoundEngine/]: Missing sound for event: minecraft:entity.goat.screaming.horn_break
+[2410月2026 15:38:06.000] [Render thread/INFO] [com.mojang.blaze3d.audio.Library/]: OpenAL initialized on device OpenAL Soft on 扬声器 (Realtek High Definition Audio)
+[2410月2026 15:38:06.002] [Render thread/INFO] [net.minecraft.client.sounds.SoundEngine/SOUNDS]: Sound engine started
+[2410月2026 15:38:06.192] [Render thread/INFO] [net.minecraft.client.renderer.texture.TextureAtlas/]: Created: 1024x1024x4 minecraft:textures/atlas/blocks.png-atlas
+[2410月2026 15:38:06.218] [Render thread/INFO] [net.minecraft.client.renderer.texture.TextureAtlas/]: Created: 256x256x4 minecraft:textures/atlas/signs.png-atlas
+[2410月2026 15:38:06.219] [Render thread/INFO] [net.minecraft.client.renderer.texture.TextureAtlas/]: Created: 512x512x4 minecraft:textures/atlas/shield_patterns.png-atlas
+[2410月2026 15:38:06.220] [Render thread/INFO] [net.minecraft.client.renderer.texture.TextureAtlas/]: Created: 512x512x4 minecraft:textures/atlas/banner_patterns.png-atlas
+[2410月2026 15:38:06.227] [Render thread/INFO] [net.minecraft.client.renderer.texture.TextureAtlas/]: Created: 1024x1024x4 minecraft:textures/atlas/armor_trims.png-atlas
+[2410月2026 15:38:06.248] [Render thread/INFO] [net.minecraft.client.renderer.texture.TextureAtlas/]: Created: 256x256x4 minecraft:textures/atlas/chest.png-atlas
+[2410月2026 15:38:06.249] [Render thread/INFO] [net.minecraft.client.renderer.texture.TextureAtlas/]: Created: 128x64x4 minecraft:textures/atlas/decorated_pot.png-atlas
+[2410月2026 15:38:06.250] [Render thread/INFO] [net.minecraft.client.renderer.texture.TextureAtlas/]: Created: 512x256x4 minecraft:textures/atlas/beds.png-atlas
+[2410月2026 15:38:06.250] [Render thread/INFO] [net.minecraft.client.renderer.texture.TextureAtlas/]: Created: 512x256x4 minecraft:textures/atlas/shulker_boxes.png-atlas
+[2410月2026 15:38:06.695] [Render thread/INFO] [net.minecraft.client.renderer.texture.TextureAtlas/]: Created: 512x256x0 minecraft:textures/atlas/particles.png-atlas
+[2410月2026 15:38:06.699] [Render thread/INFO] [net.minecraft.client.renderer.texture.TextureAtlas/]: Created: 512x256x0 minecraft:textures/atlas/paintings.png-atlas
+[2410月2026 15:38:06.700] [Render thread/INFO] [net.minecraft.client.renderer.texture.TextureAtlas/]: Created: 256x128x0 minecraft:textures/atlas/mob_effects.png-atlas
+[2410月2026 15:38:06.701] [Render thread/INFO] [net.minecraft.client.renderer.texture.TextureAtlas/]: Created: 64x64x0 minecraft:textures/atlas/map_decorations.png-atlas
+[2410月2026 15:38:06.701] [Render thread/INFO] [net.minecraft.client.renderer.texture.TextureAtlas/]: Created: 1024x512x0 minecraft:textures/atlas/gui.png-atlas
+[2410月2026 15:38:06.869] [Render thread/WARN] [net.minecraft.client.renderer.ShaderInstance/]: Shader rendertype_entity_translucent_emissive could not find sampler named Sampler2 in the specified shader program.
+[2410月2026 15:38:07.188] [Render thread/INFO] [net.neoforged.neoforge.client.entity.animation.json.AnimationLoader/]: Loaded 0 entity animations
+[2410月2026 15:39:02.188] [Render thread/INFO] [net.minecraft.world.item.crafting.RecipeManager/]: Loaded 1291 recipes
+[2410月2026 15:39:02.530] [Render thread/INFO] [net.minecraft.advancements.AdvancementTree/]: Loaded 1399 advancements
+[2410月2026 15:39:03.556] [Server thread/INFO] [net.minecraft.client.server.IntegratedServer/]: Starting integrated minecraft server version 1.21.1
+[2410月2026 15:39:03.556] [Server thread/INFO] [net.minecraft.server.MinecraftServer/]: Generating keypair
+[2410月2026 15:39:04.160] [Server thread/INFO] [net.minecraft.server.MinecraftServer/]: Preparing start region for dimension minecraft:overworld
+[2410月2026 15:39:04.588] [progressListener/INFO] [net.minecraft.server.level.progress.LoggerChunkProgressListener/]: 准备生成区域中：0%
+[2410月2026 15:39:04.692] [progressListener/INFO] [net.minecraft.server.level.progress.LoggerChunkProgressListener/]: 准备生成区域中：18%
+[2410月2026 15:39:04.791] [Server thread/INFO] [net.neoforged.neoforge.server.permission.PermissionAPI/]: Successfully initialized permission handler neoforge:default_handler
+[2410月2026 15:39:04.808] [progressListener/INFO] [net.minecraft.server.level.progress.LoggerChunkProgressListener/]: Time elapsed: 638 ms
+[2410月2026 15:39:04.961] [Server thread/INFO] [net.minecraft.client.server.IntegratedServer/]: Changing view distance to 12, from 10
+[2410月2026 15:39:04.961] [Server thread/INFO] [net.minecraft.client.server.IntegratedServer/]: Changing simulation distance to 12, from 0
+[2410月2026 15:39:06.196] [Server thread/INFO] [net.minecraft.server.players.PlayerList/]: Dev[local:E:a7187fc5] logged in with entity id 76 at (-1.6179728594748153, -60.0, -4.765524446750391)
+[2410月2026 15:39:06.326] [Server thread/INFO] [net.minecraft.server.MinecraftServer/]: Dev加入了游戏
+[2410月2026 15:39:06.880] [Render thread/WARN] [net.minecraft.client.multiplayer.ClientPacketListener/]: Ignoring chat session from Dev due to missing Services public key
+[2410月2026 15:39:06.887] [Render thread/INFO] [net.minecraft.advancements.AdvancementTree/]: Loaded 2 advancements
+[2410月2026 15:39:10.153] [Server thread/INFO] [net.minecraft.client.server.IntegratedServer/]: Saving and pausing game...
+[2410月2026 15:39:10.229] [Server thread/INFO] [net.minecraft.server.MinecraftServer/]: Saving chunks for level 'ServerLevel[world]'/minecraft:overworld
+[2410月2026 15:39:10.347] [Server thread/INFO] [net.minecraft.server.MinecraftServer/]: Saving chunks for level 'ServerLevel[world]'/minecraft:the_nether
+[2410月2026 15:39:10.348] [Server thread/INFO] [net.minecraft.server.MinecraftServer/]: Saving chunks for level 'ServerLevel[world]'/minecraft:the_end
+[2410月2026 15:39:19.940] [Server thread/ERROR] [net.minecraft.world.entity.Display/]: Display entityNot a string
+[2410月2026 15:39:21.170] [Render thread/ERROR] [net.minecraft.world.entity.Display/]: Display entityNot a string
+[2410月2026 15:39:21.171] [Render thread/ERROR] [net.minecraft.world.entity.Display/]: Display entityNot a string
+[2410月2026 15:39:21.172] [Render thread/ERROR] [net.minecraft.world.entity.Display/]: Display entityNot a string
+[2410月2026 15:39:21.172] [Render thread/ERROR] [net.minecraft.world.entity.Display/]: Display entityNot a string
+[2410月2026 15:39:21.217] [Render thread/ERROR] [net.minecraft.world.entity.Display/]: Display entityNot a string
+[2410月2026 15:39:21.230] [Render thread/ERROR] [net.minecraft.world.entity.Display/]: Display entityNot a string
+[2410月2026 15:39:21.231] [Render thread/ERROR] [net.minecraft.world.entity.Display/]: Display entityNot a string
+[2410月2026 15:39:21.231] [Render thread/ERROR] [net.minecraft.world.entity.Display/]: Display entityNot a string
+[2410月2026 15:39:23.919] [Render thread/ERROR] [net.minecraft.world.entity.Display/]: Display entityNot a string
+[2410月2026 15:39:25.030] [Render thread/ERROR] [net.minecraft.world.entity.Display/]: Display entityNot a string
+[2410月2026 15:39:25.031] [Render thread/ERROR] [net.minecraft.world.entity.Display/]: Display entityNot a string
+[2410月2026 15:39:26.021] [Render thread/ERROR] [net.minecraft.world.entity.Display/]: Display entityNot a string
+[2410月2026 15:39:26.021] [Render thread/ERROR] [net.minecraft.world.entity.Display/]: Display entityNot a string
+[2410月2026 15:39:26.955] [Render thread/ERROR] [net.minecraft.world.entity.Display/]: Display entityNot a string
+[2410月2026 15:39:26.956] [Render thread/ERROR] [net.minecraft.world.entity.Display/]: Display entityNot a string
+[2410月2026 15:39:27.907] [Render thread/ERROR] [net.minecraft.world.entity.Display/]: Display entityNot a string
+[2410月2026 15:39:27.907] [Render thread/ERROR] [net.minecraft.world.entity.Display/]: Display entityNot a string
+[2410月2026 15:39:28.959] [Render thread/ERROR] [net.minecraft.world.entity.Display/]: Display entityNot a string
+[2410月2026 15:39:28.960] [Render thread/ERROR] [net.minecraft.world.entity.Display/]: Display entityNot a string
+[2410月2026 15:39:29.961] [Render thread/ERROR] [net.minecraft.world.entity.Display/]: Display entityNot a string
+[2410月2026 15:39:29.961] [Render thread/ERROR] [net.minecraft.world.entity.Display/]: Display entityNot a string
+[2410月2026 15:39:30.913] [Render thread/ERROR] [net.minecraft.world.entity.Display/]: Display entityNot a string
+[2410月2026 15:39:30.914] [Render thread/ERROR] [net.minecraft.world.entity.Display/]: Display entityNot a string
+[2410月2026 15:39:32.129] [Render thread/ERROR] [net.minecraft.world.entity.Display/]: Display entityNot a string
+[2410月2026 15:39:32.130] [Render thread/ERROR] [net.minecraft.world.entity.Display/]: Display entityNot a string
+[2410月2026 15:39:33.029] [Render thread/ERROR] [net.minecraft.world.entity.Display/]: Display entityNot a string
+[2410月2026 15:39:33.030] [Render thread/ERROR] [net.minecraft.world.entity.Display/]: Display entityNot a string
+[2410月2026 15:39:34.078] [Render thread/ERROR] [net.minecraft.world.entity.Display/]: Display entityNot a string
+[2410月2026 15:39:34.080] [Render thread/ERROR] [net.minecraft.world.entity.Display/]: Display entityNot a string
+[2410月2026 15:39:35.054] [Render thread/ERROR] [net.minecraft.world.entity.Display/]: Display entityNot a string
+[2410月2026 15:39:35.055] [Render thread/ERROR] [net.minecraft.world.entity.Display/]: Display entityNot a string
+[2410月2026 15:39:35.506] [Render thread/ERROR] [net.minecraft.world.entity.Display/]: Display entityNot a string
+[2410月2026 15:39:35.529] [Render thread/INFO] [net.minecraft.client.gui.components.ChatComponent/]: [System] [CHAT] 对局结束，最终排名：
+[2410月2026 15:39:35.534] [Render thread/INFO] [net.minecraft.client.gui.components.ChatComponent/]: [System] [CHAT] 1. AI:苔叶兽1 25000 点 (马+20, pt+0.0)
+[2410月2026 15:39:35.535] [Render thread/INFO] [net.minecraft.client.gui.components.ChatComponent/]: [System] [CHAT] 2. AI:苔叶兽2 25000 点 (马+10, pt+0.0)
+[2410月2026 15:39:35.536] [Render thread/INFO] [net.minecraft.client.gui.components.ChatComponent/]: [System] [CHAT] 3. AI:苔叶兽3 25000 点 (马-10, pt+0.0)
+[2410月2026 15:39:35.537] [Render thread/INFO] [net.minecraft.client.gui.components.ChatComponent/]: [System] [CHAT] 4. AI:狰 25000 点 (马-30, pt+0.0)
+[2410月2026 15:39:37.796] [Server thread/INFO] [net.minecraft.client.server.IntegratedServer/]: Saving and pausing game...
+[2410月2026 15:39:37.828] [Server thread/INFO] [net.minecraft.server.MinecraftServer/]: Saving chunks for level 'ServerLevel[world]'/minecraft:overworld
+[2410月2026 15:39:37.838] [Server thread/INFO] [net.minecraft.server.MinecraftServer/]: Saving chunks for level 'ServerLevel[world]'/minecraft:the_nether
+[2410月2026 15:39:37.839] [Server thread/INFO] [net.minecraft.server.MinecraftServer/]: Saving chunks for level 'ServerLevel[world]'/minecraft:the_end
+[2410月2026 15:40:04.687] [Render thread/INFO] [net.minecraft.client.Minecraft/]: Stopping!
+[2410月2026 15:40:04.753] [Server thread/INFO] [net.minecraft.server.network.ServerGamePacketListenerImpl/]: Dev lost connection: 连接中断
+[2410月2026 15:40:04.753] [Server thread/INFO] [net.minecraft.server.MinecraftServer/]: Dev退出了游戏
+[2410月2026 15:40:04.783] [Server thread/INFO] [net.minecraft.server.network.ServerCommonPacketListenerImpl/]: Stopping singleplayer server as player logged out
+[2410月2026 15:40:04.805] [Server thread/INFO] [net.minecraft.server.MinecraftServer/]: Stopping server
+[2410月2026 15:40:04.806] [Server thread/INFO] [net.minecraft.server.MinecraftServer/]: Saving players
+[2410月2026 15:40:04.806] [Server thread/INFO] [net.minecraft.server.MinecraftServer/]: Saving worlds
+[2410月2026 15:40:05.010] [Server thread/INFO] [net.minecraft.server.MinecraftServer/]: Saving chunks for level 'ServerLevel[world]'/minecraft:overworld
+[2410月2026 15:40:05.087] [Server thread/INFO] [net.minecraft.server.MinecraftServer/]: Saving chunks for level 'ServerLevel[world]'/minecraft:the_nether
+[2410月2026 15:40:05.101] [Server thread/INFO] [net.minecraft.server.MinecraftServer/]: Saving chunks for level 'ServerLevel[world]'/minecraft:the_end
+[2410月2026 15:40:05.135] [Server thread/INFO] [net.minecraft.server.MinecraftServer/]: ThreadedAnvilChunkStorage (world): All chunks are saved
+[2410月2026 15:40:05.136] [Server thread/INFO] [net.minecraft.server.MinecraftServer/]: ThreadedAnvilChunkStorage (DIM-1): All chunks are saved
+[2410月2026 15:40:05.136] [Server thread/INFO] [net.minecraft.server.MinecraftServer/]: ThreadedAnvilChunkStorage (DIM1): All chunks are saved
+[2410月2026 15:40:05.136] [Server thread/INFO] [net.minecraft.server.MinecraftServer/]: ThreadedAnvilChunkStorage: All dimensions are saved
