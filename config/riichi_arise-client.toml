@@ -1,7 +1,0 @@
-[client]
-	#Mahjong spectator view: display all four players' hands face-up (flat). Default: false
-	spectatorOpenHands = false
-	#Mahjong AI avatar pose: true = standing (default standing animation), false = riding crouch pose. Default: false
-	mahjongAvatarStanding = false
-	#Mahjong spectator shows table content: when true, spectators within 8 blocks of the table are also shown the win/settlement screens and table chat. Default: true
-	spectatorShowTable = true

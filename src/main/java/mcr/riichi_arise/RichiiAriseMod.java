@@ -28,6 +28,10 @@ import java.util.Comparator;
 import it.unimi.dsi.fastutil.ints.IntObjectPair;
 import it.unimi.dsi.fastutil.ints.IntObjectImmutablePair;
 
+import mcr.riichi_arise.network.*;
+import mcr.riichi_arise.compat.TlmCompatBridge;
+import mcr.riichi_arise.game.RichiGameRules;
+
 @Mod("riichi_arise")
 public class RichiiAriseMod {
 	public static final Logger LOGGER = LogManager.getLogger(RichiiAriseMod.class);
@@ -57,19 +61,18 @@ public class RichiiAriseMod {
 		MahjongLoot.TYPES.register(modEventBus); // 随机牌面 loot function（战利品表用）
 		MahjongParticleTypes.REGISTRY.register(modEventBus);
 		MahjongTabs.REGISTRY.register(modEventBus);
-		// 麻雀回合倒计时叠加层 payload（须在 RegisterPayloadHandlersEvent 前注册）
-		mcr.riichi_arise.network.MahjongCountdownPayload.register();
-		// 风盘点播唱片（右击风盘临时压制原版 BGM 播放唱片内容）
-		mcr.riichi_arise.network.FengPanMusicPayload.register();
-		// 麻雀大厅（等待队列/管理）与对局进行 payload
-		mcr.riichi_arise.network.MahjongLobbyPayloads.register();
-		mcr.riichi_arise.network.MahjongGamePayloads.register();
-		// 麻雀结算界面（和牌结算/终局结算）+ 点数变化界面
-		mcr.riichi_arise.network.MahjongSettlementPayload.register();
-		mcr.riichi_arise.network.MahjongPointDeltaPayload.register();
-		// 麻雀牌局渲染状态包（服务端过滤后整桌快照，客户端自建显示实体）
-		mcr.riichi_arise.network.MahjongTablePayload.register();
-		mcr.riichi_arise.network.PaipuPayload.register();
+
+		// 麻雀网络包注册
+		MahjongCountdownPayload.register();
+		FengPanMusicPayload.register();
+		MahjongLobbyPayloads.register();
+		MahjongGamePayloads.register();
+		MahjongSettlementPayload.register();
+		MahjongPointDeltaPayload.register();
+		MahjongTablePayload.register();
+		PaipuPayload.register();
+		VoicePayloads.register();
+
 		// Start of user code block mod init
 		// End of user code block mod init
 	}
@@ -77,7 +80,7 @@ public class RichiiAriseMod {
 	// Start of user code block mod methods
 	// End of user code block mod methods
 	private void onCommonSetup(net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent event) {
-		event.enqueueWork(mcr.riichi_arise.compat.TlmCompatBridge::init);
+		event.enqueueWork(TlmCompatBridge::init);
 	}
 	private static boolean networkingRegistered = false;
 	private static final Map<CustomPacketPayload.Type<?>, NetworkMessage<?>> MESSAGES = new HashMap<>();

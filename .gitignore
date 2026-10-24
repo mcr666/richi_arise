@@ -1,51 +1,6 @@
-# Gradle
-.gradle/
-/gradle/
-/gradlew
-/gradlew.bat
-/build.gradle
-/settings.gradle
-/gradle.properties
+# Whitelist mode
+/*
+!/src/
+!/README.md
+!/.gitignore
 
-# Build and output
-/build/
-/run/
-/compile_result.txt
-/runclient_out.txt
-/javac.args
-/build_out.txt
-/javac_err.txt
-/javac_out.txt
-/jdk_out.txt
-/atpatch_out.txt
-/rename_log.txt
-/rename_pkg_result.txt
-/usercache.json
-/usernamecache.json
-/options.txt
-
-# Scripts
-/run_*.ps1
-/rename_*.ps1
-
-# MCreator residue
-.mcreator/
-*.mcreator
-*.mcreator-backup*
-/mcreator.gradle
-/_*.txt
-/cp_len.txt
-/zz_test.txt
-
-# Docs
-/docs/
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# OS
-.DS_Store
-Thumbs.db

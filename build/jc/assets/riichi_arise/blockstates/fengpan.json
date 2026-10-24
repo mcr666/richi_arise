@@ -1,9 +1,0 @@
-{
-	"multipart": [
-		{ "when": { "tx": "0", "tz": "0", "game_active": "false" }, "apply": { "model": "riichi_arise:block/fengpan_quad_pm" } },
-		{ "when": { "tx": "1", "tz": "0", "game_active": "false" }, "apply": { "model": "riichi_arise:block/fengpan_quad_pp" } },
-		{ "when": { "tx": "0", "tz": "1", "game_active": "false" }, "apply": { "model": "riichi_arise:block/fengpan_quad_mm" } },
-		{ "when": { "tx": "1", "tz": "1", "game_active": "false" }, "apply": { "model": "riichi_arise:block/fengpan_quad_mp" } },
-		{ "when": { "game_active": "true" }, "apply": { "model": "riichi_arise:block/empty" } }
-	]
-}
