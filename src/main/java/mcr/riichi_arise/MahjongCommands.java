@@ -258,7 +258,8 @@ public class MahjongCommands {
 	}
 
 	/** /richi net start：开启内网接入端口（默认绑定 127.0.0.1，端口可覆盖配置） */
-	private static int netStart(CommandSourceStack src, int port) {
+	private static int netStart(CommandContext<CommandSourceStack> ctx, int port) {
+		CommandSourceStack src = ctx.getSource();
 		if (mcr.riichi_arise.net.RichiNetManager.start(src.getServer(), port, mcr.riichi_arise.net.RichiNetConfig.BIND)) {
 			src.sendSuccess(() -> Component.literal("§6<麻雀>§r 内网端口已开启: "
 					+ mcr.riichi_arise.net.RichiNetConfig.BIND + ":" + port
@@ -270,7 +271,8 @@ public class MahjongCommands {
 	}
 
 	/** /richi net status：显示运行状态 */
-	private static int netStatus(CommandSourceStack src) {
+	private static int netStatus(CommandContext<CommandSourceStack> ctx) {
+		CommandSourceStack src = ctx.getSource();
 		if (!mcr.riichi_arise.net.RichiNetManager.isRunning()) {
 			src.sendSuccess(() -> Component.literal("§6<麻雀>§r 内网端口未开启（默认 "
 					+ mcr.riichi_arise.net.RichiNetConfig.BIND + ":" + mcr.riichi_arise.net.RichiNetConfig.PORT + "）"), false);

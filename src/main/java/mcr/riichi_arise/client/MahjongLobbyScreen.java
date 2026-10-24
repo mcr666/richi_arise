@@ -20,10 +20,10 @@ public class MahjongLobbyScreen extends Screen {
 
 	private static final int PHASE_WAITING = 0, PHASE_PLAYING = 1, PHASE_FINISHED = 2;
 
-	/** AI 座位角色显示键（顺序与 MahjongLobby.AVATAR_MODES 一致：默认 > 八木唯 > 琳琅 > 福姬 > 瓦西子 > 赤木） */
+	/** AI 座位角色显示键（顺序与 MahjongLobby.AVATAR_MODES 一致：默认 > 八木唯 > 琳琅 > 福姬 > 瓦西子 > 赤木 > 一姬） */
 	private static final String[] AVATAR_KEYS = { "gui.riichi_arise.lobby.ch_default", "gui.riichi_arise.lobby.ch_bamuwei",
 			"gui.riichi_arise.lobby.ch_linlang", "gui.riichi_arise.lobby.ch_fuji", "gui.riichi_arise.lobby.ch_washizu",
-			"gui.riichi_arise.lobby.ch_akagi" };
+			"gui.riichi_arise.lobby.ch_akagi", "gui.riichi_arise.lobby.ch_yiji" };
 
 	private final BlockPos origin;
 	/** 最近一次服务端同步（未收到前显示加载中） */
@@ -132,10 +132,10 @@ public class MahjongLobbyScreen extends Screen {
 		addBtn(colLX, y + 40, colW, 18,
 				() -> Component.translatable("gui.riichi_arise.lobby.btn_paipu").getString(),
 				PaipuListScreen::open);
-		// 个人设置：固定停靠面板左下角（不随左列按钮流，独立于队列/座位布局）
+		// 设置：固定停靠面板左下角（不随左列按钮流，独立于队列/座位布局）→ 内容设置界面（客户端/个人设定/世界规则）
 		addBtn(colLX, top + 220, colW, 18,
-				() -> Component.translatable("gui.riichi_arise.lobby.btn_voice").getString(),
-				() -> VoiceSettingsScreen.open(this.origin));
+				() -> Component.translatable("gui.riichi_arise.lobby.btn_settings").getString(),
+				() -> RichiSettingsScreen.open(this.origin));
 		// 右列：游戏设置列表（管理员·等待/终局未清理阶段可改；对局中不可调整，点击整行循环切换）
 		boolean adminSettings = this.sync.canManage() && this.sync.phase() != PHASE_PLAYING;
 		if (adminSettings) {
@@ -296,8 +296,11 @@ public class MahjongLobbyScreen extends Screen {
 					label = Component.translatable("gui.riichi_arise.lobby.picker_remove").getString();
 					color = 0xFF8080;
 				} else {
-					label = Component.translatable(AVATAR_KEYS[mode]).getString();
-					color = mcr.riichi_arise.game.MahjongLobby.AVATAR_MODES[mode].equals(cur) ? 0xFFCC66 : 0xFFFFFF;
+					// 防御：角色键与 AVATAR_MODES 数量不一致（如残留旧编译产物）时不越界
+					String key = mode < AVATAR_KEYS.length ? AVATAR_KEYS[mode] : AVATAR_KEYS[0];
+					label = Component.translatable(key).getString();
+					color = mode < mcr.riichi_arise.game.MahjongLobby.AVATAR_MODES.length
+							&& mcr.riichi_arise.game.MahjongLobby.AVATAR_MODES[mode].equals(cur) ? 0xFFCC66 : 0xFFFFFF;
 				}
 				graphics.drawString(font, label, px + 2, ey + 2, color, false);
 			}
@@ -318,7 +321,7 @@ public class MahjongLobbyScreen extends Screen {
 		if (mode != null && !mode.isEmpty()) {
 			for (int i = 0; i < mcr.riichi_arise.game.MahjongLobby.AVATAR_MODES.length; i++)
 				if (mcr.riichi_arise.game.MahjongLobby.AVATAR_MODES[i].equals(mode))
-					return Component.translatable(AVATAR_KEYS[i]).getString();
+					return Component.translatable(i < AVATAR_KEYS.length ? AVATAR_KEYS[i] : AVATAR_KEYS[0]).getString();
 		}
 		return Component.translatable(AVATAR_KEYS[0]).getString();
 	}

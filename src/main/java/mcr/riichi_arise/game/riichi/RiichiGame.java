@@ -55,6 +55,8 @@ public class RiichiGame {
 	private int[] pointsBeforeRound = new int[4];
 	/** 待结算界面全部关闭后播报的聊天行（和牌/流局满贯播报延后到点数变化界面结束） */
 	private String pendingChat = "";
+	/** 报番役种缓存（seat → 英文役名列表）：doMultiRon/doTsumo 填入，finishRound 发送报番包后清空 */
+	private final java.util.Map<Integer, List<String>> pendingFan = new java.util.LinkedHashMap<>();
 	/** 本局结算后是否轮庄（庄家输牌 / 荒牌流局庄家未听牌 = true；连庄/庄家听牌流局 = false，本场累加） */
 	private boolean roundAdvance;
 	/** 九种九牌宣言窗口（本回合首次摸牌有效；确认后途中流局） */
@@ -105,6 +107,8 @@ public class RiichiGame {
 	private final List<DelayedTask> tasks = new ArrayList<>();
 	/** 10s 续局任务引用（全员结算确认后取消） */
 	private Runnable settleTask;
+	/** 对局已彻底结束（投票强制终局 / 破产 / 局数打完）：此后不再推进任何延迟任务与响应窗口 */
+	private boolean ended;
 	/** 待延迟宣言的 AI 荣和数（AI 和牌停 0.5s 再宣布，期间响应窗口不收口） */
 	private int aiRonPending;
 	/** 待延迟决策的 AI 副露数（速度档中/慢时决策延后，期间响应窗口不收口） */
@@ -1050,6 +1054,7 @@ public class RiichiGame {
 			if (!r.win())
 				continue;
 			resultBySeat.put(w, r);
+			pendingFan.put(w, buildFanKeys(r, w)); // 报番：荣和役种 + 宝牌计数
 			int gain = r.score().getRon() + 300 * st.honba;
 			st.points[claimDiscarder] -= gain;
 			st.points[w] += gain + (w == stickWinner ? sticks : 0);
@@ -1186,6 +1191,7 @@ public class RiichiGame {
 		MahjongGameLog.win(level, origin, handIndex + 1, false, seat, -1,
 				String.join("+", r.yakuNames().stream().map(YakuNames::zh).toList()),
 				r.han(), r.fu(), 0, MahjongTileNotation.format(p.hand), csvMelds(p));
+		pendingFan.put(seat, buildFanKeys(r, seat)); // 报番：自摸役种 + 宝牌计数
 		finishRound("message.riichi_arise.win_tsumo", p.name, describeResult(r), shortDescribe(r),
 				payInfo.toString().trim(), seat);
 		pendingChat = Component.translatable("message.riichi_arise.win_tsumo", p.name, describeResult(r)).getString()
@@ -1500,6 +1506,13 @@ public class RiichiGame {
 		if (tsumoWin || (msgKey != null && msgKey.contains("win_ron")))
 			for (int w : winnerSeats)
 				voiceEvent(w, tsumoWin ? mcr.riichi_arise.voice.VoiceEvents.TUMO : mcr.riichi_arise.voice.VoiceEvents.RON);
+		// 报番语音：act 语音之后按役种顺序追加播报（仅内置角色有报番音频，客户端静默降级）
+		for (int w : winnerSeats) {
+			List<String> fan = pendingFan.get(w);
+			if (fan != null && !fan.isEmpty())
+				mcr.riichi_arise.network.VoicePayloads.sendFan(level, origin, w, fan);
+		}
+		pendingFan.clear();
 		// 和牌后等 2s 再弹结算 GUI；多家荣和按座次每 2s 轮流展示（settleWaiting 结束后不再推送）
 		for (int i = 0; i < pendingSettlements.size(); i++) {
 			var s = pendingSettlements.get(i);
@@ -1552,7 +1565,7 @@ public class RiichiGame {
 		sendToSpectators(p -> MahjongSettlementPayload.sendTo(p, s));
 	}
 
-	/** 结算阶段 1 结束 → 推送点数变化界面（阶段 2，5s 自动确认） */
+	/** 结算阶段 1 结束 → 推送点数变化界面（阶段 2；客户端动画+3s 倒计时后自动确认） */
 	private void showPointDelta() {
 		if (!settleWaiting || settlePhase != 1)
 			return;
@@ -1568,7 +1581,9 @@ public class RiichiGame {
 		}
 		sendToSpectators(p -> mcr.riichi_arise.network.MahjongPointDeltaPayload.sendTo(p, origin.asLong(), seatNames(),
 				pointsBeforeRound, st.points));
-		schedule(5 * 20, settleTask);
+		// 客户端点数界面动画+3s 倒计时合计 6s 自动确认回传，服务端兜底再多留 1s，
+		// 避免界面在倒计时未走完（如显示 2s）时被 sendClose 提前关闭
+		schedule(7 * 20, settleTask);
 	}
 
 	/** 结算确认后推进：连庄（局数不变、本场累加）或轮庄（局数+1）；终局不清桌，下一把开始前才清 */
@@ -1659,12 +1674,21 @@ public class RiichiGame {
 		aiRonPending = 0;
 		aiMeldPending = 0;
 		discarderSeat = -1;
+		// 关闭响应窗口：否则 tick 仍会走窗口超时 → closeWindowAndAdvance → AI 继续摸打（牌自己打）
+		claimWindowEnd = 0;
+		claimShortEnd = 0;
+		claimDiscarder = -1;
+		claimTile = -1;
+		java.util.Arrays.fill(claimOptions, null);
+		chiCombos.clear();
+		pendingRons.clear();
 		clearAllOptions();
 		endGame();
 	}
 
 	/** 终局：聊天框向全场播报排名 + 风盘处挑战解锁音效 + 推终局结算界面，回到等待重开 */
 	private void endGame() {
+		ended = true;
 		st.phase = RichiTableState.PHASE_FINISHED;
 		// 上一局人类玩家自动回到等待队列：管理界面（含清桌重置后）保留上一局玩家的队列座位，可直接再开
 		for (int seat = 0; seat < 4; seat++)
@@ -1706,15 +1730,14 @@ public class RiichiGame {
 			if (p != null)
 				p.onGameSettled(uma[seat][2]);
 		}
-		// 聊天框播报（全场玩家）：顺位 + 点数 + 马 + pt
+		// 聊天框播报（全场玩家）：顺位 + 点数（不含马点）
 		var header = Component.translatable("message.riichi_arise.gameover");
 		for (ServerPlayer p : level.getServer().getPlayerList().getPlayers()) {
 			p.sendSystemMessage(header);
 			for (int rank = 0; rank < 4; rank++) {
 				int s = order[rank];
 				p.sendSystemMessage(Component.translatable("message.riichi_arise.standing_pt",
-						rank + 1, ps[s].name, st.points[s],
-						String.format("%+d", (int) uma[s][1]), String.format("%+.1f", uma[s][2])));
+						rank + 1, ps[s].name, st.points[s]));
 			}
 		}
 		// 风盘位置挑战进度解锁音效
@@ -2041,6 +2064,8 @@ public class RiichiGame {
 
 	/** 每服务端 tick（MahjongTicker 转发） */
 	public void tick(long now) {
+		if (ended)
+			return; // 已终局：延迟任务与响应窗口一律不再推进（否则窗口超时会把牌局继续打下去）
 		if (!tasks.isEmpty()) {
 			List<DelayedTask> due = null;
 			for (DelayedTask t : tasks)
@@ -2438,6 +2463,37 @@ public class RiichiGame {
 	/** 天凤式角色语音：对局事件 → 通知桌周附近客户端播报某座玩家的语音（声音文件由客户端按各座语音自行播） */
 	private void voiceEvent(int seat, mcr.riichi_arise.voice.VoiceEvents ev) {
 		mcr.riichi_arise.network.VoicePayloads.sendVoice(level, origin, seat, ev.code());
+	}
+
+	/** 自风/场风方位后缀（索引 0..3 = 東南西北，与 mjsdb 报番音频文件对应） */
+	private static final String[] WIND_KEYS = { "TON", "NAN", "SHAA", "PEI" };
+
+	/**
+	 * 报番键列表（S→C 发给客户端，客户端 YakuVoices 解析）：
+	 * <ol><li>役种英文名，其中自风/场风替换为带具体方位的 JIKAZE_TON / BAKAZE_NAN 等（报牌名）</li>
+	 * <li>宝牌计数：表宝牌、红宝牌、里宝牌通用 DORA/RED/URA + 数量（如 DORA3、URA13），按数量分开报</li></ol>
+	 */
+	private List<String> buildFanKeys(Mahjong4jBridge.WinResult r, int seat) {
+		List<String> keys = new ArrayList<>();
+		int selfWind = (seat - dealerSeat() + 4) % 4;
+		for (String n : r.yakuNames()) {
+			if (n.equals("JIKAZE"))
+				keys.add("JIKAZE_" + WIND_KEYS[selfWind]);
+			else if (n.equals("BAKAZE"))
+				keys.add("BAKAZE_" + WIND_KEYS[st.roundWind]);
+			else
+				keys.add(n);
+		}
+		appendDoraKeys(keys, "DORA", r.doraHits().size()); // 表宝牌
+		appendDoraKeys(keys, "RED", r.redHits().size()); // 红宝牌
+		appendDoraKeys(keys, "URA", r.uraHits().size()); // 里宝牌
+		return keys;
+	}
+
+	/** 追加宝牌计数键：0 张不报；1 张报牌名；2-12 报数量；13+ 报"一大堆" */
+	private static void appendDoraKeys(List<String> keys, String base, int count) {
+		if (count > 0)
+			keys.add(count == 1 ? base : base + Math.min(count, 13));
 	}
 
 	/** 聊天框向桌心 16 格内所有玩家播报（副露/立直/和牌/流局等每次操作实时通知；个人提示走动作栏不受影响）。

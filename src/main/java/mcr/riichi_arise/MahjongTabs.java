@@ -19,6 +19,7 @@ public class MahjongTabs {
 					.icon(() -> new ItemStack(MahjongItems.FENG_PAN.get()))
 					.displayItems((parameters, tabData) -> {
 						tabData.accept(MahjongItems.FENG_PAN.get()); // 风盘（麻雀牌桌）
+						tabData.accept(MahjongItems.FENG_PAN_SMALL.get()); // 小型风盘（紧凑 3×3 牌桌）
 						tabData.accept(MahjongTileItem.create(-1)); // 未知牌（背面）
 						tabData.accept(MahjongItems.ITEMS.get(0).get()); // 点棒 1000（立直宣言用）
 					}).build());

@@ -82,14 +82,9 @@ public final class VoiceCache {
 		if (id == null || id.isEmpty())
 			return null;
 		// 1) 内置 / 资源包资源
-		try {
-			ResourceLocation loc = ResourceLocation.fromNamespaceAndPath("riichi_arise",
-					"sounds/voice/" + id + "/" + ev.act() + ".mp3");
-			var opt = Minecraft.getInstance().getResourceManager().getResource(loc);
-			if (opt.isPresent())
-				return opt.get().open();
-		} catch (Exception ignored) {
-		}
+		InputStream in = openResource(id, ev.act());
+		if (in != null)
+			return in;
 		// 2) 本地缓存
 		File f = cachedFile(id, ev);
 		if (f != null && f.isFile() && f.canRead()) {
@@ -97,6 +92,29 @@ public final class VoiceCache {
 				return Files.newInputStream(f.toPath());
 			} catch (Exception ignored) {
 			}
+		}
+		return null;
+	}
+
+	/**
+	 * 报番语音（仅内置/资源包）：{@code riichi_arise:sounds/voice/<id>/fan/<key>.mp3}。
+	 * 报番音频不提供在线下载，找不到返回 null（调用方静默跳过）。
+	 */
+	public static InputStream openFan(String id, String key) {
+		if (id == null || id.isEmpty())
+			return null;
+		return openResource(id, "fan/" + key);
+	}
+
+	/** 读 mod 资源 {@code sounds/voice/<id>/<path>.mp3}；不存在返回 null */
+	private static InputStream openResource(String id, String path) {
+		try {
+			ResourceLocation loc = ResourceLocation.fromNamespaceAndPath("riichi_arise",
+					"sounds/voice/" + id + "/" + path + ".mp3");
+			var opt = Minecraft.getInstance().getResourceManager().getResource(loc);
+			if (opt.isPresent())
+				return opt.get().open();
+		} catch (Exception ignored) {
 		}
 		return null;
 	}

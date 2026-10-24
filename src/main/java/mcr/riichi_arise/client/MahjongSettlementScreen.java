@@ -66,8 +66,8 @@ public class MahjongSettlementScreen extends Screen {
 
 	@Override
 	public void tick() {
-		// 自动关闭兜底：播报结束 + 确认窗口 + 2s 余量
-		if (++age >= announceEndTick() + CONFIRM_WINDOW_TICKS + 40)
+		// 自动关闭兜底：播报结束 + 番符/点数/段位三段延迟(2s) + 确认窗口 + 2s 余量
+		if (++age >= announceEndTick() + CONFIRM_WINDOW_TICKS + 80)
 			onClose();
 		// 报番音效：每新出现一条役种播放一次木板放置声（可见条数由 age 推导，与渲染一致）
 		if (this.data != null && !this.data.yakuList().isBlank()) {
@@ -84,10 +84,10 @@ public class MahjongSettlementScreen extends Screen {
 								net.minecraft.sounds.SoundEvents.WOOD_PLACE, 1.0F));
 			}
 		}
-		// 番数显示时刻（役种播报完）：按打点段位播一次音效——役满=不死图腾、三倍满=信标、
+		// 段位显现时刻（番符 +1s、点数 +0.5s 后）：按打点段位播一次音效——役满=不死图腾、三倍满=信标、
 		// 倍满=铁砧放置、跳满=喷溅药水迸发、满贯（含流局满贯）=粘液块放置、满贯以下无
 		if (!this.tierPlayed && this.data != null && this.data.mode() == MahjongSettlementPayload.MODE_HAND_WIN
-				&& age >= announceEndTick()) {
+				&& age >= announceEndTick() + 40) {
 			this.tierPlayed = true;
 			var sound = tierSound();
 			if (sound != null)
@@ -151,6 +151,34 @@ public class MahjongSettlementScreen extends Screen {
 		return null;
 	}
 
+	/** 点数等级播报键（与实际打点段位一致；未达满贯返回 null） */
+	private String tierVoiceKey() {
+		if (this.data == null || "nagashi".equals(this.data.winType()))
+			return null; // 流局满贯无役种报番，不播等级语音
+		if (this.data.fu() == 0) {
+			// 役满（han 编码倍数）：13 番以上为累计役满，否则 N 倍役满（6 倍以上用 6 倍音频）
+			int count = Math.max(1, this.data.han());
+			return count >= 13 ? "leijiyiman" : "yiman" + Math.min(6, count);
+		}
+		int gain = this.data.gain();
+		boolean parent = this.data.parent();
+		if (gain >= (parent ? 36000 : 24000))
+			return "sanbeiman";
+		if (gain >= (parent ? 24000 : 16000))
+			return "beiman";
+		if (gain >= (parent ? 18000 : 12000))
+			return "tiaoman";
+		if (gain >= (parent ? 12000 : 8000))
+			return "mangan";
+		return null;
+	}
+
+	/** 报番语音模式下的播报结束时刻（最后一次 FanAnnouncer.done 时记录） */
+	private Integer voiceEndAge;
+
+	/** 点数等级语音是否已触发（点数显现的同一刻播一次） */
+	private boolean levelPlayed;
+
 	/** 役种逐条播报结束时刻（15tick 起、间隔 7tick、尾条停留 1s） */
 	private int announceEndTick() {
 		int n = this.data == null || this.data.yakuList().isBlank() ? 0
@@ -176,14 +204,30 @@ public class MahjongSettlementScreen extends Screen {
 			g.drawCenteredString(this.font, "...", this.width / 2, this.height / 2, 0xAAAAAA);
 			return;
 		}
-		// 确认倒计时（右上角）：役种播报结束后才开始 5s 倒计时；全员确定或倒计时结束服务端强制推进
-		int announceEnd = announceEndTick();
 		boolean win = this.data.mode() == MahjongSettlementPayload.MODE_HAND_WIN;
 		List<Integer> doraTiles = win ? parseCsv(this.data.doraCsv()) : List.of();
 		List<Integer> uraTiles = win ? parseCsv(this.data.uraCsv()) : List.of();
 		List<String> yakus = win && !this.data.yakuList().isBlank()
 				? List.of(this.data.yakuList().split(";"))
 				: List.of();
+		// 报番同步：有报番任务时役种随语音进度显现（念完一条显现下一条+打点音）；
+		// 语音中断超时或无报番任务时回退固定节奏
+		boolean fanActive = mcr.riichi_arise.voice.FanAnnouncer.isActive();
+		boolean fanDone = fanActive && (mcr.riichi_arise.voice.FanAnnouncer.isDone()
+				|| age > 15 + 7 * Math.max(1, yakus.size()) + 100);
+		int announceEnd;
+		if (fanActive) {
+			if (fanDone && voiceEndAge == null)
+				voiceEndAge = age;
+			announceEnd = voiceEndAge != null ? voiceEndAge + 20 : Integer.MAX_VALUE - 1;
+		} else {
+			announceEnd = announceEndTick();
+		}
+		// 报番结束后分三段显现：+1s 番数符数 → +0.5s 点数 → +0.5s 段位名（满贯/跳满等）
+		boolean pending = announceEnd >= Integer.MAX_VALUE - 1000; // 报番尚未结束（哨兵值），避免加法溢出
+		int hanFuAt = pending ? Integer.MAX_VALUE : announceEnd + 20;
+		int pointAt = pending ? Integer.MAX_VALUE : announceEnd + 30;
+		int tierAt = pending ? Integer.MAX_VALUE : announceEnd + 40;
 		// 役种网格：固定每列 4 个（排满一列再排下一列，≤4 条目单列）
 		int cols = yakus.size() <= 4 ? 1 : (yakus.size() + 3) / 4;
 		int yakuRows = yakus.isEmpty() ? 0 : Math.min(4, yakus.size());
@@ -222,9 +266,9 @@ public class MahjongSettlementScreen extends Screen {
 				win ? "gui.riichi_arise.settlement." + this.data.winType() : "gui.riichi_arise.settlement.final").getString();
 		String head = win ? title + "　" + this.data.winnerName() : title;
 		g.drawCenteredString(this.font, head, this.width / 2, y, 0xFFFF55);
-		// 倒计时在役种播报结束后才开始显示
-		if (age >= announceEnd) {
-			int remain = Math.max(0, (announceEnd + CONFIRM_WINDOW_TICKS - age + 19) / 20);
+		// 倒计时在番符/点数/段位全部显现后（报番结束 +2s）才开始显示
+		if (age >= tierAt) {
+			int remain = Math.max(0, (tierAt + CONFIRM_WINDOW_TICKS - age + 19) / 20);
 			String cd = Component.translatable("gui.riichi_arise.settlement.countdown", remain).getString();
 			g.drawString(this.font, cd, left + w - pad - this.font.width(cd), top + 6, 0xFFAA55, false);
 		}
@@ -275,34 +319,64 @@ public class MahjongSettlementScreen extends Screen {
 				}
 			}
 			y += 22;
-			// 役种逐条播报：延迟 15 tick，间隔 7 tick 依次出现（≤4 一行一个，否则 3 列网格）
+			// 役种逐条播报：报番模式下随语音进度显现（念完一条显现下一条）；
+			// 无报番时按固定节奏（延迟 15 tick、间隔 7 tick）
 			if (!yakus.isEmpty()) {
 				y += 2;
 				int shown = Math.min(yakus.size(), cols * 4);
+				int limit = -1; // 已显现的最大条目下标
+				if (fanActive) {
+					if (fanDone) {
+						limit = yakus.size() - 1;
+					} else {
+						// 已开始播报的役种按中文名对应到列表下标（其之前的宝牌等未播报条目一并显现）
+						for (String zh : mcr.riichi_arise.voice.FanAnnouncer.startedZh()) {
+							int idx = yakus.indexOf(zh);
+							if (idx >= 0)
+								limit = Math.max(limit, idx);
+						}
+					}
+				} else {
+					for (int i = 0; i < shown; i++)
+						if (age >= 15 + 7 * i)
+							limit = i;
+				}
+				// 列优先且每列固定 4 个：col = i/4, row = i%4（播报顺序与排布一致）
 				for (int i = 0; i < shown; i++) {
-					if (age < 15 + 7 * i)
+					if (i > limit)
 						break;
-					// 列优先且每列固定 4 个：col = i/4, row = i%4（播报顺序与排布一致）
 					int col = i / 4;
 					int row = i % 4;
 					g.drawString(this.font, yakus.get(i), left + pad + col * COL_W, y + row * 13, 0x7FFF7F, true);
 				}
-				if (shown < yakus.size() && age >= 15 + 7 * (shown - 1))
+				if (shown < yakus.size() && limit >= shown - 1)
 					g.drawString(this.font, "+" + (yakus.size() - shown), left + pad, y + yakuRows * 13, 0xAAAAAA, true);
 				y += yakuRows * 13 + 4;
 			}
-			// 底部：番数·符数·点数（役满/三倍满/倍满/跳满/满贯显示段位名+点数；流局满贯只显示点数）——役种播报完后才显示
-			if (age >= announceEnd) {
-				String score;
-				String tier = "nagashi".equals(this.data.winType()) ? null : tierLabel();
-				if ("nagashi".equals(this.data.winType()))
-					score = Component.translatable("gui.riichi_arise.settlement.pts_only", this.data.gain()).getString();
-				else if (tier != null)
-					score = tier + "　" + Component.translatable("gui.riichi_arise.settlement.pts_only", this.data.gain()).getString();
-				else
-					score = Component.translatable("gui.riichi_arise.settlement.score",
-							this.data.han(), this.data.fu(), this.data.gain()).getString();
-				g.drawCenteredString(this.font, score, this.width / 2, y, 0xFFFF55);
+			// 底部三段式显现：报番结束 → +1s 番数符数 → +0.5s 点数 → +0.5s 段位名（满贯/跳满等）并播报等级语音
+			boolean nagashi = "nagashi".equals(this.data.winType());
+			String tier = nagashi ? null : tierLabel();
+			if (age >= hanFuAt) {
+				StringBuilder sb = new StringBuilder();
+				if (!nagashi && this.data.fu() != 0)
+					sb.append(Component.translatable("gui.riichi_arise.settlement.han_fu",
+							this.data.han(), this.data.fu()).getString());
+				if (age >= pointAt) {
+					if (sb.length() > 0)
+						sb.append('　');
+					sb.append(Component.translatable("gui.riichi_arise.settlement.pts_only", this.data.gain()).getString());
+				}
+				if (age >= tierAt && tier != null) {
+					if (sb.length() > 0)
+						sb.append('　');
+					sb.append(tier);
+					// 段位显现的同一刻播报其语音（满贯/跳满/倍满/三倍满/累计役满/N倍役满）
+					if (!levelPlayed) {
+						levelPlayed = true;
+						mcr.riichi_arise.voice.FanAnnouncer.playLevel(tierVoiceKey());
+					}
+				}
+				g.drawCenteredString(this.font, sb.toString(), this.width / 2, y, 0xFFFF55);
 			}
 		} else {
 			// 终局排名：按点数高→低

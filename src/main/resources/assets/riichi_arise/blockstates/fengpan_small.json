@@ -1,0 +1,6 @@
+{
+	"variants": {
+		"game_active=false": { "model": "riichi_arise:block/fengpan_small" },
+		"game_active=true":  { "model": "riichi_arise:block/empty" }
+	}
+}

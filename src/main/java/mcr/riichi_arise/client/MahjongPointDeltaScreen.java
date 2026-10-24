@@ -9,23 +9,23 @@ import mcr.riichi_arise.network.MahjongPointDeltaPayload;
 
 /**
  * 点数变化界面（和牌结算界面关闭后展示）：四家点数 局前 → 局后，带结算动画：
- * 出现即显示原点数 + 右侧红/绿增减数 → 1s 后点数 2s 内快速浮动到最终点数 →
+ * 出现即显示原点数 + 右侧红/绿增减数 → 1s 后点数 1s 内快速浮动到最终点数 →
  * 四家名字按排名上下滑动排序 → 最后 3s 自动确认（回 settle_confirm 推进服务端）；
  * 全员确认/手动确认立即推进（服务端关闭包兜底）。
  */
 public class MahjongPointDeltaScreen extends Screen {
 	// 结算动画时间轴（tick，1/20s）：
 	//   0s    界面出现：四家显示原点数，右侧红/绿点数增减数
-	//   1s    点数变动家的点数开始快速浮动，2s 内（即 3s 时）变到最终点数
-	//   3s    点数落定 → 四家名字按排名上下滑动排序成一~四位
-	//   排序完成 → 开始 3s 自动确认倒计时，超时回传推进
+	//   1s    点数变动家的点数开始快速浮动，1s 内（即 2s 时）变到最终点数
+	//   2s    点数落定 → 四家名字按排名上下滑动排序成一~四位
+	//   3s    排序完成 → 开始 3s 自动确认倒计时，超时回传推进
 	private static final int POINTS_DELAY_TICKS = 20;       // 1s：点数开始浮动前
-	private static final int POINTS_DURATION_TICKS = 40;    // 2s：浮动到最终点数
-	private static final int REORDER_START = POINTS_DELAY_TICKS + POINTS_DURATION_TICKS; // 3s：点数落定，开始排序
+	private static final int POINTS_DURATION_TICKS = 20;    // 1s（速度已调快一倍）：浮动到最终点数
+	private static final int REORDER_START = POINTS_DELAY_TICKS + POINTS_DURATION_TICKS; // 2s：点数落定，开始排序
 	private static final int REORDER_DURATION_TICKS = 20;   // 1s：名字按排名滑动
-	private static final int COUNTDOWN_START = REORDER_START + REORDER_DURATION_TICKS;   // 排序完成，开始倒计时
+	private static final int COUNTDOWN_START = REORDER_START + REORDER_DURATION_TICKS;   // 3s：排序完成，开始倒计时
 	private static final int COUNTDOWN_TICKS = 60;          // 3s：自动确认倒计时
-	private static final int AUTO_CONFIRM_TICKS = COUNTDOWN_START + COUNTDOWN_TICKS;
+	private static final int AUTO_CONFIRM_TICKS = COUNTDOWN_START + COUNTDOWN_TICKS;     // 6s：动画+倒计时合计
 
 	private MahjongPointDeltaPayload.PointDeltaMessage data;
 	private int age;
@@ -70,7 +70,7 @@ public class MahjongPointDeltaScreen extends Screen {
 		return new int[] { order[0], order[1], order[2], order[3] };
 	}
 
-	/** 点数动画：1s 延迟后 2s 内从原点数快速浮动到最终点数（缓出：先快后落定） */
+	/** 点数动画：1s 延迟后 1s 内从原点数快速浮动到最终点数（缓出：先快后落定） */
 	private int animatedPoints(int before, int after) {
 		if (age < POINTS_DELAY_TICKS)
 			return before;
@@ -125,7 +125,7 @@ public class MahjongPointDeltaScreen extends Screen {
 			int before = this.data.before().get(seat);
 			int after = this.data.after().get(seat);
 			int delta = after - before;
-			// 当前显示点数：原点数 → 1s 后 2s 内快速浮动到最终点数（未变动的家恒为原点数）
+			// 当前显示点数：原点数 → 1s 后 1s 内快速浮动到最终点数（未变动的家恒为原点数）
 			int shown = animatedPoints(before, after);
 			// 行位置：先按座位序，点数落定后按排名上下滑动到 1~4 位
 			int targetRow = 0;

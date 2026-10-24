@@ -2,16 +2,15 @@
   "type": "minecraft:crafting_shaped",
   "category": "misc",
   "pattern": [
-    "SPS",
-    "NFN",
-    "IPI"
+    "DPD",
+    "ICI",
+    "DPD"
   ],
   "key": {
-    "S": { "item": "minecraft:stone" },
+    "D": { "item": "minecraft:lapis_lazuli" },
+    "P": { "item": "minecraft:paper" },
     "I": { "item": "minecraft:iron_ingot" },
-    "P": { "item": "minecraft:piston" },
-    "N": { "item": "minecraft:note_block" },
-    "F": { "item": "minecraft:item_frame" }
+    "C": { "item": "minecraft:comparator" }
   },
   "result": {
     "id": "riichi_arise:fengpan",

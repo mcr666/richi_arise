@@ -294,6 +294,7 @@ public final class MahjongLobby {
 		st.phase = RichiTableState.PHASE_PLAYING;
 		st.avatarsDirty = true;
 		FengPanBlock.resolveAvatars(level, st);
+		st.avatarsDirty = false; // 开局已解析完毕：终局时不要重算（重算会换随机名/皮肤 UUID，客户端据此重建假玩家 → 形象突然位移）
 		st.honba = 0;
 		// 东风战单局：每局点数重置
 		java.util.Arrays.fill(st.points, 25000);
@@ -536,7 +537,8 @@ public final class MahjongLobby {
 		}
 	}
 
-	/** 某座位是否需要 AI Marker：对局中 aiSeat（参牌者除外）；等待/终局阶段 reservedAI（与座位展示一致，终局未清桌也能管理） */
+	/** 某座位是否需要 AI Marker：对局中 aiSeat（参牌者除外）；等待/终局阶段 = 本局 AI 座位或下一局预约
+	 *  （终局未清桌时本局 AI 的标记不能凭空消失/换座，否则看起来像形象位移） */
 	private static boolean needsAiMarker(RichiTableState st, int seat) {
 		if (st.phase == RichiTableState.PHASE_PLAYING) {
 			// 参牌者（女仆/NPC）座位：真实实体钉在座位，无需 AI Marker 代理
@@ -544,8 +546,7 @@ public final class MahjongLobby {
 				return false;
 			return st.aiSeat[seat];
 		}
-		// 等待/终局阶段：reservedAI（queue 里的 UUID 开局才分配到 players[]）
-		return st.reservedAI[seat];
+		return st.aiSeat[seat] || st.reservedAI[seat];
 	}
 
 	/** 把四位玩家传送到对应座位外侧站位（面向桌心）：开局随机入座后与每局开始时调用 */

@@ -38,6 +38,10 @@ public class MahjongItems {
 	public static final DeferredHolder<Item, Item> FENG_PAN =
 			REGISTRY.register("fengpan", () -> new net.minecraft.world.item.BlockItem(MahjongBlocks.FENG_PAN.get(), new Item.Properties()));
 
+	/** 小型风盘（紧凑 3×3 牌桌）的物品形式 */
+	public static final DeferredHolder<Item, Item> FENG_PAN_SMALL =
+			REGISTRY.register("fengpan_small", () -> new net.minecraft.world.item.BlockItem(MahjongBlocks.FENG_PAN_SMALL.get(), new Item.Properties()));
+
 	public static final List<DeferredHolder<Item, Item>> ITEMS = IDS.stream()
 			.map(id -> REGISTRY.register(id, () -> {
 				Item.Properties props = new Item.Properties();
