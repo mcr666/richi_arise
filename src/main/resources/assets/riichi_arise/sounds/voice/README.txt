@@ -15,7 +15,7 @@ mod 在"个人设置"里对这 6 名角色标注「内置」，播放时直接�
 
 角色 id：
   linlang  琳琅
-  yuanxiao 元宵
+  yiji     一姬
   fuji     福姬
   bamuwei  八木唯
   akagi    赤木茂

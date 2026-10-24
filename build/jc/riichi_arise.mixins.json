@@ -1,6 +1,6 @@
 {
   "required": true,
-  "package": "mcr.richi.mixin",
+  "package": "mcr.riichi_arise.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [],
   "client": [

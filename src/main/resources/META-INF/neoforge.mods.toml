@@ -6,20 +6,14 @@ license="MIT License"
 modId="riichi_arise"
 version="1.0.0"
 displayName="立直浮现之时"
-displayURL="https://mcreator.net"
+displayURL=""
 logoFile="logo.png"
 credits="deepseek"
 authors="Maocry"
 description="When Riichi Arise"
 
-# Start of user code block mod configuration
-# End of user code block mod configuration
-
-
-# Start of user code block custom mixins
 [[mixins]]
     config = "riichi_arise.mixins.json"
-# End of user code block custom mixins
 
 [[dependencies.riichi_arise]]
     modId="neoforge"
@@ -42,9 +36,3 @@ description="When Riichi Arise"
     versionRange="*"
     ordering="AFTER"
     side="BOTH"
-
-
-
-
-# Start of user code block dependencies configuration
-# End of user code block dependencies configuration
