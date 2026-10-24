@@ -30,7 +30,6 @@ import it.unimi.dsi.fastutil.ints.IntObjectImmutablePair;
 
 import mcr.riichi_arise.network.*;
 import mcr.riichi_arise.compat.TlmCompatBridge;
-import mcr.riichi_arise.game.RichiGameRules;
 
 @Mod("riichi_arise")
 public class RichiiAriseMod {

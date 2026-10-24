@@ -801,7 +801,9 @@ public final class MahjongTableClient {
 			if (e != null && !old.sig().equals(slot.sig())
 					&& TableLayout.KIND_HAND.equals(p.kind()) && p.axis() != null
 					&& isStandingHandSig(old.sig())) {
-				boolean isDrawn = st.drawnSeat == p.seat() && p.index() >= 0 && p.index() == st.hands[p.seat()].size() - 1;
+				// hands 已改为记号串：解析后按张数判断最后一张（刚摸的牌无倒下延迟）
+				boolean isDrawn = st.drawnSeat == p.seat() && p.index() >= 0
+						&& p.index() == mcr.riichi_arise.game.MahjongTileNotation.parse(st.hands[p.seat()]).size() - 1;
 				startFall(e, p, isDrawn ? 0 : FALL_TICKS);
 				fresh.put(slot.slotKey(), new Entry(e.getId(), slot.sig()));
 				if (p.index() >= 0)
@@ -940,7 +942,7 @@ public final class MahjongTableClient {
 							handNbt(p, false, null, level), p.pos(), p.yRot()));
 				}
 			}
-			case TableLayout.KIND_RIVER, TableLayout.KIND_MELD, TableLayout.KIND_DORA -> {
+			case TableLayout.KIND_RIVER, TableLayout.KIND_DORA -> {
 				if (animate)
 					schedule(tableKey, p.delay(), () -> {
 						if (deal)
@@ -950,6 +952,18 @@ public final class MahjongTableClient {
 					});
 				else
 					out = spawnKeyed(level, table, slot.slotKey(), slot.sig(), flatNbt(p, level), p.pos(), p.yRot());
+			}
+			case TableLayout.KIND_MELD -> {
+				// 副露：自家牌竖放（axis==null，立起面朝本家）、声明牌/暗杠平躺（横放长轴指向来源）
+				CompoundTag meldNbt = p.axis() == null ? handNbt(p, true, null, level) : flatNbt(p, level);
+				if (animate)
+					schedule(tableKey, p.delay(), () -> {
+						if (deal)
+							playDealSound(level, p.pos());
+						spawnKeyed(level, table, slot.slotKey(), slot.sig(), meldNbt, p.pos(), p.yRot());
+					});
+				else
+					out = spawnKeyed(level, table, slot.slotKey(), slot.sig(), meldNbt, p.pos(), p.yRot());
 			}
 			default -> {
 				// KIND_STICK：立直点棒

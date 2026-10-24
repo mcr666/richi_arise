@@ -253,62 +253,102 @@ public final class TableLayout {
 			}
 		}
 		// 3) 副露（吃碰杠）：副露行向桌心内收（与手牌行错开带），组序从外向内游标式排开——
-		//    每组按实际占宽（纵牌展开 + 声明牌伸出方向）推进，外缘不超过 MELD_EDGE_CAP，
+		//    每组按实际占宽（竖放自家牌 + 横放声明牌伸出方向）推进，外缘不超过 MELD_EDGE_CAP，
 		//    保证相邻两家副露在桌角处永不重叠；同一家的多组也不会因声明牌相对而压叠。
-		//    整组朝向与横牌（声明牌）端位对应喂牌家座位——
-		//    上家（左手边）横牌在组左端、下家（右手边）在右端、对家（对面）整组旋转 90° 朝桌心展开且横牌在朝心一端、
-		//    自杠无来源方向取右端；横牌与相邻纵牌边距 = 组内牌缝（flatStep - 牌宽），紧贴无豁口。
+		//    所有副露整体靠右排列（游标自外缘内收），新的副露永远紧挨上一组，不插手牌中间。
+		//    组内：声明牌（副露串末尾那张，见 RiichiPlayer.displayOrder）横放躺倒，长轴指向来源玩家——
+		//    上家（rel3/左手）横牌在组最左、下家（rel1/右手）在最右、对家（rel2/对面）在中间且长轴朝桌心；
+		//    自家其余牌竖放立起，面朝本家（与手牌立牌同向）。
+		//    暗杠（来源自己且 4 张）无声明牌：4 张平躺横排，两端扣盖（背面朝上）、中间两张亮明（正面朝上）。
 		for (int h = 0; h < 4; h++) {
-			Vec3 tangent = tangents[h];
 			Vec3 facingCenter = outs[h].scale(-1);
-			Vec3 playerRight = new Vec3(-facingCenter.z, 0, facingCenter.x); // 面朝桌心时的右手方向
+			Vec3 playerRight = new Vec3(-facingCenter.z, 0, facingCenter.x); // 面朝桌心时的右手（副露行 / 手牌向右延伸）
+			Vec3 playerLeft = playerRight.scale(-1);
 			List<RichiTableState.MeldGroup> groups = st.meldGroupInfos(h);
 			Vec3 meldRow = rows[h].subtract(outs[h].scale(MELD_ROW_INSET));
-			double cursor = MELD_EDGE_CAP; // 游标：当前可用外缘（沿 playerRight 的标量）
+			double halfW = TILE_WIDTH / 2.0;
+			double halfL = TILE_LONG / 2.0;
+			double protrude = halfL - halfW; // 横放声明牌沿行伸出量（长轴与立牌同向时占用更长）
+			double cursor = MELD_EDGE_CAP;   // 游标：当前可用外缘（沿 playerRight 的标量）
 			for (int g = 0; g < groups.size(); g++) {
 				List<Integer> meld = groups.get(g).codes();
 				if (meld.isEmpty())
 					continue;
 				int fromSeat = groups.get(g).fromSeat();
 				int rel = fromSeat < 0 ? 0 : (fromSeat - h + 4) % 4;
-				boolean toimen = rel == 2; // 喂牌家在对面：整组旋转 90° 朝桌心方向展开
-				// 暗杠（来源 = 自己 且 4 张）：四张平行平躺，中间两张牌面朝下（盖牌）
-				boolean ankan = fromSeat == h && meld.size() == 4;
-				int flatCount = Math.max(0, meld.size() - 1);
-				// 声明牌沿 playerRight 的伸出方向：+1 向外（桌角侧）、-1 向内、0 无（对家/暗杠，伸出垂直于轴）
-				double claimDir = toimen || ankan ? 0
-						: (rel == 1 || rel == 0 ? 1 : -1);
-				double flush = (flatCount + 1) / 2.0 * flatStep + (TILE_LONG - TILE_WIDTH) / 2.0;
-				// 组沿轴各侧占宽（中心到外缘）：纵牌展开 + 半牌宽；声明牌伸出侧为 flush + 半牌长
-				double flatHalf = toimen ? TILE_LONG / 2
-						: (flatCount - 1) / 2.0 * flatStep + TILE_WIDTH / 2;
-				double claimHalf = flush + TILE_LONG / 2;
-				double outer = claimDir > 0 ? claimHalf : flatHalf;
-				double inner = claimDir < 0 ? claimHalf : flatHalf;
+				int n = meld.size();
+				boolean ankan = fromSeat == h && n == 4; // 暗杠：来源自己且 4 张
+				// 声明牌横放位置：上家(rel3)最左、对家(rel2)中间、下家(rel1)最右；
+				// 横放长轴指向来源玩家：上家朝左、下家朝右、对家朝桌心。
+				int flatPos = -1;
+				Vec3 flatLong = null;
+				if (!ankan) {
+					flatPos = switch (rel) {
+						case 3 -> 0;                    // 上家：横牌在最左 [横][竖]..[竖]
+						case 1 -> n - 1;                // 下家：横牌在最右 [竖]..[竖][横]
+						default -> 1;                   // 对家：横牌在中间（3 张=第 2 位、4 张=中间偏左）
+					};
+					if (rel == 3) {
+						flatLong = playerLeft;          // 长轴朝左指向左侧上家
+					} else if (rel == 1) {
+						flatLong = playerRight;         // 长轴朝右指向右侧下家
+					} else {
+						flatLong = facingCenter;        // 长轴朝桌心指向对家（垂直副露行）
+					}
+				}
+				// 组沿行（playerRight）各侧半宽（中心到外缘），供游标避让（相邻组/相邻家不重叠）
+				double pitch = ankan ? flatStep : TILE_GAP;
+				double centerOff = (n - 1) / 2.0 * pitch;
+				double inner, outer;
+				if (ankan) {
+					inner = outer = centerOff + halfW;
+				} else if (rel == 3) {
+					inner = centerOff + halfL + protrude; // 横牌最左且向左伸出
+					outer = centerOff + halfW;
+				} else if (rel == 1) {
+					inner = centerOff + halfW;
+					outer = centerOff + halfL + protrude; // 横牌最右且向右伸出
+				} else {
+					inner = outer = centerOff + halfW;     // 对家横牌在中间、长轴垂直，无伸出
+				}
 				double c = cursor - outer; // 组中心标量
 				cursor = c - inner - MELD_GAP;
 				Vec3 groupCenter = meldRow.add(playerRight.scale(c));
-				Vec3 spread = toimen ? facingCenter : tangent;   // 纵牌展开方向 = 喂牌家方位
-				Vec3 flatLong = toimen ? tangent : facingCenter; // 纵牌长轴（垂直于展开方向）
+				// 每张牌沿 playerRight 的位置标量（相对 groupCenter；声明牌按伸出方向平移，避免压到邻家立牌）
+				double[] u = new double[n];
+				for (int j = 0; j < n; j++)
+					u[j] = (j - (n - 1) / 2.0) * pitch;
 				if (ankan) {
-					for (int j = 0; j < 4; j++) {
-						Vec3 target = groupCenter.add(spread.scale((j - 1.5) * flatStep));
-						boolean faceUp = j == 0 || j == 3; // 两端明牌，中间两张盖牌
+					for (int j = 0; j < n; j++) {
+						Vec3 target = groupCenter.add(playerRight.scale(u[j]));
+						boolean faceUp = j == 1 || j == 2; // 两端扣盖（背面朝上），中间两张亮明（正面朝上）
 						out.add(new Placement(KIND_MELD, flatEntityPos(target, 0), target, meld.get(j),
-								flatYaw(flatLong), flatLong, faceUp, h, j, dealIndex++ * step));
+								flatYaw(facingCenter), facingCenter, faceUp, h, j, dealIndex++ * step));
 					}
 					continue;
 				}
-				for (int j = 0; j < flatCount; j++) {
-					Vec3 target = groupCenter.add(spread.scale((j - (flatCount - 1) / 2.0) * flatStep));
-					out.add(new Placement(KIND_MELD, flatEntityPos(target, 0), target, meld.get(j),
-							flatYaw(flatLong), flatLong, true, h, j, dealIndex++ * step));
+				if (rel == 3)
+					u[flatPos] -= protrude; // 上家横牌向左伸（紧贴邻家立牌，无豁口）
+				else if (rel == 1)
+					u[flatPos] += protrude; // 下家横牌向右伸
+				// 组内摆放序：声明牌（副露串末尾）放横位，其余自家牌按原序竖放
+				int[] order = new int[n];
+				order[flatPos] = n - 1;
+				for (int j = 0, oi = 0; j < n; j++)
+					if (j != flatPos)
+						order[j] = oi++;
+				for (int j = 0; j < n; j++) {
+					Vec3 target = groupCenter.add(playerRight.scale(u[j]));
+					if (j == flatPos) {
+						// 声明牌：横放躺倒，长轴指向来源玩家
+						out.add(new Placement(KIND_MELD, flatEntityPos(target, 0), target, meld.get(order[j]),
+								flatYaw(flatLong), flatLong, true, h, j, dealIndex++ * step));
+					} else {
+						// 自家牌：竖放立起，面朝本家
+						out.add(new Placement(KIND_MELD, standingEntityPos(target), target, meld.get(order[j]),
+								yRots[h], null, true, h, j, dealIndex++ * step));
+					}
 				}
-				Vec3 claimedDir = toimen ? spread
-						: (claimDir > 0 ? playerRight : playerRight.scale(-1));
-				Vec3 claimedTarget = groupCenter.add(claimedDir.scale(flush));
-				out.add(new Placement(KIND_MELD, flatEntityPos(claimedTarget, 0), claimedTarget,
-						meld.get(meld.size() - 1), flatYaw(spread), spread, true, h, -1, dealIndex++ * step));
 			}
 		}
 		// 3.5) 立直点棒：牌河前面（比第一排牌河更靠桌心），长轴平行于手牌行，多根依次向牌河方向堆叠

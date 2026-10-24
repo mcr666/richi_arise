@@ -143,6 +143,8 @@
   "gui.riichi_arise.settlement.pts_only": "%s点",
   "gui.riichi_arise.points.title": "点数变化",
   "gui.riichi_arise.points.confirm_in": "%s 秒后继续（点击/回车确认）",
+  "gui.riichi_arise.hud.honba": "场供 ×%s",
+  "gui.riichi_arise.hud.sticks": "供托 ×%s",
   "message.riichi_arise.round_start": "[%s%d局-%d本场] 您的座位：%s",
   "gui.riichi_arise.lobby.playing": "对局进行中",
   "gui.riichi_arise.lobby.finished": "本局已结束（右击风盘重新排队）",

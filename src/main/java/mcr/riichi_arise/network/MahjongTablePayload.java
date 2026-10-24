@@ -39,10 +39,32 @@ import mcr.riichi_arise.RichiiAriseMod;
 
 		public static void handleData(final ViewMessage message, final IPayloadContext context) {
 			if (context.flow() == PacketFlow.CLIENTBOUND) {
-				context.enqueueWork(() -> mcr.riichi_arise.client.MahjongTableClient.apply(message));
+				context.enqueueWork(() -> {
+					mcr.riichi_arise.client.MahjongTableClient.apply(message);
+					// 左上角宝牌/场供叠加层数据：参战玩家更新；或为当前叠加层所在桌（同 origin）
+					// 的观战/离桌包也同步 phase（用于隐藏）。观战其他桌不覆盖。
+					if (message.viewerSeat() >= 0 || MahjongTablePayload.gameOriginPacked == message.originPacked()) {
+						MahjongTablePayload.gameOriginPacked = message.originPacked();
+						MahjongTablePayload.gamePhase = message.phase();
+						MahjongTablePayload.gameViewerSeat = message.viewerSeat();
+						MahjongTablePayload.gameHonba = message.honba();
+						MahjongTablePayload.gameRevealed = message.revealedIndicators();
+						MahjongTablePayload.gameDoraWall = orEmpty(message.doraWall());
+						System.arraycopy(message.riichiSticks(), 0, gameRiichiSticks, 0, 4);
+					}
+				});
 			}
 		}
 	}
+
+	/** HUD 左上角宝牌/场供叠加层客户端缓存（纯原始类型，服务端加载亦安全；见 handleData 更新时机） */
+	public static volatile long gameOriginPacked = Long.MIN_VALUE;
+	public static volatile int gamePhase = -1;
+	public static volatile int gameViewerSeat = -1;
+	public static volatile int gameHonba = 0;
+	public static volatile int gameRevealed = 0;
+	public static volatile String gameDoraWall = "";
+	public static final int[] gameRiichiSticks = new int[4];
 
 	private static String orEmpty(String s) {
 		return s == null ? "" : s;

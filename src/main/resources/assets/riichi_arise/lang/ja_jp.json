@@ -143,6 +143,8 @@
   "gui.riichi_arise.settlement.pts_only": "%s点",
   "gui.riichi_arise.points.title": "点数変動",
   "gui.riichi_arise.points.confirm_in": "%s 秒後に続行（クリック/Enter で確認）",
+  "gui.riichi_arise.hud.honba": "本場 ×%s",
+  "gui.riichi_arise.hud.sticks": "供託 ×%s",
   "message.riichi_arise.round_start": "[%s%d局-%d本場] あなたの席：%s",
   "gui.riichi_arise.lobby.playing": "対局進行中",
   "gui.riichi_arise.lobby.finished": "対局終了（雀卓を右クリックして再び並ぶ）",

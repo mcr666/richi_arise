@@ -150,7 +150,46 @@ public class MahjongCommands {
 										ctx.getSource().sendSuccess(
 												() -> Component.literal("§6<Murmol>§r 下次再约吧～"), false);
 										return 1;
-									})))));
+									}))))
+							.then(Commands.literal("net")
+									.requires(src -> src.hasPermission(2))
+									.then(Commands.literal("start")
+											.executes(ctx -> netStart(ctx, mcr.riichi_arise.net.RichiNetConfig.PORT))
+											.then(Commands.argument("port", IntegerArgumentType.integer(1, 65535))
+													.executes(ctx -> netStart(ctx, IntegerArgumentType.getInteger(ctx, "port"))))
+											)
+									.then(Commands.literal("stop")
+											.executes(ctx -> {
+													mcr.riichi_arise.net.RichiNetManager.stop();
+													ctx.getSource().sendSuccess(() -> Component.literal("§6<麻雀>§r 内网端口已停止"), true);
+													return 1;
+											}))
+									.then(Commands.literal("status")
+											.executes(MahjongCommands::netStatus))
+									.then(Commands.literal("port")
+											.then(Commands.argument("port", IntegerArgumentType.integer(1, 65535))
+													.executes(ctx -> {
+															mcr.riichi_arise.net.RichiNetConfig.PORT = IntegerArgumentType.getInteger(ctx, "port");
+															ctx.getSource().sendSuccess(() -> Component.literal("§6<麻雀>§r 默认端口设为 " + mcr.riichi_arise.net.RichiNetConfig.PORT + "（下次 start 生效）"), true);
+															return 1;
+													}))
+											)
+									.then(Commands.literal("bind")
+											.then(Commands.argument("addr", StringArgumentType.word())
+													.executes(ctx -> {
+															mcr.riichi_arise.net.RichiNetConfig.BIND = StringArgumentType.getString(ctx, "addr");
+															ctx.getSource().sendSuccess(() -> Component.literal("§6<麻雀>§r 绑定地址设为 " + mcr.riichi_arise.net.RichiNetConfig.BIND), true);
+															return 1;
+													}))
+											)
+									.then(Commands.literal("token")
+											.then(Commands.argument("token", StringArgumentType.greedyString())
+													.executes(ctx -> {
+															String t = StringArgumentType.getString(ctx, "token");
+															mcr.riichi_arise.net.RichiNetConfig.TOKEN = t.equalsIgnoreCase("clear") ? "" : t;
+															ctx.getSource().sendSuccess(() -> Component.literal("§6<麻雀>§r token " + (mcr.riichi_arise.net.RichiNetConfig.TOKEN.isEmpty() ? "已清除" : "已设置")), true);
+															return 1;
+													})))));
 	}
 
 	/** replace 指令座位参数解析：e/s/w/n → 0..3，其余抛异常 */
@@ -216,6 +255,32 @@ public class MahjongCommands {
 	/** 座位 0..3 → 座位名（東南西北，与 RichiTableState 家序一致） */
 	private static String seatName(int seat) {
 		return new String[] { "東", "南", "西", "北" }[seat];
+	}
+
+	/** /richi net start：开启内网接入端口（默认绑定 127.0.0.1，端口可覆盖配置） */
+	private static int netStart(CommandSourceStack src, int port) {
+		if (mcr.riichi_arise.net.RichiNetManager.start(src.getServer(), port, mcr.riichi_arise.net.RichiNetConfig.BIND)) {
+			src.sendSuccess(() -> Component.literal("§6<麻雀>§r 内网端口已开启: "
+					+ mcr.riichi_arise.net.RichiNetConfig.BIND + ":" + port
+					+ (mcr.riichi_arise.net.RichiNetConfig.TOKEN.isEmpty() ? "（无 token）" : "（需 token）")), true);
+			return 1;
+		}
+		src.sendFailure(Component.literal("§c端口启动失败（可能已开启或端口被占用）"));
+		return 0;
+	}
+
+	/** /richi net status：显示运行状态 */
+	private static int netStatus(CommandSourceStack src) {
+		if (!mcr.riichi_arise.net.RichiNetManager.isRunning()) {
+			src.sendSuccess(() -> Component.literal("§6<麻雀>§r 内网端口未开启（默认 "
+					+ mcr.riichi_arise.net.RichiNetConfig.BIND + ":" + mcr.riichi_arise.net.RichiNetConfig.PORT + "）"), false);
+			return 0;
+		}
+		src.sendSuccess(() -> Component.literal("§6<麻雀>§r 内网端口运行中: "
+				+ mcr.riichi_arise.net.RichiNetManager.bind() + ":" + mcr.riichi_arise.net.RichiNetManager.port()
+				+ "，连接 " + mcr.riichi_arise.net.RichiNetManager.connectionCount() + " 条"
+				+ (mcr.riichi_arise.net.RichiNetConfig.TOKEN.isEmpty() ? "" : "（token 已启用）")), false);
+		return 1;
 	}
 }
 

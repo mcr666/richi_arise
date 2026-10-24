@@ -143,6 +143,8 @@
   "gui.riichi_arise.settlement.pts_only": "%s pts",
   "gui.riichi_arise.points.title": "Point Changes",
   "gui.riichi_arise.points.confirm_in": "Continuing in %s s (click/Enter to confirm)",
+  "gui.riichi_arise.hud.honba": "Honba ×%s",
+  "gui.riichi_arise.hud.sticks": "Riichi ×%s",
   "message.riichi_arise.round_start": "[%s%d-%d honba] Your seat: %s",
   "gui.riichi_arise.lobby.playing": "Game in progress",
   "gui.riichi_arise.lobby.finished": "Game finished (right-click the table to queue again)",

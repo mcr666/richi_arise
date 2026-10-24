@@ -125,8 +125,14 @@ public class RiichiGame {
 		for (int seat = 0; seat < 4; seat++) {
 			boolean ai = st.aiSeat[seat];
 			String uuid = st.players[seat] == null ? RiichiBot.aiUuid(seat) : st.players[seat];
-			String pname = (st.players[seat] != null && st.npcUuids.contains(st.players[seat]))
-				? participantNameOf(uuid) : (ai ? aiSeatName(seat) : nameOf(uuid));
+			String pname;
+			// 外部程序（net 接入）座位：名字取 externalNames（join 时登记），否则退回 uuid 前 8 位
+			if (st.players[seat] != null && st.externalUuids.contains(st.players[seat]))
+				pname = st.externalNames.getOrDefault(uuid, nameOf(uuid));
+			else if (st.players[seat] != null && st.npcUuids.contains(st.players[seat]))
+				pname = participantNameOf(uuid);
+			else
+				pname = ai ? aiSeatName(seat) : nameOf(uuid);
 			ps[seat] = new RiichiPlayer(seat, uuid, pname, ai, st.points[seat]);
 		}
 	}
@@ -355,6 +361,11 @@ public class RiichiGame {
 		int kakan = findKakan(seat);
 		if (kakan >= 0)
 			opts.add("kakan:" + kakan);
+		// 外部程序（net 接入）座位：无 ServerPlayer，回合选项改由 net 层推送（含手牌）
+		if (st.externalUuids.contains(ps[seat].uuid)) {
+			mcr.riichi_arise.net.RichiNetManager.pushYourTurn(this, seat, opts);
+			return;
+		}
 		if (ps[seat].ai)
 			return;
 		ServerPlayer p = st.playerOf(level, seat);
@@ -549,16 +560,21 @@ public class RiichiGame {
 				claimOptions[seat] = opts;
 				if (!ps[seat].ai) {
 					anyHumanOption = true;
-					ServerPlayer p = st.playerOf(level, seat);
-					if (p != null) {
-						mcr.riichi_arise.network.MahjongGamePayloads.sendOptions(p, origin,
-								String.join(";", withClaimTile(opts)));
-						playOptionSound(p); // 待副露提示音：仅该玩家听得见（不公开谁可副露）
+					// 外部程序（net 接入）：无 ServerPlayer，响应选项由 net 层推送
+					if (st.externalUuids.contains(ps[seat].uuid)) {
+						mcr.riichi_arise.net.RichiNetManager.pushClaimOptions(this, seat, withClaimTile(opts));
+					} else {
+						ServerPlayer p = st.playerOf(level, seat);
+						if (p != null) {
+							mcr.riichi_arise.network.MahjongGamePayloads.sendOptions(p, origin,
+									String.join(";", withClaimTile(opts)));
+							playOptionSound(p); // 待副露提示音：仅该玩家听得见（不公开谁可副露）
+						}
+						// 等待倒计时只推给该家（不公开）：短考秒数 + 长考银行
+						sendClaimCountdown(seat,
+								RichiTableState.THINK_PRESETS[st.thinkIdx][0],
+								(st.longBank[seat] + 19) / 20);
 					}
-					// 等待倒计时只推给该家（不公开）：短考秒数 + 长考银行
-					sendClaimCountdown(seat,
-							RichiTableState.THINK_PRESETS[st.thinkIdx][0],
-							(st.longBank[seat] + 19) / 20);
 				}
 			}
 		}
@@ -1764,7 +1780,31 @@ public class RiichiGame {
 		int seat = seatOf(sp.getUUID().toString());
 		if (seat < 0)
 			return;
+		applyAction(seat, action, data);
+	}
+
+	/** 外部程序（net 端口接入）操作入口：按外部玩家 uuid 定位座位并执行动作。
+	 *  返回 false = 未入座或动作无效（供 net 层 ack）。 */
+	public boolean externalAction(String uuid, String action, String data) {
+		int seat = findSeat(uuid);
+		if (seat < 0)
+			return false;
+		applyAction(seat, action, data);
+		return true;
+	}
+
+	/** 按玩家 uuid 定位座位（外部程序用；-1 = 不在本局） */
+	public int findSeat(String uuid) {
+		return seatOf(uuid);
+	}
+
+	private void applyAction(int seat, String action, String data) {
 		switch (action) {
+			case "discard" -> {
+				// 外部程序打牌：data = 手牌下标（net 层已把牌面记法解析为下标）
+				if (turn == seat && waitingDiscard)
+					playerDiscard(seat, parseInt(data, -1));
+			}
 			case "chi" -> {
 				// data = "<组合索引>:<荣和牌>"（荣和牌仅客户端画牌面用）
 				String idxPart = data.contains(":") ? data.substring(0, data.indexOf(':')) : data;
@@ -1779,12 +1819,16 @@ public class RiichiGame {
 			}
 			case "riichi" -> {
 				if (turn == seat && waitingDiscard && canRiichi(seat) && !pendingRiichi) {
-					// 立直两段式：先宣言（清选项 HUD），玩家右键点选手牌确定打出哪张
+					// 立直两段式：先宣言（清选项 HUD），随后确定打出哪张（真人右键点牌 / 外部程序收 riichi_pick 后发 discard）
 					pendingRiichi = true;
-					ServerPlayer p = st.playerOf(level, seat);
-					if (p != null) {
-						mcr.riichi_arise.network.MahjongGamePayloads.sendOptions(p, origin, "");
-						p.displayClientMessage(Component.translatable("message.riichi_arise.riichi_pick"), true);
+					if (st.externalUuids.contains(ps[seat].uuid)) {
+						mcr.riichi_arise.net.RichiNetManager.pushRiichiPick(this, seat);
+					} else {
+						ServerPlayer p = st.playerOf(level, seat);
+						if (p != null) {
+							mcr.riichi_arise.network.MahjongGamePayloads.sendOptions(p, origin, "");
+							p.displayClientMessage(Component.translatable("message.riichi_arise.riichi_pick"), true);
+						}
 					}
 				}
 			}
@@ -1908,6 +1952,26 @@ public class RiichiGame {
 
 	public RiichiPlayer player(int seat) {
 		return ps[seat];
+	}
+
+	/** 桌角原点（net 层推送定位用） */
+	public net.minecraft.core.BlockPos origin() {
+		return origin;
+	}
+
+	/** 当前局庄家座位（net 层推算外部玩家自风用） */
+	public int gameDealerSeat() {
+		return dealerSeat();
+	}
+
+	/** 当前响应窗口的出牌家座位（net 层 claim_options 附带用；-1 = 无窗口） */
+	public int claimDiscarderSeat() {
+		return claimDiscarder;
+	}
+
+	/** 牌局状态（net 层读取渲染层数据源） */
+	public RichiTableState tableState() {
+		return st;
 	}
 
 	// ==================================================================
@@ -2356,6 +2420,7 @@ public class RiichiGame {
 		st.doraWall = MahjongTileNotation.format(wall.doraStackTiles());
 		st.revealedIndicators = wall.revealedIndicatorCount();
 		RichiTableSync.broadcast(level, origin);
+		mcr.riichi_arise.net.RichiNetManager.pushTableSnapshot(level, origin, st); // 内网订阅者快照同步
 	}
 
 	private static int parseInt(String s, int def) {
