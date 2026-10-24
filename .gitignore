@@ -1,6 +1,6 @@
 # Whitelist mode
 /*
 !/src/
-!/README.md
 !/.gitignore
+/README.md
 
