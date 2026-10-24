@@ -294,6 +294,7 @@ public final class MahjongLobby {
 		st.phase = RichiTableState.PHASE_PLAYING;
 		st.avatarsDirty = true;
 		FengPanBlock.resolveAvatars(level, st);
+		st.avatarsDirty = false; // 开局已解析完毕：终局时不要重算（重算会换随机名/皮肤 UUID，客户端据此重建假玩家 → 形象突然位移）
 		st.honba = 0;
 		// 东风战单局：每局点数重置
 		java.util.Arrays.fill(st.points, 25000);
@@ -409,6 +410,76 @@ public final class MahjongLobby {
 	}
 
 	// ==================================================================
+	// 外部程序（net 端口接入）玩家
+	// ==================================================================
+
+	/**
+	 * 外部程序玩家加入指定桌等候队列（net 层 join 调用；无 ServerPlayer/实体）。
+	 * 占据方式与真人相同（队列 UUID），额外登记 externalUuids/externalNames；
+	 * 满员时与 NPC 一样顶替 AI 预约或队内参牌者。对局中不可加入。
+	 */
+	public static boolean externalJoinTable(ServerLevel level, BlockPos origin, String uuid, String name) {
+		RichiTableState st = RichiTableManager.get(origin);
+		if (st == null || !(level.getBlockState(origin).getBlock() instanceof FengPanBlock)
+				|| st.phase == RichiTableState.PHASE_PLAYING || st.queue.contains(uuid)
+				|| st.externalUuids.contains(uuid))
+			return false;
+		if (st.queue.size() + aiCount(st.reservedAI) >= 4) {
+			int freed = -1;
+			for (int seat = 0; seat < 4 && freed < 0; seat++)
+				if (st.reservedAI[seat])
+					freed = seat;
+			if (freed >= 0) {
+				st.reservedAI[freed] = false;
+			} else {
+				for (String q : new ArrayList<>(st.queue))
+					if (st.npcUuids.contains(q)) {
+						st.queue.remove(q);
+						Entity e = level.getEntity(java.util.UUID.fromString(q));
+						MahjongParticipant p = e == null ? null : MahjongParticipantRegistry.of(e);
+						if (p != null)
+							p.unpin();
+						break;
+					}
+				if (st.queue.size() + aiCount(st.reservedAI) >= 4)
+					return false;
+			}
+		}
+		st.queue.add(uuid);
+		st.externalUuids.add(uuid);
+		st.externalNames.put(uuid, name);
+		updateQueueDisplay(level, origin, st);
+		broadcastSync(level, origin, st);
+		return true;
+	}
+
+	/** 外部程序玩家离开牌局/队列（net 层断开或 leave 调用）：对局中座位由 AI 接管，等待阶段清空座位 */
+	public static void externalLeaveTable(ServerLevel level, BlockPos origin, String uuid) {
+		RichiTableState st = RichiTableManager.get(origin);
+		if (st == null)
+			return;
+		boolean dirty = st.queue.remove(uuid);
+		st.externalUuids.remove(uuid);
+		st.externalNames.remove(uuid);
+		for (int seat = 0; seat < 4; seat++) {
+			if (!uuid.equals(st.players[seat]))
+				continue;
+			if (st.phase == RichiTableState.PHASE_PLAYING && !st.aiSeat[seat]) {
+				var game = RichiTableManager.getGame(origin);
+				if (game != null)
+					game.makeAI(seat); // 对局中断开：座位由 AI 接管
+			} else if (st.phase != RichiTableState.PHASE_PLAYING) {
+				st.players[seat] = null;
+			}
+			dirty = true;
+		}
+		if (dirty) {
+			updateQueueDisplay(level, origin, st);
+			broadcastSync(level, origin, st);
+		}
+	}
+
+	// ==================================================================
 	// 服务端 Marker 代理：每个 AI 座位一个 Marker 实体，可被选择器选中/tp
 	// ==================================================================
 
@@ -466,7 +537,8 @@ public final class MahjongLobby {
 		}
 	}
 
-	/** 某座位是否需要 AI Marker：对局中 aiSeat（参牌者除外）；等待/终局阶段 reservedAI（与座位展示一致，终局未清桌也能管理） */
+	/** 某座位是否需要 AI Marker：对局中 aiSeat（参牌者除外）；等待/终局阶段 = 本局 AI 座位或下一局预约
+	 *  （终局未清桌时本局 AI 的标记不能凭空消失/换座，否则看起来像形象位移） */
 	private static boolean needsAiMarker(RichiTableState st, int seat) {
 		if (st.phase == RichiTableState.PHASE_PLAYING) {
 			// 参牌者（女仆/NPC）座位：真实实体钉在座位，无需 AI Marker 代理
@@ -474,8 +546,7 @@ public final class MahjongLobby {
 				return false;
 			return st.aiSeat[seat];
 		}
-		// 等待/终局阶段：reservedAI（queue 里的 UUID 开局才分配到 players[]）
-		return st.reservedAI[seat];
+		return st.aiSeat[seat] || st.reservedAI[seat];
 	}
 
 	/** 把四位玩家传送到对应座位外侧站位（面向桌心）：开局随机入座后与每局开始时调用 */

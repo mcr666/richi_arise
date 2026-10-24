@@ -157,4 +157,10 @@ public class MahjongTicker {
 			mcr.riichi_arise.game.MahjongLobby.handlePlayerLeave(event.getEntity().getServer(),
 					event.getEntity().getStringUUID());
 	}
+
+	/** 服务端停止：关闭内网接入端口（net 模块） */
+	@SubscribeEvent
+	public static void onServerStopping(net.neoforged.neoforge.event.server.ServerStoppingEvent event) {
+		mcr.riichi_arise.net.RichiNetManager.onServerStopping();
+	}
 }

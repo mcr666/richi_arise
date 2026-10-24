@@ -1,0 +1,17 @@
+{
+	"parent": "minecraft:block/block",
+	"render_type": "minecraft:cutout",
+	"textures": {
+		"0": "riichi_arise:item/fengpan",
+		"particle": "riichi_arise:item/fengpan"
+	},
+	"elements": [
+		{
+			"from": [0, 0, 0],
+			"to": [16, 1, 16],
+			"faces": {
+				"up": { "texture": "#0", "uv": [0, 0, 16, 16] }
+			}
+		}
+	]
+}

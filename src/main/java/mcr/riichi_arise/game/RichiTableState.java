@@ -76,6 +76,11 @@ public class RichiTableState {
 	public final java.util.Set<String> npcUuids = new java.util.HashSet<>();
 	/** 每桌可容纳的参牌者（NPC/女仆等）上限：放开多女仆，默认最多 3，至少留 1 个真人座位（可调整） */
 	public static final int MAX_NPC_SEATS = 3;
+	/** 外部程序（net 端口接入）玩家 UUID（类似 npcUuids）：对局中 aiSeat=false，操作经 net 层转发，
+	 *  客户端无对应 ServerPlayer，仅作为数据源参与；观战者视角该座位无真实实体（仅显示名字） */
+	public final java.util.Set<String> externalUuids = new java.util.HashSet<>();
+	/** 外部玩家显示名：uuid → 名字（join 时设置，构造 RiichiPlayer 用） */
+	public final java.util.Map<String, String> externalNames = new java.util.HashMap<>();
 	/** 服务端 Marker 代理实体：每个 AI 座位对应一个 Marker，可被选择器选中/tp；key=座位 0..3，value=实体 UUID */
 	public final java.util.Map<Integer, java.util.UUID> aiMarkerUuids = new java.util.HashMap<>();
 	/** 管理界面预约的 AI 座位（等待阶段设置，开局时该座位固定安排 AI） */

@@ -47,12 +47,17 @@ public final class VoicePlayer {
 	private static SourceDataLine line;
 	private static AudioFormat lineFormat;
 
-	/** 一次播放请求：音频流 + 其代次 */
-	private record Job(InputStream in, long gen) {
+	/** 一次播放请求：音频流 + 其代次 + 播完回调（被新语音打断则不回调；可为 null） */
+	private record Job(InputStream in, long gen, Runnable onDone) {
 	}
 
 	/** 播报某角色某事件的语音；无可用音频（文件缺失/未下载）时写日志并跳过 */
 	public static void play(String charId, VoiceEvents ev) {
+		play(charId, ev, null);
+	}
+
+	/** 同上；语音自然播完后回调 onDone（播放线程调用） */
+	public static void play(String charId, VoiceEvents ev, Runnable onDone) {
 		if (charId == null || charId.isEmpty())
 			return;
 		InputStream in = VoiceCache.open(charId, ev);
@@ -65,7 +70,29 @@ public final class VoicePlayer {
 		synchronized (PENDING) {
 			while (!PENDING.isEmpty())
 				closeQuietly(PENDING.poll().in()); // 丢弃未播的积压
-			PENDING.add(new Job(in, gen));
+			PENDING.add(new Job(in, gen, onDone));
+			PENDING.notifyAll();
+		}
+		startWorker();
+	}
+
+	/**
+	 * 报番语音：追加到播放队列尾部（不丢积压、不打断当前播报），按入队顺序接续播放。
+	 * 音频缺失时静默跳过。随后的 {@link #play} 会递增代次并清空积压，即新 act 语音/清场会打断报番。
+	 */
+	public static void enqueue(String charId, String fanKey) {
+		enqueue(charId, fanKey, null);
+	}
+
+	/** 同上；该条语音自然播完后回调 onDone（播放线程调用，被新语音打断则不回调） */
+	public static void enqueue(String charId, String fanKey, Runnable onDone) {
+		if (charId == null || charId.isEmpty() || fanKey == null || fanKey.isEmpty())
+			return;
+		InputStream in = VoiceCache.openFan(charId, fanKey);
+		if (in == null)
+			return;
+		synchronized (PENDING) {
+			PENDING.add(new Job(in, generation, onDone));
 			PENDING.notifyAll();
 		}
 		startWorker();
@@ -163,7 +190,8 @@ public final class VoicePlayer {
 				job = PENDING.poll();
 			}
 			try {
-				decodeAndWrite(job);
+				if (decodeAndWrite(job) && job.onDone() != null)
+					job.onDone().run();
 			} catch (Throwable e) {
 				LogUtils.getLogger().warn("[voice] 播放失败: {}", e.toString());
 			} finally {
@@ -172,14 +200,14 @@ public final class VoicePlayer {
 		}
 	}
 
-	/** 解码 mp3 逐帧写入常驻音频行；被新播放取代（代次变化）时立即停止 */
-	private static void decodeAndWrite(Job job) throws Exception {
+	/** 解码 mp3 逐帧写入常驻音频行；被新播放取代（代次变化）时中断。完整播完返回 true（供完成回调） */
+	private static boolean decodeAndWrite(Job job) throws Exception {
 		Bitstream bitstream = new Bitstream(new BufferedInputStream(job.in(), 8192));
 		try {
 			Decoder decoder = new Decoder();
 			for (;;) {
 				if (generation != job.gen())
-					return;
+					return false;
 				Header header = bitstream.readFrame();
 				if (header == null)
 					break;
@@ -196,6 +224,7 @@ public final class VoicePlayer {
 			SourceDataLine out = line;
 			if (out != null && generation == job.gen())
 				out.drain();
+			return generation == job.gen();
 		} finally {
 			try {
 				bitstream.close();

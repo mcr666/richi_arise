@@ -21,7 +21,21 @@ public final class VoiceClient {
 		String voiceId = sync.seatVoices()[seat];
 		if (voiceId == null || voiceId.isEmpty())
 			return;
-		VoicePlayer.play(voiceId, VoiceEvents.byCode(event));
+		VoiceEvents ev = VoiceEvents.byCode(event);
+		// 和牌 act 语音播完后报番界面显现第一个役种（无报番任务时 no-op）
+		boolean win = ev == VoiceEvents.RON || ev == VoiceEvents.TUMO;
+		VoicePlayer.play(voiceId, ev, win ? FanAnnouncer::actDone : null);
+	}
+
+	/** 收到 S→C 报番事件：在该座位的 act 语音之后按役种顺序追加播报（无报番音频的角色静默跳过） */
+	public static void onFanEvent(long originPacked, int seat, java.util.List<String> yakuKeys) {
+		MahjongLobbyPayloads.LobbySync sync = MahjongLobbyPayloads.CLIENT_SYNC.get(originPacked);
+		if (sync == null || sync.seatVoices() == null || seat < 0 || seat >= sync.seatVoices().length)
+			return;
+		String voiceId = sync.seatVoices()[seat];
+		if (voiceId == null || voiceId.isEmpty())
+			return;
+		YakuVoices.enqueue(voiceId, yakuKeys);
 	}
 
 	/** 对局开始：确保当前桌所有入座玩家的语音已缓存（客户端本地缓存） */

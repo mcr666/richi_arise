@@ -30,7 +30,7 @@ import it.unimi.dsi.fastutil.ints.IntObjectImmutablePair;
 
 import mcr.riichi_arise.network.*;
 import mcr.riichi_arise.compat.TlmCompatBridge;
-import mcr.riichi_arise.game.RichiGameRules;
+
 
 @Mod("riichi_arise")
 public class RichiiAriseMod {
@@ -48,6 +48,7 @@ public class RichiiAriseMod {
 		// End of user code block mod constructor
 		// 触发游戏规则静态注册（引用静态字段才会执行 <clinit>；class.getName() 仅加载类不初始化）
 		java.util.Objects.requireNonNull(RichiGameRules.USE_AKOCHAN, "akochan gamerule");
+		java.util.Objects.requireNonNull(RichiGameRules.AUTO_OPEN_NET_PORT, "net gamerule");
 		NeoForge.EVENT_BUS.register(this);
 		modEventBus.addListener(this::registerNetworking);
 		// TouhouLittleMaid 联动（软依赖）：女仆可参与麻雀牌局；未安装时全部联动逻辑静默跳过。
@@ -72,6 +73,7 @@ public class RichiiAriseMod {
 		MahjongTablePayload.register();
 		PaipuPayload.register();
 		VoicePayloads.register();
+		MahjongSettingsPayloads.register();
 
 		// Start of user code block mod init
 		// End of user code block mod init
@@ -119,5 +121,15 @@ public class RichiiAriseMod {
 		while (!workQueue.isEmpty() && currentTick >= workQueue.peek().getTick()) {
 			workQueue.poll().run();
 		}
+		// 内网端口自动开启（gamerule autoOpenNetPort）：每 2 秒检测一次，启用即自动开启，否则仅手动命令开启
+		netCheckTicks++;
+		if (netCheckTicks % 40 == 0
+				&& event.getServer().getGameRules().getBoolean(RichiGameRules.AUTO_OPEN_NET_PORT)
+				&& !mcr.riichi_arise.net.RichiNetManager.isRunning())
+			mcr.riichi_arise.net.RichiNetManager.start(event.getServer(),
+					mcr.riichi_arise.net.RichiNetConfig.PORT, mcr.riichi_arise.net.RichiNetConfig.BIND);
 	}
+
+	/** 内网端口自动开启检测节拍 */
+	private static int netCheckTicks = 0;
 }

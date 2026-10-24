@@ -7,6 +7,7 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.core.registries.Registries;
 
 import mcr.riichi_arise.block.FengPanBlock;
+import mcr.riichi_arise.block.FengPanSmallBlock;
 import mcr.riichi_arise.block.MahjongTileBlock;
 
 /**
@@ -31,5 +32,14 @@ public class MahjongBlocks {
 								.strength(3.0f) // 与信标一致：任意工具同速挖掘、不要求正确工具掉落
 								.sound(net.minecraft.world.level.block.SoundType.GLASS)
 								.pushReaction(net.minecraft.world.level.material.PushReaction.BLOCK) // 活塞/液体不可推毁
+								.noOcclusion()));
+
+	/** 小型风盘：单方块薄板变体（紧凑 3×3 牌桌），放置同样能创建牌局，但手牌/牌河/座位更靠内 */
+	public static final DeferredHolder<Block, Block> FENG_PAN_SMALL =
+			REGISTRY.register("fengpan_small", () -> new FengPanSmallBlock(
+					Block.Properties.of()
+								.strength(3.0f)
+								.sound(net.minecraft.world.level.block.SoundType.GLASS)
+								.pushReaction(net.minecraft.world.level.material.PushReaction.BLOCK)
 								.noOcclusion()));
 }

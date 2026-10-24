@@ -40,7 +40,6 @@ import mcr.riichi_arise.MahjongTileItem;
 import mcr.riichi_arise.block.FengPanBlock;
 import mcr.riichi_arise.game.MahjongTileNotation;
 import mcr.riichi_arise.game.RichiTableState;
-import mcr.riichi_arise.game.riichi.RiichiWall;
 import mcr.riichi_arise.network.MahjongTablePayload;
 import mcr.riichi_arise.render.DisplayEntityNbt;
 import mcr.riichi_arise.render.TableLayout;
@@ -74,6 +73,8 @@ public final class MahjongTableClient {
 		final Map<String, Entry> keyed = new HashMap<>();
 		final Map<Integer, Integer> handIds = new HashMap<>();
 		MahjongTablePayload.ViewMessage last;
+		int centerId = -1;    // 桌心信息悬浮文本实体 id（-1 = 无）
+		String centerSig = ""; // 桌心信息上次文本（内容变化就地 load 更新，不重建）
 	}
 
 	private static final Map<Long, TableRender> TABLES = new HashMap<>();
@@ -405,7 +406,8 @@ public final class MahjongTableClient {
 		} else {
 			diffApply(level, table, geom, st, msg, slots);
 		}
-		// 对局状态（中心信息 + 结算横幅）改由 boss 栏渲染（桌面中央不再生成悬浮文本）
+		// 对局状态：桌心悬浮文本显示局目/本场/牌山剩余；结算横幅由 boss 栏渲染
+		updateCenterInfo(level, table, geom.center(), st, msg);
 		updateBossBar(key, st, msg);
 		// AI 座位假玩家（回放合成包不驱动；回放结束后由最后真实包恢复）
 		if (!synthetic)
@@ -445,7 +447,7 @@ public final class MahjongTableClient {
 					// 等待阶段：预约后即出现，站在桌边随机位置（创建时定一次，不随同步重摆）；同座位标记向内收 0.25
 				? center.add(level.random.nextDouble() * 3.5 - 1.75, 0,
 						level.random.nextDouble() * 3.5 - 1.75)
-					: center.add(geom.outs()[seat].scale(TableLayout.SEAT_DISTANCE - 0.25)); // AI 形象比座位标记更靠内 0.25 格
+					: center.add(geom.outs()[seat].scale(geom.seatDist() - 0.25)); // AI 形象比座位标记更靠内 0.25 格
 			float yaw = (float) Math.toDegrees(Math.atan2(-(center.x - pos.x), center.z - pos.z));
 			UUID uuid = profileUuidOf(key, seat, msg);
 			// 显示名：默认角色 = 随机名、有角色 = 角色名（均由服务端解析下发）；缺失时才回退语言键
@@ -520,8 +522,9 @@ public final class MahjongTableClient {
 				protected net.minecraft.world.phys.Vec3 getPassengerAttachmentPoint(
 						net.minecraft.world.entity.Entity entity,
 						net.minecraft.world.entity.EntityDimensions dimensions, float f) {
-					// 骑乘点 = 载具上方 0.60 格：玩家中心在此、脚落载具所在表面（坐姿贴地但不沉入）
-					return new net.minecraft.world.phys.Vec3(0.0, 0.60, 0.0);
+					// 骑乘点 = 载具自身高度（模型高度偏移清零）：骑手实体 y 即载具 y，
+					// 坐姿模型按原版骑乘渲染下压（若下压后脚沉入地表，可把 0.60 改回）
+					return new net.minecraft.world.phys.Vec3(0.0, 0.0, 0.0);
 				}
 			};
 			seat.setId(--nextAvatarEntityId); // 客户端唯一负数 id
@@ -801,7 +804,9 @@ public final class MahjongTableClient {
 			if (e != null && !old.sig().equals(slot.sig())
 					&& TableLayout.KIND_HAND.equals(p.kind()) && p.axis() != null
 					&& isStandingHandSig(old.sig())) {
-				boolean isDrawn = st.drawnSeat == p.seat() && p.index() >= 0 && p.index() == st.hands[p.seat()].size() - 1;
+				// hands 已改为记号串：解析后按张数判断最后一张（刚摸的牌无倒下延迟）
+				boolean isDrawn = st.drawnSeat == p.seat() && p.index() >= 0
+						&& p.index() == mcr.riichi_arise.game.MahjongTileNotation.parse(st.hands[p.seat()]).size() - 1;
 				startFall(e, p, isDrawn ? 0 : FALL_TICKS);
 				fresh.put(slot.slotKey(), new Entry(e.getId(), slot.sig()));
 				if (p.index() >= 0)
@@ -990,24 +995,46 @@ public final class MahjongTableClient {
 		return e;
 	}
 
-	/** 中心信息文案：局目 / 当前宝牌 / 牌山枚数（单行，供 boss 栏显示） */
-	private static String infoText(RichiTableState st, MahjongTablePayload.ViewMessage msg) {
-		var dora = st.doraCodes();
-		int shown = Math.max(0, st.revealedIndicators);
-		StringBuilder doraNames = new StringBuilder();
-		for (int i = 0; i < shown && 2 * i + 1 < dora.size(); i++) {
-			if (doraNames.length() > 0)
-				doraNames.append(' ');
-			doraNames.append(MahjongTileItem.create(
-					RiichiWall.doraTileOf(dora.get(2 * i + 1))).getHoverName().getString());
+	/** 桌心信息悬浮文本文案（两行）：第一行"东一局 1本场"，第二行"剩余xx张" */
+	private static String centerText(RichiTableState st, MahjongTablePayload.ViewMessage msg) {
+		String wind = st.roundWind == 0 ? "东" : "南";
+		String roundNum = switch (st.round) {
+			case 1 -> "一";
+			case 2 -> "二";
+			case 3 -> "三";
+			default -> "四";
+		};
+		return wind + roundNum + "局 " + st.honba + "本场\n剩余" + msg.wallCount() + "张";
+	}
+
+	/**
+	 * 更新桌心信息悬浮文本：局目/本场/牌山剩余，置于桌心中央往上 1.5 格。
+	 * 文本不变 → 复用；文本变化 → 就地 load 更新 text NBT（不重建）；位置不符/实体丢失 → 重建。
+	 */
+	private static void updateCenterInfo(ClientLevel level, TableRender table, Vec3 center,
+			RichiTableState st, MahjongTablePayload.ViewMessage msg) {
+		String text = centerText(st, msg);
+		Vec3 pos = center.add(0, 1.5, 0); // 桌心中央往上 1.5 格
+		Entity e = table.centerId < 0 ? null : level.getEntity(table.centerId);
+		if (e instanceof TextDisplay td && !td.isRemoved()
+				&& td.distanceToSqr(pos.x, pos.y, pos.z) <= 1.0E-8) {
+			if (table.centerSig.equals(text))
+				return; // 完全不变：复用
+			// 文本变化：就地更新 NBT（Entity.load 需带 Pos 保持位置）
+			td.load(withPose(DisplayEntityNbt.textDisplay(level.registryAccess(), "richi_center", text),
+					new Vec3(td.getX(), td.getY(), td.getZ()), td.getYRot()));
+			table.centerSig = text;
+			return;
 		}
-		String doraName = doraNames.length() > 0 ? doraNames.toString() : "无";
-		return (st.roundWind == 0 ? "東" : "南") + st.round + "局　" + st.honba + "本场　宝牌: " + doraName
-				+ "　牌山: " + msg.wallCount() + " 枚";
+		if (e != null && !e.isRemoved())
+			e.discard();
+		Entity ne = spawnLocal(level, DisplayEntityNbt.textDisplay(level.registryAccess(), "richi_center", text), pos, 0);
+		table.centerId = ne == null ? -1 : ne.getId();
+		table.centerSig = text;
 	}
 
 	// ==================================================================
-	// 对局状态 → boss 栏（原桌心悬浮文本迁移至此）
+	// 对局状态 → boss 栏（仅结算横幅；局目/本场/牌山剩余已改桌心悬浮文本）
 	// ==================================================================
 
 	/** boss 栏所在的 BossHealthOverlay.events（包级私有，反射获取，缓存 Field） */
@@ -1032,26 +1059,28 @@ public final class MahjongTableClient {
 	}
 
 	/**
-	 * 更新本桌 boss 栏：显示局目/宝牌/牌山与和牌/结算横幅（进度 = 牌山剩余 / 70）。
-	 * 桌不可见/等待阶段由调用方传入移除。
+	 * 更新本桌 boss 栏：仅显示和牌/结算横幅（局目/本场/牌山剩余已改为桌心悬浮文本）。
+	 * 无横幅时移除 boss 栏；桌不可见/等待阶段由调用方传入移除。
 	 */
 	private static void updateBossBar(long key, RichiTableState st, MahjongTablePayload.ViewMessage msg) {
 		Map<UUID, LerpingBossEvent> events = bossEvents();
 		if (events == null)
 			return;
-		UUID id = bossBarUuid(key);
 		String banner = orEmpty(msg.bannerText());
-		String info = infoText(st, msg);
-		String text = banner.isEmpty() ? info : (banner + "　" + info);
+		if (banner.isEmpty()) {
+			clearBossBar(key);
+			return;
+		}
+		UUID id = bossBarUuid(key);
 		float progress = Mth.clamp(msg.wallCount() / 70.0f, 0.0f, 1.0f);
 		LerpingBossEvent bar = events.get(id);
 		if (bar == null) {
-			bar = new LerpingBossEvent(id, Component.literal(text), progress,
+			bar = new LerpingBossEvent(id, Component.literal(banner), progress,
 					net.minecraft.world.BossEvent.BossBarColor.BLUE,
 					net.minecraft.world.BossEvent.BossBarOverlay.PROGRESS, false, false, false);
 			events.put(id, bar);
 		} else {
-			bar.setName(Component.literal(text));
+			bar.setName(Component.literal(banner));
 			bar.setProgress(progress);
 		}
 	}
@@ -1102,6 +1131,12 @@ public final class MahjongTableClient {
 			Entity e = level.getEntity(en.entityId());
 			if (e != null && !e.isRemoved())
 				e.discard();
+		}
+		if (table.centerId >= 0) {
+			Entity ce = level.getEntity(table.centerId);
+			if (ce != null && !ce.isRemoved())
+				ce.discard();
+			table.centerId = -1;
 		}
 		table.keyed.clear();
 		table.handIds.clear();

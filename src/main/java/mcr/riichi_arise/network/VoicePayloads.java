@@ -1,5 +1,6 @@
 package mcr.riichi_arise.network;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import net.minecraft.core.BlockPos;
@@ -92,8 +93,61 @@ public class VoicePayloads {
 			net.neoforged.neoforge.network.PacketDistributor.sendToPlayer(p, pkt);
 	}
 
+	/**
+	 * S→C：某座位和牌后的报番役种列表（英文役名，按结算展示顺序）。
+	 * 客户端在该座位的 act 语音之后按序追加播报（仅内置角色有报番音频）。
+	 */
+	public record VoiceFanPayload(long originPacked, int seat, List<String> keys) implements CustomPacketPayload {
+		public static final Type<VoiceFanPayload> TYPE = new Type<>(
+				ResourceLocation.fromNamespaceAndPath(RichiiAriseMod.MODID, "richi_voice_fan"));
+
+		public static final StreamCodec<RegistryFriendlyByteBuf, VoiceFanPayload> STREAM_CODEC = StreamCodec.of(
+				(RegistryFriendlyByteBuf buf, VoiceFanPayload msg) -> {
+					buf.writeLong(msg.originPacked());
+					buf.writeVarInt(msg.seat());
+					buf.writeVarInt(msg.keys().size());
+					for (String k : msg.keys())
+						buf.writeUtf(k, 32);
+				},
+				(RegistryFriendlyByteBuf buf) -> {
+					long origin = buf.readLong();
+					int seat = buf.readVarInt();
+					int n = Math.min(buf.readVarInt(), 16);
+					List<String> keys = new ArrayList<>(n);
+					for (int i = 0; i < n && buf.isReadable(); i++)
+						keys.add(buf.readUtf(32));
+					return new VoiceFanPayload(origin, seat, keys);
+				});
+
+		@Override
+		public Type<VoiceFanPayload> type() {
+			return TYPE;
+		}
+
+		public static void handleData(final VoiceFanPayload message, final IPayloadContext context) {
+			if (context.flow() == PacketFlow.CLIENTBOUND) {
+				context.enqueueWork(() -> mcr.riichi_arise.voice.VoiceClient.onFanEvent(message.originPacked(),
+						message.seat(), message.keys()));
+			}
+		}
+	}
+
+	/** 服务端助手：把某座位的报番役种发给桌周附近（24 格）的玩家 */
+	public static void sendFan(ServerLevel level, BlockPos origin, int seat, List<String> keys) {
+		if (level == null || origin == null || keys == null || keys.isEmpty())
+			return;
+		AABB box = AABB.encapsulatingFullBlocks(origin, origin).inflate(24, 24, 24);
+		List<ServerPlayer> nearby = level.getEntitiesOfClass(ServerPlayer.class, box);
+		if (nearby.isEmpty())
+			return;
+		VoiceFanPayload pkt = new VoiceFanPayload(origin.asLong(), seat, keys);
+		for (ServerPlayer p : nearby)
+			net.neoforged.neoforge.network.PacketDistributor.sendToPlayer(p, pkt);
+	}
+
 	public static void register() {
 		RichiiAriseMod.addNetworkMessage(VoiceSetMessage.TYPE, VoiceSetMessage.STREAM_CODEC, VoiceSetMessage::handleData);
 		RichiiAriseMod.addNetworkMessage(VoiceEventPayload.TYPE, VoiceEventPayload.STREAM_CODEC, VoiceEventPayload::handleData);
+		RichiiAriseMod.addNetworkMessage(VoiceFanPayload.TYPE, VoiceFanPayload.STREAM_CODEC, VoiceFanPayload::handleData);
 	}
 }

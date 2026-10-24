@@ -126,11 +126,23 @@ public class FengPanBlock extends Block {
 				.relative(right.getOpposite(), state.getValue(TZ));
 	}
 
+	/** 表尺寸：正常风盘 2×2 = 2；小型单方块 = 1（几何/多方块/清理均按此分派） */
+	public static int tableSize(BlockState state) {
+		return state.getBlock() instanceof FengPanSmallBlock ? 1 : SIZE;
+	}
+
+	/** 是否为小型单方块风盘（紧凑 3×3 布局） */
+	public static boolean isSmall(BlockState state) {
+		return state.getBlock() instanceof FengPanSmallBlock;
+	}
+
 	/**
 	 * 旋转免疫的桌角还原：沿“前进/右向的反方向”走到头（结构 jigsaw 旋转只会变换 FACING，
 	 * 不会变换自定义 tx/tz——必须按世界邻居扫描定位原点，而不是信 NBT 里的 tx/tz）。
 	 */
 	public static BlockPos scanOrigin(LevelAccessor level, BlockState state, BlockPos pos) {
+		if (isSmall(state))
+			return pos; // 小型单方块：无 2×2 邻块，原点即自身
 		Direction forward = state.getValue(FACING);
 		Direction right = forward.getClockWise();
 		BlockPos p = pos;
@@ -146,6 +158,8 @@ public class FengPanBlock extends Block {
 	 * 按扫描到的原点反推每块的正确 tx/tz 并写回（UPDATE_CLIENTS，不触发邻居更新）。
 	 */
 	public static BlockPos normalizeTable(net.minecraft.server.level.ServerLevel level, BlockState state, BlockPos pos) {
+		if (isSmall(state))
+			return pos; // 小型单方块：无需 2×2 自愈
 		BlockPos origin = scanOrigin(level, state, pos);
 		BlockState originState = level.getBlockState(origin);
 		if (!(originState.getBlock() instanceof FengPanBlock))
@@ -166,8 +180,10 @@ public class FengPanBlock extends Block {
 		return origin;
 	}
 
-	/** 桌面几何中心（2x2 区域中点，f/r 可为负方向），y 取桌面顶面 */
+	/** 桌面几何中心（正常 2x2 区域中点；小型单方块取方块中心），y 取桌面顶面 */
 	public static Vec3 getTableCenter(BlockState state, BlockPos pos) {
+		if (isSmall(state))
+			return new Vec3(pos.getX() + 0.5, pos.getY() + 0.0625, pos.getZ() + 0.5);
 		BlockPos origin = getOrigin(state, pos);
 		Direction forward = state.getValue(FACING);
 		Direction right = forward.getClockWise();
@@ -183,15 +199,16 @@ public class FengPanBlock extends Block {
 		return net.minecraft.world.level.block.RenderShape.MODEL;
 	}
 
-	/** 切换整桌 4 块的 game_active（牌局开始/结束时调用，同步到客户端决定模型显隐） */
+	/** 切换整桌 4 块（小型单方块仅 1 块）的 game_active（牌局开始/结束时调用，同步到客户端决定模型显隐） */
 	public static void setGameActive(net.minecraft.server.level.ServerLevel level, BlockPos origin, boolean active) {
 		BlockState s = level.getBlockState(origin);
 		if (!(s.getBlock() instanceof FengPanBlock) || s.getValue(GAME_ACTIVE) == active)
 			return;
+		int sz = tableSize(s);
 		Direction forward = s.getValue(FACING);
 		Direction right = forward.getClockWise();
-		for (int i = 0; i < SIZE; i++) {
-			for (int j = 0; j < SIZE; j++) {
+		for (int i = 0; i < sz; i++) {
+			for (int j = 0; j < sz; j++) {
 				BlockPos p = origin.relative(forward, i).relative(right, j);
 				level.setBlock(p, level.getBlockState(p).setValue(GAME_ACTIVE, active), Block.UPDATE_ALL);
 			}
@@ -271,19 +288,21 @@ public class FengPanBlock extends Block {
 		normalizeTable(level, state, pos);
 	}
 
-	/** 类原版床：破坏任意部分，整桌消失且只掉落本次破坏的这个物品；桌面上的牌一并消失 */
+	/** 类原版床：破坏任意部分，整桌消失且只掉落本次破坏的这个物品；桌面上的牌一并消失（小型单方块仅清牌局、无兄弟块） */
 	@Override
 	public BlockState playerWillDestroy(Level level, BlockPos pos, BlockState state, Player player) {
 		if (!level.isClientSide) {
 			BlockPos origin = getOrigin(state, pos);
 			Direction forward = state.getValue(FACING);
 			killTableDisplays(level, origin, forward, forward.getClockWise());
-			Direction right = forward.getClockWise();
-			for (int i = 0; i < SIZE; i++) {
-				for (int j = 0; j < SIZE; j++) {
-					if (i == state.getValue(TX) && j == state.getValue(TZ))
-						continue;
-					level.removeBlock(pos.relative(forward, i - state.getValue(TX)).relative(right, j - state.getValue(TZ)), false);
+			if (!isSmall(state)) {
+				Direction right = forward.getClockWise();
+				for (int i = 0; i < SIZE; i++) {
+					for (int j = 0; j < SIZE; j++) {
+						if (i == state.getValue(TX) && j == state.getValue(TZ))
+							continue;
+						level.removeBlock(pos.relative(forward, i - state.getValue(TX)).relative(right, j - state.getValue(TZ)), false);
+					}
 				}
 			}
 		}
@@ -291,7 +310,7 @@ public class FengPanBlock extends Block {
 	}
 
 	/** 移除桌面范围内的所有牌显示实体与座位标记，并清除服务端牌局状态 */
-	private static void killTableDisplays(Level level, BlockPos origin, Direction forward, Direction right) {
+	protected static void killTableDisplays(Level level, BlockPos origin, Direction forward, Direction right) {
 		mcr.riichi_arise.game.RichiTableManager.remove(origin);
 		clearDisplays(level, origin, forward, right);
 		// 牌局结束：恢复风盘占位模型（仅服务端 Level 有效）
@@ -312,7 +331,8 @@ public class FengPanBlock extends Block {
 	}
 
 	private static void clearDisplays(Level level, BlockPos origin, Direction forward, Direction right) {
-		BlockPos farCorner = origin.relative(forward, SIZE - 1).relative(right, SIZE - 1);
+		int sz = tableSize(level.getBlockState(origin));
+		BlockPos farCorner = origin.relative(forward, sz - 1).relative(right, sz - 1);
 		AABB tableBox = AABB.encapsulatingFullBlocks(origin, farCorner).expandTowards(0, 1, 0)
 				.expandTowards(5, 4, 5).expandTowards(-5, 0, -5);
 		for (Entity e : level.getEntitiesOfClass(Entity.class, tableBox,
@@ -440,10 +460,10 @@ public class FengPanBlock extends Block {
 		return TableLayout.of(level, origin).center();
 	}
 
-	/** 座位站位（外侧 3.5 格，与座位标记同轴）：开局随机入座后传送玩家用 */
+	/** 座位站位（正常外侧 3.5 格 / 小型 2.5 格，与座位标记同轴）：开局随机入座后传送玩家用 */
 	public static Vec3 seatStandPos(net.minecraft.server.level.ServerLevel level, BlockPos origin, int seat) {
 		TableLayout.Geom geom = TableLayout.of(level, origin);
-		Vec3 p = geom.center().add(geom.outs()[seat].scale(TableLayout.SEAT_DISTANCE));
+		Vec3 p = geom.center().add(geom.outs()[seat].scale(geom.seatDist()));
 		return new Vec3(p.x, origin.getY(), p.z);
 	}
 
@@ -465,7 +485,8 @@ public class FengPanBlock extends Block {
 		if (players.isEmpty())
 			return;
 		double y = c.y + 0.05;
-		double half = 2.0; // 4x4 边框半边长
+		boolean small = isSmall(level.getBlockState(origin));
+		double half = small ? 1.5 : 2.0; // 桌边半边长：正常 4×4 边框 / 小型 3×3 边框
 		double u0 = (level.getGameTime() / 10 % 4) * 1.0; // 每轮沿周长推进 1 格
 		var particle = mcr.riichi_arise.MahjongParticleTypes.FENG_PAN_EDGE.get();
 		for (int i = 0; i < 8; i++) {
@@ -510,18 +531,20 @@ public class FengPanBlock extends Block {
 	 */
 	public static void resolveAvatars(net.minecraft.server.level.ServerLevel level, RichiTableState st) {
 		for (int seat = 0; seat < 4; seat++) {
-			// 等待/终局阶段按预约标记判定（aiSeat 开局才赋值），对局中按 aiSeat 判定（终局未清理也能管理下一局预约）
-			boolean ai = st.phase == RichiTableState.PHASE_PLAYING ? st.aiSeat[seat] : st.reservedAI[seat];
+			// 等待/终局阶段：预约 AI 或本局 AI 座位都算（终局未清桌时本局 AI 形象不应凭空消失）。
+			// 判定须与 RichiTableSync#sendTo 下发形象的条件保持一致，否则 form 被清空 → 客户端移除假玩家。
+			boolean ai = st.aiSeat[seat]
+					|| ((st.phase == RichiTableState.PHASE_WAITING
+							|| st.phase == RichiTableState.PHASE_FINISHED) && st.reservedAI[seat]);
 			if (!ai) {
 				st.aiAvatarForms[seat] = "";
 				st.aiAvatarNames[seat] = "";
 				st.aiAvatarSkins[seat] = "";
 				continue;
 			}
-			// NPC 参战座位（对局中）：不发假玩家形态（form=npc，客户端跳过渲染），
-			// 真实 NPC 实体由 MahjongLobby.pinNpcSeats 钉在座位站位
-			if (st.phase == RichiTableState.PHASE_PLAYING && st.players[seat] != null
-					&& st.npcUuids.contains(st.players[seat])) {
+			// NPC 参战座位：不发假玩家形态（form=npc，客户端跳过渲染），
+			// 真实 NPC 实体由 MahjongLobby.pinNpcSeats 钉在座位站位（终局解除钉位后仍是真实实体，同样不能画假玩家）
+			if (st.players[seat] != null && st.npcUuids.contains(st.players[seat])) {
 				st.aiAvatarForms[seat] = "npc";
 				st.aiAvatarNames[seat] = "Murmol";
 				st.aiAvatarSkins[seat] = "";
@@ -720,7 +743,8 @@ public class FengPanBlock extends Block {
 		String tag = TableLayout.handTag(seat, index);
 		Direction forward = level.getBlockState(origin).getValue(FACING);
 		Direction right = forward.getClockWise();
-		BlockPos farCorner = origin.relative(forward, SIZE - 1).relative(right, SIZE - 1);
+		int sz = tableSize(level.getBlockState(origin));
+		BlockPos farCorner = origin.relative(forward, sz - 1).relative(right, sz - 1);
 		AABB box = AABB.encapsulatingFullBlocks(origin, farCorner).expandTowards(0, 1, 0)
 				.expandTowards(5, 4, 5).expandTowards(-5, 0, -5);
 		for (Entity e : level.getEntitiesOfClass(Entity.class, box,

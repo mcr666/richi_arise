@@ -10,6 +10,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 
 import mcr.riichi_arise.block.FengPanBlock;
+import mcr.riichi_arise.block.FengPanSmallBlock;
 import mcr.riichi_arise.game.RichiTableState;
 
 /**
@@ -27,9 +28,9 @@ public final class TableLayout {
 	public static final String[] SEAT_NAMES = { "東", "南", "西", "北" };
 	/** 每家手牌张数（发牌 13 张） */
 	public static final int HAND_SIZE = 13;
-	/** 牌河每排张数（8 张一排） */
-	public static final int RIVER_COLS = 8;
-	/** 牌河排数上限（第 1 排最靠玩家、逐排向桌心；排满后不再新增排，多出的牌接在第 1 排右端向右续排，满 8 张后折上一排同侧） */
+	/** 牌河内排每排张数（6 张一排） */
+	public static final int RIVER_COLS = 6;
+	/** 牌河内排排数（内排三行每排 6 张、从最靠桌心逐排向玩家；第 4 排起不再换行，一直往右延伸） */
 	public static final int RIVER_ROWS = 3;
 	/** 牌河相邻两排排距（格，≈平躺牌长 0.2083 + 缝） */
 	public static final double RIVER_ROW_PITCH = 0.21;
@@ -72,8 +73,35 @@ public final class TableLayout {
 	public static final String KIND_STICK = "stick";
 	public static final String KIND_DORA = "dora";
 
-	/** 桌面几何：桌心 + f/r 方向 + 各家行中心/切线/朝外/左手方向 */
-	public record Geom(Vec3 center, Vec3 f, Vec3 r, Vec3[] rows, Vec3[] tangents, Vec3[] outs, Vec3[] lefts) {
+	/** 桌面几何：桌心 + f/r 方向 + 各家行中心/切线/朝外/左手方向 + 是否小型风盘（紧凑 3×3 布局） */
+	public record Geom(Vec3 center, Vec3 f, Vec3 r, Vec3[] rows, Vec3[] tangents, Vec3[] outs, Vec3[] lefts,
+			boolean small) {
+		/** 手牌行中心距桌心（正常 1.65 / 小型 3×3 = 1.5−EDGE_INSET = 1.15） */
+		public double edge() {
+			return (small ? 1.5 : 2.0) - EDGE_INSET;
+		}
+
+		/** 座位站位距桌心（正常 3.5 / 小型 2.5） */
+		public double seatDist() {
+			return small ? 2.5 : SEAT_DISTANCE;
+		}
+
+		/** 牌河最靠桌心一排行中心距桌心（小型收窄，保证副露行与牌河外排不重叠） */
+		public double riverDist() {
+			return small ? 0.28 : RIVER_DIST;
+		}
+
+		/** 副露区外缘上限（小型按表宽等比收窄，防相邻两家副露重叠） */
+		public double meldEdgeCap() {
+			return small ? 1.05 : MELD_EDGE_CAP;
+		}
+
+		/** 第 rowIdx 排（内排 0 = 最靠玩家）行中心距桌心：内排增大即向桌心推进；第 RIVER_ROWS 排起为溢出行，置于最外内排外侧 */
+		public double riverRowDist(int rowIdx) {
+			if (rowIdx >= RIVER_ROWS)
+				return riverDist() + RIVER_ROWS * RIVER_ROW_PITCH;
+			return riverDist() + (RIVER_ROWS - 1 - rowIdx) * RIVER_ROW_PITCH;
+		}
 	}
 
 	/**
@@ -93,12 +121,15 @@ public final class TableLayout {
 		Direction right = forward.getClockWise();
 		Vec3 f = new Vec3(forward.getStepX(), 0, forward.getStepZ());
 		Vec3 r = new Vec3(right.getStepX(), 0, right.getStepZ());
-		// 桌面基准 = 风盘方块顶面（y=origin.y）；桌心 = 2x2 区域几何中心：f/r 可为负方向（北/西）
-		Vec3 center = new Vec3(
-				origin.getX() + (forward.getStepX() + right.getStepX() + 1) / 2.0,
-				origin.getY(),
-				origin.getZ() + (forward.getStepZ() + right.getStepZ() + 1) / 2.0);
-		double edge = 2.0 - EDGE_INSET; // 行中心距桌心 1.65（保持原 4x4 桌时期尺寸，不随 2x2 风盘缩小）
+		boolean small = anyState.getBlock() instanceof FengPanSmallBlock;
+		// 桌面基准 = 风盘方块顶面（y=origin.y）；桌心：2x2 风盘取区域几何中心、小型单方块取方块中心
+		Vec3 center = small
+				? new Vec3(origin.getX() + 0.5, origin.getY(), origin.getZ() + 0.5)
+				: new Vec3(
+						origin.getX() + (forward.getStepX() + right.getStepX() + 1) / 2.0,
+						origin.getY(),
+						origin.getZ() + (forward.getStepZ() + right.getStepZ() + 1) / 2.0);
+		double edge = (small ? 1.5 : 2.0) - EDGE_INSET; // 行中心距桌心：正常 1.65（4×4 尺度）/ 小型 1.15（3×3 桌）
 		Vec3[] rows = { center.subtract(f.scale(edge)), center.add(r.scale(edge)),
 				center.add(f.scale(edge)), center.subtract(r.scale(edge)) };
 		Vec3[] tangents = { r, f, r, f }; // 行中心沿 f/r 偏移，牌列沿切线（另一轴）展开
@@ -108,7 +139,7 @@ public final class TableLayout {
 		Vec3[] lefts = new Vec3[4];
 		for (int h = 0; h < 4; h++)
 			lefts[h] = new Vec3(-outs[h].z, 0, outs[h].x);
-		return new Geom(center, f, r, rows, tangents, outs, lefts);
+		return new Geom(center, f, r, rows, tangents, outs, lefts, small);
 	}
 
 	/**
@@ -127,39 +158,32 @@ public final class TableLayout {
 	}
 
 	/**
-	 * 牌河第 index 张所在排：0 = 最靠玩家（第 1 排），RIVER_ROWS-1 = 最靠桌心。
-	 * 前 RIVER_ROWS*RIVER_COLS 张逐排向桌心排满；此后不再新增排，溢出的牌接在第 1 排（最靠玩家）右端继续向右，
-	 * 同一行累计排满 RIVER_COLS 张后折向上一排（更靠桌心）同一侧继续。
+	 * 牌河第 index 张所在排：内排三行 0 = 最靠玩家、RIVER_ROWS-1 = 最靠桌心，从内侧（靠桌心）往外排；
+	 * 前 RIVER_ROWS*RIVER_COLS（=18）张排满内排后不再新增排，第 4 排起统一返回 RIVER_ROWS，一直往右延伸。
 	 */
 	public static int riverRow(int index) {
-		int cap = RIVER_ROWS * RIVER_COLS;
-		return index < cap ? index / RIVER_COLS : (index - cap) % cap / RIVER_COLS;
+		if (index < RIVER_ROWS * RIVER_COLS)
+			return RIVER_ROWS - 1 - index / RIVER_COLS; // 内排：先内（靠桌心）后外（靠玩家）
+		return RIVER_ROWS; // 第 4 排起：不再换行
 	}
 
 	/**
-	 * 牌河第 index 张在本排中的列序（沿玩家视角自左向右，0 起）：常规 0..RIVER_COLS-1；
-	 * 溢出牌自第 RIVER_COLS 列起续增，每折满 RIVER_ROWS 排换下一列带。
+	 * 牌河第 index 张在本排中的列序（沿玩家视角自左向右，0 起）：内排 0..RIVER_COLS-1；
+	 * 第 4 排起自第 RIVER_COLS 列续增，一直往右（不再折排）。
 	 */
 	public static int riverCol(int index) {
-		int cap = RIVER_ROWS * RIVER_COLS;
-		if (index < cap)
+		if (index < RIVER_ROWS * RIVER_COLS)
 			return index % RIVER_COLS;
-		int o = index - cap;
-		return RIVER_COLS + o / cap * RIVER_COLS + o % RIVER_COLS;
-	}
-
-	/** 第 rowIdx 排（0 = 最靠玩家）牌行中心距桌心（格）：排序增大即向桌心推进 */
-	public static double riverRowDist(int rowIdx) {
-		return RIVER_DIST + (RIVER_ROWS - 1 - rowIdx) * RIVER_ROW_PITCH;
+		return RIVER_COLS + (index - RIVER_ROWS * RIVER_COLS); // 第 4 排：一直往右
 	}
 
 	/**
-	 * 牌河第 index 张的桌面位置（每排 8 张、自最靠玩家一排起逐排向桌心、每排沿玩家视角自左向右排；
-	 * 排满 3 排后不再新增排，多出的牌接在第 1 排（最靠玩家）右端继续向右；结算粒子定位用）。
+	 * 牌河第 index 张的桌面位置（内排三行每排 6 张、自最靠桌心一排起逐排向玩家（从内往外）、每排沿玩家视角自左向右排；
+	 * 排满 18 张后第 4 排起不再换行，一直往右延伸；结算粒子定位用）。
 	 */
 	public static Vec3 riverTarget(Geom geom, int seat, int index) {
 		return geom.rows()[seat]
-				.subtract(geom.outs()[seat].scale(2.0 - EDGE_INSET - riverRowDist(riverRow(index))))
+				.subtract(geom.outs()[seat].scale(geom.edge() - geom.riverRowDist(riverRow(index))))
 				.add(geom.lefts()[seat].scale(((RIVER_COLS - 1) / 2.0 - riverCol(index)) * 0.17));
 	}
 
@@ -201,7 +225,7 @@ public final class TableLayout {
 		Vec3 center = geom.center();
 		Vec3 f = geom.f();
 		Vec3 r = geom.r();
-		double edge = 2.0 - EDGE_INSET; // 手牌行中心距桌心（与 of() 一致）
+		double edge = geom.edge(); // 手牌行中心距桌心（与 of() 一致：正常 1.65 / 小型 1.15）
 		double flatStep = 0.17;         // 平躺牌间距
 		Vec3[] rows = geom.rows();
 		Vec3[] tangents = geom.tangents();
@@ -210,9 +234,9 @@ public final class TableLayout {
 		for (int h = 0; h < 4; h++)
 			yRots[h] = (float) Math.toDegrees(Math.atan2(-outs[h].x, outs[h].z));
 
-		// 0) 座位标记：各家外侧 3.25 格（向桌心收 0.25）、上方 2 格处（文本由渲染方拼装）
+		// 0) 座位标记：各家外侧 2.75 格（向桌心收 0.25 + 再内收 0.5）、上方 2 格处（文本由渲染方拼装）
 		for (int h = 0; h < 4; h++) {
-			Vec3 labelPos = center.add(outs[h].scale(SEAT_DISTANCE - 0.25)).add(0, SEAT_HEIGHT, 0);
+			Vec3 labelPos = center.add(outs[h].scale(geom.seatDist() - 0.75)).add(0, SEAT_HEIGHT, 0);
 			out.add(new Placement(KIND_SEAT, labelPos, labelPos, -1, 0, null, true, h, -1, h * step));
 		}
 		// 1) 手牌：四家同时发牌（第 k 张四家一起出：delay = (4 + k*4 + h)*step）；选中牌升高 SELECT_LIFT
@@ -237,14 +261,14 @@ public final class TableLayout {
 			}
 		}
 		int dealIndex = 4 + HAND_SIZE * 4; // 手牌区占用 4 标签 + 52 张的调度序号
-		// 2) 牌河：每排 8 张、自最靠玩家一排起逐排向桌心、每排沿玩家视角自左向右排；
-		//    排满 3 排后不再新增排，多出的牌接在第 1 排（最靠玩家）右端向右续排，满 8 张后折上一排同侧（不重叠、不越桌边）；立直宣言牌横摆（长轴沿切线）
+		// 2) 牌河：内排三行每排 6 张、自最靠桌心一排起逐排向玩家（从内往外）、每排沿玩家视角自左向右排；
+		//    排满 18 张后第 4 排起不再换行、一直往右延伸（不重叠、不越桌边）；立直宣言牌横摆（长轴沿切线）
 		for (int h = 0; h < 4; h++) {
 			Vec3 tangent = tangents[h];
 			Vec3 riverDir = outs[h].scale(-1); // 长轴指向桌心
 			List<Integer> river = st.riverCodes(h);
 			for (int i = 0; i < river.size(); i++) {
-				Vec3 target = rows[h].subtract(outs[h].scale(edge - riverRowDist(riverRow(i))))
+				Vec3 target = rows[h].subtract(outs[h].scale(edge - geom.riverRowDist(riverRow(i))))
 						.add(geom.lefts()[h].scale(((RIVER_COLS - 1) / 2.0 - riverCol(i)) * flatStep));
 				boolean riichiSide = i == st.riichiRiverIdx[h];
 				Vec3 dir = riichiSide ? tangent : riverDir;
@@ -253,68 +277,108 @@ public final class TableLayout {
 			}
 		}
 		// 3) 副露（吃碰杠）：副露行向桌心内收（与手牌行错开带），组序从外向内游标式排开——
-		//    每组按实际占宽（纵牌展开 + 声明牌伸出方向）推进，外缘不超过 MELD_EDGE_CAP，
+		//    每组按实际占宽（平躺自家牌 + 声明牌伸出方向）推进，外缘不超过 MELD_EDGE_CAP，
 		//    保证相邻两家副露在桌角处永不重叠；同一家的多组也不会因声明牌相对而压叠。
-		//    整组朝向与横牌（声明牌）端位对应喂牌家座位——
-		//    上家（左手边）横牌在组左端、下家（右手边）在右端、对家（对面）整组旋转 90° 朝桌心展开且横牌在朝心一端、
-		//    自杠无来源方向取右端；横牌与相邻纵牌边距 = 组内牌缝（flatStep - 牌宽），紧贴无豁口。
+		//    所有副露整体靠右排列（游标自外缘内收），新的副露永远紧挨上一组，不插手牌中间。
+		//    组内全部平躺：自家牌长轴垂直副露行（水平面内"竖着"、朝桌心，同牌河牌）；
+		//    声明牌（副露串末尾那张，见 RiichiPlayer.displayOrder）长轴指向来源玩家——
+		//    上家（rel3/左手）横牌在组最左、下家（rel1/右手）在最右、对家（rel2/对面）在中间且长轴朝桌心。
+		//    暗杠（来源自己且 4 张）无声明牌：4 张平躺横排，两端扣盖（背面朝上）、中间两张亮明（正面朝上）。
 		for (int h = 0; h < 4; h++) {
-			Vec3 tangent = tangents[h];
 			Vec3 facingCenter = outs[h].scale(-1);
-			Vec3 playerRight = new Vec3(-facingCenter.z, 0, facingCenter.x); // 面朝桌心时的右手方向
+			Vec3 playerRight = new Vec3(-facingCenter.z, 0, facingCenter.x); // 面朝桌心时的右手（副露行 / 手牌向右延伸）
+			Vec3 playerLeft = playerRight.scale(-1);
 			List<RichiTableState.MeldGroup> groups = st.meldGroupInfos(h);
 			Vec3 meldRow = rows[h].subtract(outs[h].scale(MELD_ROW_INSET));
-			double cursor = MELD_EDGE_CAP; // 游标：当前可用外缘（沿 playerRight 的标量）
+			double halfW = TILE_WIDTH / 2.0;
+			double halfL = TILE_LONG / 2.0;
+			double protrude = halfL - halfW; // 横放声明牌沿行伸出量（长轴与立牌同向时占用更长）
+			double cursor = geom.meldEdgeCap();   // 游标：当前可用外缘（沿 playerRight 的标量）
 			for (int g = 0; g < groups.size(); g++) {
 				List<Integer> meld = groups.get(g).codes();
 				if (meld.isEmpty())
 					continue;
 				int fromSeat = groups.get(g).fromSeat();
 				int rel = fromSeat < 0 ? 0 : (fromSeat - h + 4) % 4;
-				boolean toimen = rel == 2; // 喂牌家在对面：整组旋转 90° 朝桌心方向展开
-				// 暗杠（来源 = 自己 且 4 张）：四张平行平躺，中间两张牌面朝下（盖牌）
-				boolean ankan = fromSeat == h && meld.size() == 4;
-				int flatCount = Math.max(0, meld.size() - 1);
-				// 声明牌沿 playerRight 的伸出方向：+1 向外（桌角侧）、-1 向内、0 无（对家/暗杠，伸出垂直于轴）
-				double claimDir = toimen || ankan ? 0
-						: (rel == 1 || rel == 0 ? 1 : -1);
-				double flush = (flatCount + 1) / 2.0 * flatStep + (TILE_LONG - TILE_WIDTH) / 2.0;
-				// 组沿轴各侧占宽（中心到外缘）：纵牌展开 + 半牌宽；声明牌伸出侧为 flush + 半牌长
-				double flatHalf = toimen ? TILE_LONG / 2
-						: (flatCount - 1) / 2.0 * flatStep + TILE_WIDTH / 2;
-				double claimHalf = flush + TILE_LONG / 2;
-				double outer = claimDir > 0 ? claimHalf : flatHalf;
-				double inner = claimDir < 0 ? claimHalf : flatHalf;
+				int n = meld.size();
+				boolean ankan = fromSeat == h && n == 4; // 暗杠：来源自己且 4 张
+				// 声明牌横放位置：上家(rel3)最左、对家(rel2)中间、下家(rel1)最右；
+				// 横放长轴指向来源玩家：上家朝左、下家朝右、对家朝桌心。
+				int flatPos = -1;
+				Vec3 flatLong = null;
+				if (!ankan) {
+					flatPos = switch (rel) {
+						case 3 -> 0;                    // 上家：横牌在最左 [横][竖]..[竖]
+						case 1 -> n - 1;                // 下家：横牌在最右 [竖]..[竖][横]
+						default -> 1;                   // 对家：横牌在中间（3 张=第 2 位、4 张=中间偏左）
+					};
+					if (rel == 3) {
+						flatLong = playerLeft;          // 长轴朝左指向左侧上家
+					} else if (rel == 1) {
+						flatLong = playerRight;         // 长轴朝右指向右侧下家
+					} else {
+						flatLong = facingCenter;        // 长轴朝桌心指向对家（垂直副露行）
+					}
+				}
+				// 组沿行（playerRight）各侧半宽（中心到外缘），供游标避让（相邻组/相邻家不重叠）
+				double pitch = ankan ? flatStep : TILE_GAP;
+				double centerOff = (n - 1) / 2.0 * pitch;
+				double inner, outer;
+				if (ankan) {
+					inner = outer = centerOff + halfW;
+				} else if (rel == 3) {
+					inner = centerOff + halfL + protrude; // 横牌最左且向左伸出
+					outer = centerOff + halfW;
+				} else if (rel == 1) {
+					inner = centerOff + halfW;
+					outer = centerOff + halfL + protrude; // 横牌最右且向右伸出
+				} else {
+					inner = outer = centerOff + halfW;     // 对家横牌在中间、长轴垂直，无伸出
+				}
 				double c = cursor - outer; // 组中心标量
 				cursor = c - inner - MELD_GAP;
 				Vec3 groupCenter = meldRow.add(playerRight.scale(c));
-				Vec3 spread = toimen ? facingCenter : tangent;   // 纵牌展开方向 = 喂牌家方位
-				Vec3 flatLong = toimen ? tangent : facingCenter; // 纵牌长轴（垂直于展开方向）
+				// 每张牌沿 playerRight 的位置标量（相对 groupCenter；声明牌按伸出方向平移，避免压到邻家平躺牌）
+				double[] u = new double[n];
+				for (int j = 0; j < n; j++)
+					u[j] = (j - (n - 1) / 2.0) * pitch;
 				if (ankan) {
-					for (int j = 0; j < 4; j++) {
-						Vec3 target = groupCenter.add(spread.scale((j - 1.5) * flatStep));
-						boolean faceUp = j == 0 || j == 3; // 两端明牌，中间两张盖牌
+					for (int j = 0; j < n; j++) {
+						Vec3 target = groupCenter.add(playerRight.scale(u[j]));
+						boolean faceUp = j == 1 || j == 2; // 两端扣盖（背面朝上），中间两张亮明（正面朝上）
 						out.add(new Placement(KIND_MELD, flatEntityPos(target, 0), target, meld.get(j),
-								flatYaw(flatLong), flatLong, faceUp, h, j, dealIndex++ * step));
+								flatYaw(facingCenter), facingCenter, faceUp, h, j, dealIndex++ * step));
 					}
 					continue;
 				}
-				for (int j = 0; j < flatCount; j++) {
-					Vec3 target = groupCenter.add(spread.scale((j - (flatCount - 1) / 2.0) * flatStep));
-					out.add(new Placement(KIND_MELD, flatEntityPos(target, 0), target, meld.get(j),
-							flatYaw(flatLong), flatLong, true, h, j, dealIndex++ * step));
+				if (rel == 3)
+					u[flatPos] -= protrude; // 上家横牌向左伸（紧贴邻家平躺牌，无豁口）
+				else if (rel == 1)
+					u[flatPos] += protrude; // 下家横牌向右伸
+				// 组内摆放序：声明牌（副露串末尾）放横位，其余自家牌按原序平躺
+				int[] order = new int[n];
+				order[flatPos] = n - 1;
+				for (int j = 0, oi = 0; j < n; j++)
+					if (j != flatPos)
+						order[j] = oi++;
+				for (int j = 0; j < n; j++) {
+					Vec3 target = groupCenter.add(playerRight.scale(u[j]));
+					if (j == flatPos) {
+						// 声明牌：平躺，长轴指向来源玩家（上家朝左/下家朝右/对家朝桌心）
+						out.add(new Placement(KIND_MELD, flatEntityPos(target, 0), target, meld.get(order[j]),
+								flatYaw(flatLong), flatLong, true, h, j, dealIndex++ * step));
+					} else {
+						// 自家牌：平躺，长轴垂直副露行（水平面内"竖着"、朝桌心）
+						out.add(new Placement(KIND_MELD, flatEntityPos(target, 0), target, meld.get(order[j]),
+								flatYaw(facingCenter), facingCenter, true, h, j, dealIndex++ * step));
+					}
 				}
-				Vec3 claimedDir = toimen ? spread
-						: (claimDir > 0 ? playerRight : playerRight.scale(-1));
-				Vec3 claimedTarget = groupCenter.add(claimedDir.scale(flush));
-				out.add(new Placement(KIND_MELD, flatEntityPos(claimedTarget, 0), claimedTarget,
-						meld.get(meld.size() - 1), flatYaw(spread), spread, true, h, -1, dealIndex++ * step));
 			}
 		}
 		// 3.5) 立直点棒：牌河前面（比第一排牌河更靠桌心），长轴平行于手牌行，多根依次向牌河方向堆叠
 		for (int h = 0; h < 4; h++) {
 			for (int k = 0; k < st.riichiSticks[h]; k++) {
-				Vec3 stickPos = rows[h].subtract(outs[h].scale(edge - RIVER_DIST + 0.2 + k * 0.12));
+				Vec3 stickPos = rows[h].subtract(outs[h].scale(edge - geom.riverDist() + 0.2 + k * 0.12));
 				Vec3 toCenter = tangents[h];
 				out.add(new Placement(KIND_STICK,
 						new Vec3(stickPos.x, stickPos.y + 0.5 * TILE_SCALE, stickPos.z), stickPos,
