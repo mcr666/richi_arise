@@ -249,25 +249,29 @@ public final class MahjongLobby {
 			st.phase = RichiTableState.PHASE_WAITING; // 客户端按等待快照清掉桌面残影
 			FengPanBlock.clearDisplaysAt(level, origin);
 			RichiTableSync.broadcast(level, origin);
-				record Entry(String uuid, boolean ai) {
+				record Entry(String uuid, boolean ai, String avatarMode) {
 				}
 				java.util.List<Entry> entries = new ArrayList<>();
 				for (int seat = 0; seat < 4; seat++)
 					if (st.reservedAI[seat])
-						entries.add(new Entry(RiichiBot.aiUuid(seat), true));
+						entries.add(new Entry(RiichiBot.aiUuid(seat), true, st.aiAvatarModes[seat]));
 				for (String uuid : st.queue)
-					entries.add(new Entry(uuid, st.npcUuids.contains(uuid))); // NPC 排队视作 AI 座位
+					entries.add(new Entry(uuid, st.npcUuids.contains(uuid), null)); // NPC/女仆排队视作 AI 座位，但不带角色形象
 			// 每局随机洗牌入座：洗 4 个座位号，把入场者放进随机座位（避免单人/少人时永远坐东=庄家，也不按排队顺序）；
 			// 空位再补 AI。RandomSource 不兼容 Collections.shuffle，手写 Fisher-Yates。
+			// 剧本牌局（临时）：不洗座位——预约 AI 0/1/2 坐東南西、玩家坐北（三家先立直、玩家最后摸牌）
 			int[] seatOrder = { 0, 1, 2, 3 };
-			for (int i = seatOrder.length - 1; i > 0; i--) {
-				int j = level.random.nextInt(i + 1);
-				int t = seatOrder[i];
-				seatOrder[i] = seatOrder[j];
-				seatOrder[j] = t;
+			if (st.film == null) {
+				for (int i = seatOrder.length - 1; i > 0; i--) {
+					int j = level.random.nextInt(i + 1);
+					int t = seatOrder[i];
+					seatOrder[i] = seatOrder[j];
+					seatOrder[j] = t;
+				}
 			}
 			java.util.Arrays.fill(st.players, null);
 			java.util.Arrays.fill(st.aiSeat, false);
+			java.util.Arrays.fill(st.aiSeatModes, ""); // 本局座位角色：按洗牌结果重新写入（不改预约设置 aiAvatarModes）
 			int n = Math.min(entries.size(), 4);
 			for (int i = 0; i < n; i++) {
 				int seat = seatOrder[i];
@@ -279,6 +283,9 @@ public final class MahjongLobby {
 				else
 					st.players[seat] = en.uuid();
 				st.aiSeat[seat] = en.ai();
+				// 角色形象跟着 AI 本人换座位（洗牌后若仍按原座位取角色，新座位会掉成默认角色、原座位角色凭空消失）
+				if (en.ai() && en.avatarMode() != null)
+					st.aiSeatModes[seat] = en.avatarMode();
 			}
 			st.gamesStarted++;
 		// 空位补 AI
@@ -537,8 +544,8 @@ public final class MahjongLobby {
 		}
 	}
 
-	/** 某座位是否需要 AI Marker：对局中 aiSeat（参牌者除外）；等待/终局阶段 = 本局 AI 座位或下一局预约
-	 *  （终局未清桌时本局 AI 的标记不能凭空消失/换座，否则看起来像形象位移） */
+	/** 某座位是否需要 AI Marker：对局中/终局按本局 aiSeat（参牌者除外）；等待阶段按下一局预约。
+	 *  终局不能按预约判定——预约席是洗牌前的座位号，会在人类座位上多出名字标记。 */
 	private static boolean needsAiMarker(RichiTableState st, int seat) {
 		if (st.phase == RichiTableState.PHASE_PLAYING) {
 			// 参牌者（女仆/NPC）座位：真实实体钉在座位，无需 AI Marker 代理
@@ -546,7 +553,7 @@ public final class MahjongLobby {
 				return false;
 			return st.aiSeat[seat];
 		}
-		return st.aiSeat[seat] || st.reservedAI[seat];
+		return st.aiSeat[seat] || (st.phase == RichiTableState.PHASE_WAITING && st.reservedAI[seat]);
 	}
 
 	/** 把四位玩家传送到对应座位外侧站位（面向桌心）：开局随机入座后与每局开始时调用 */
@@ -835,7 +842,9 @@ public final class MahjongLobby {
 				String v = sd.getVoice(st.players[seat]);
 				voice = v == null ? "" : v;
 			} else if (st.aiSeat[seat]) {
-				voice = mcr.riichi_arise.game.riichi.AiCharacters.voice(st.aiAvatarModes[seat]);
+				// 语音跟随本局实际座位角色（洗牌后不能再用预约座位的设置）
+				String mode = st.phase == RichiTableState.PHASE_WAITING ? st.aiAvatarModes[seat] : st.aiSeatModes[seat];
+				voice = mcr.riichi_arise.game.riichi.AiCharacters.voice(mode);
 			}
 			seatVoices[seat] = voice;
 		}

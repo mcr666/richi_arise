@@ -46,9 +46,16 @@ public final class VoicePlayer {
 	/** 常驻音频行与格式（复用，避免每次播放重新初始化音频设备） */
 	private static SourceDataLine line;
 	private static AudioFormat lineFormat;
+	/** 主播放线程是否正在播一条语音（isBusy 判定用） */
+	private static volatile boolean playing;
+	/** 并行播放中的语音条数（多家和牌语音同时播） */
+	private static final java.util.concurrent.atomic.AtomicInteger CONCURRENT =
+			new java.util.concurrent.atomic.AtomicInteger();
+	/** 报番代次：清掉报番语音时递增，只中止报番类任务（不影响正在播的荣/自摸等 act 语音） */
+	private static volatile long fanToken;
 
-	/** 一次播放请求：音频流 + 其代次 + 播完回调（被新语音打断则不回调；可为 null） */
-	private record Job(InputStream in, long gen, Runnable onDone) {
+	/** 一次播放请求：音频流 + 其代次 + 是否报番类 + 报番代次 + 播完回调（被新语音打断则不回调；可为 null） */
+	private record Job(InputStream in, long gen, boolean fan, long fanToken, Runnable onDone) {
 	}
 
 	/** 播报某角色某事件的语音；无可用音频（文件缺失/未下载）时写日志并跳过 */
@@ -70,7 +77,7 @@ public final class VoicePlayer {
 		synchronized (PENDING) {
 			while (!PENDING.isEmpty())
 				closeQuietly(PENDING.poll().in()); // 丢弃未播的积压
-			PENDING.add(new Job(in, gen, onDone));
+			PENDING.add(new Job(in, gen, false, 0, onDone));
 			PENDING.notifyAll();
 		}
 		startWorker();
@@ -86,16 +93,123 @@ public final class VoicePlayer {
 
 	/** 同上；该条语音自然播完后回调 onDone（播放线程调用，被新语音打断则不回调） */
 	public static void enqueue(String charId, String fanKey, Runnable onDone) {
+		enqueueOrSkip(charId, fanKey, onDone);
+	}
+
+	/** 入队一条报番语音；音频缺失时返回 false（由调用方决定如何补齐进度） */
+	public static boolean enqueueOrSkip(String charId, String fanKey, Runnable onDone) {
 		if (charId == null || charId.isEmpty() || fanKey == null || fanKey.isEmpty())
-			return;
+			return false;
 		InputStream in = VoiceCache.openFan(charId, fanKey);
 		if (in == null)
-			return;
+			return false;
 		synchronized (PENDING) {
-			PENDING.add(new Job(in, generation, onDone));
+			PENDING.add(new Job(in, generation, true, fanToken, onDone));
 			PENDING.notifyAll();
 		}
 		startWorker();
+		return true;
+	}
+
+	/**
+	 * 清掉报番类语音：丢弃排队中的报番任务，并让正在播的那一条报番立即中止；
+	 * 正在播的荣/自摸等 act 语音不受影响（播放循环只对报番任务校验 {@link #fanToken}）。
+	 * 用于新一局报番开始前、结算界面关闭时清理残留（末尾宝牌/段位语音），避免它们排到番名前先响。
+	 */
+	public static void clearFan() {
+		fanToken++;
+		synchronized (PENDING) {
+			java.util.Iterator<Job> it = PENDING.iterator();
+			while (it.hasNext()) {
+				Job j = it.next();
+				if (j.fan()) {
+					it.remove();
+					closeQuietly(j.in());
+				}
+			}
+		}
+	}
+
+	/**
+	 * 与主播放并行播一条语音（多家荣和的"荣"语音同时播报）：独占一条音频行，由系统混音器叠加；
+	 * 不打断当前播放，但之后 play()/stopAll() 递增代次时立即中止。无音频时静默跳过。
+	 */
+	public static void playConcurrent(String charId, VoiceEvents ev) {
+		if (charId == null || charId.isEmpty())
+			return;
+		InputStream in = VoiceCache.open(charId, ev);
+		if (in == null) {
+			LogUtils.getLogger().warn("[voice] 无可用语音文件: {} {}（离线内置缺文件或在线未下载成功）",
+					charId, ev.act());
+			return;
+		}
+		long gen = generation;
+		CONCURRENT.incrementAndGet();
+		Thread t = new Thread(() -> {
+			try (InputStream src = in) {
+				playOwnLine(src, gen);
+			} catch (Throwable e) {
+				LogUtils.getLogger().warn("[voice] 并行播放失败: {}", e.toString());
+			} finally {
+				CONCURRENT.decrementAndGet();
+			}
+		}, "riichi-voice-concurrent");
+		t.setDaemon(true);
+		t.start();
+	}
+
+	/** 是否还有语音正在播/待播（结算界面延迟到和牌语音播完再打开用） */
+	public static boolean isBusy() {
+		if (playing || CONCURRENT.get() > 0)
+			return true;
+		synchronized (PENDING) {
+			return !PENDING.isEmpty();
+		}
+	}
+
+	/** 在独立音频行上解码播放（供并行播放；代次变化即中止） */
+	private static void playOwnLine(InputStream in, long gen) throws Exception {
+		Bitstream bitstream = new Bitstream(new BufferedInputStream(in, 8192));
+		SourceDataLine out = null;
+		try {
+			Decoder decoder = new Decoder();
+			for (;;) {
+				if (generation != gen)
+					return;
+				Header header = bitstream.readFrame();
+				if (header == null)
+					break;
+				SampleBuffer output = (SampleBuffer) decoder.decodeFrame(header, bitstream);
+				if (out == null) {
+					float freq = decoder.getOutputFrequency() > 0 ? decoder.getOutputFrequency() : 44100;
+					int channels = decoder.getOutputChannels() > 0 ? decoder.getOutputChannels() : 2;
+					AudioFormat fmt = new AudioFormat(freq, 16, channels, true, false);
+					out = (SourceDataLine) AudioSystem.getLine(new DataLine.Info(SourceDataLine.class, fmt));
+					out.open(fmt);
+					out.start();
+				}
+				short[] samples = output.getBuffer();
+				int len = output.getBufferLength();
+				if (len > 0)
+					out.write(toBytes(samples, len), 0, len * 2);
+				bitstream.closeFrame();
+			}
+			if (out != null && generation == gen)
+				out.drain();
+		} finally {
+			if (out != null) {
+				try {
+					out.stop();
+					out.flush();
+					out.close();
+				} catch (Throwable ignored) {
+				}
+			}
+			try {
+				bitstream.close();
+			} catch (Throwable ignored) {
+			}
+		}
 	}
 
 	/** 立即停止当前播放（离开牌桌/清场时用） */
@@ -190,23 +304,25 @@ public final class VoicePlayer {
 				job = PENDING.poll();
 			}
 			try {
+				playing = true;
 				if (decodeAndWrite(job) && job.onDone() != null)
 					job.onDone().run();
 			} catch (Throwable e) {
 				LogUtils.getLogger().warn("[voice] 播放失败: {}", e.toString());
 			} finally {
+				playing = false;
 				closeQuietly(job.in());
 			}
 		}
 	}
 
-	/** 解码 mp3 逐帧写入常驻音频行；被新播放取代（代次变化）时中断。完整播完返回 true（供完成回调） */
+	/** 解码 mp3 逐帧写入常驻音频行；被新播放取代（代次变化）或报番被清掉时中断。完整播完返回 true（供完成回调） */
 	private static boolean decodeAndWrite(Job job) throws Exception {
 		Bitstream bitstream = new Bitstream(new BufferedInputStream(job.in(), 8192));
 		try {
 			Decoder decoder = new Decoder();
 			for (;;) {
-				if (generation != job.gen())
+				if (cancelled(job))
 					return false;
 				Header header = bitstream.readFrame();
 				if (header == null)
@@ -222,15 +338,20 @@ public final class VoicePlayer {
 				bitstream.closeFrame();
 			}
 			SourceDataLine out = line;
-			if (out != null && generation == job.gen())
+			if (out != null && !cancelled(job))
 				out.drain();
-			return generation == job.gen();
+			return !cancelled(job);
 		} finally {
 			try {
 				bitstream.close();
 			} catch (Throwable ignored) {
 			}
 		}
+	}
+
+	/** 该任务是否已被取代：act 语音看播放代次，报番语音另看报番代次（clearFan 可单独中止报番） */
+	private static boolean cancelled(Job job) {
+		return generation != job.gen() || (job.fan() && fanToken != job.fanToken());
 	}
 
 	/** 取与解码输出格式匹配的音频行：常驻行格式一致则复用，否则重开（格式变化极少见） */

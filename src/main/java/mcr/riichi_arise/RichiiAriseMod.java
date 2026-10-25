@@ -47,7 +47,6 @@ public class RichiiAriseMod {
 		}
 		// End of user code block mod constructor
 		// 触发游戏规则静态注册（引用静态字段才会执行 <clinit>；class.getName() 仅加载类不初始化）
-		java.util.Objects.requireNonNull(RichiGameRules.USE_AKOCHAN, "akochan gamerule");
 		java.util.Objects.requireNonNull(RichiGameRules.AUTO_OPEN_NET_PORT, "net gamerule");
 		NeoForge.EVENT_BUS.register(this);
 		modEventBus.addListener(this::registerNetworking);

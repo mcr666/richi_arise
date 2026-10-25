@@ -22,9 +22,11 @@ public final class VoiceClient {
 		if (voiceId == null || voiceId.isEmpty())
 			return;
 		VoiceEvents ev = VoiceEvents.byCode(event);
-		// 和牌 act 语音播完后报番界面显现第一个役种（无报番任务时 no-op）
-		boolean win = ev == VoiceEvents.RON || ev == VoiceEvents.TUMO;
-		VoicePlayer.play(voiceId, ev, win ? FanAnnouncer::actDone : null);
+		// 和牌语音（荣/自摸）：并行播放（多家荣和同时喊，互不打断）；结算界面等语音播完才打开
+		if (ev == VoiceEvents.RON || ev == VoiceEvents.TUMO)
+			VoicePlayer.playConcurrent(voiceId, ev);
+		else
+			VoicePlayer.play(voiceId, ev); // 其它事件（吃/碰/杠/立直）照旧打断式播放
 	}
 
 	/** 收到 S→C 报番事件：在该座位的 act 语音之后按役种顺序追加播报（无报番音频的角色静默跳过） */
@@ -32,10 +34,8 @@ public final class VoiceClient {
 		MahjongLobbyPayloads.LobbySync sync = MahjongLobbyPayloads.CLIENT_SYNC.get(originPacked);
 		if (sync == null || sync.seatVoices() == null || seat < 0 || seat >= sync.seatVoices().length)
 			return;
-		String voiceId = sync.seatVoices()[seat];
-		if (voiceId == null || voiceId.isEmpty())
-			return;
-		YakuVoices.enqueue(voiceId, yakuKeys);
+		// 空语音（默认角色）也交给 YakuVoices 处理：它会清空上一局残留的报番/段位语音状态
+		YakuVoices.enqueue(sync.seatVoices()[seat], yakuKeys);
 	}
 
 	/** 对局开始：确保当前桌所有入座玩家的语音已缓存（客户端本地缓存） */

@@ -100,15 +100,18 @@ public class MahjongHud {
 
 	/**
 	 * 对局中在屏幕左上角绘制：已揭开的宝牌指示牌（TileIcons 直绘牌面）下方并列
-	 * 场供（本场数）与供托（桌上全部立直棒数）。仅参战玩家（viewerSeat &ge; 0）
-	 * 且 phase=PLAYING、无 Screen 时显示；观战/结算/终局自动隐藏。
+	 * 场供（本场数）与供托（桌上全部立直棒数）。参战玩家（viewerSeat &ge; 0）且 phase=PLAYING、
+	 * 无 Screen 时显示；观战者若客户端开启"观战显示牌局内容"（SPECTATOR_SHOW_TABLE）同样显示。
+	 * 结算/终局自动隐藏。
 	 */
 	private static void renderDoraOverlay(GuiGraphics g) {
 		Minecraft mc = Minecraft.getInstance();
 		if (mc.screen != null) // 结算等 Screen 打开时不显示
 			return;
 		if (MahjongTablePayload.gameViewerSeat < 0
-				|| MahjongTablePayload.gamePhase != RichiTableState.PHASE_PLAYING)
+				&& !mcr.riichi_arise.RichiConfig.SPECTATOR_SHOW_TABLE.get()) // 观战者：按客户端选项决定
+			return;
+		if (MahjongTablePayload.gamePhase != RichiTableState.PHASE_PLAYING)
 			return;
 		// 远离牌桌 16 格（与服务端同步范围一致）即隐藏；桌已拆除也隐藏
 		long packed = MahjongTablePayload.gameOriginPacked;
@@ -137,7 +140,30 @@ public class MahjongHud {
 		int tileRowW = revealed > 0 ? revealed * (tileW + tileGap) : 0;
 		int w = Math.max(Math.max(tileRowW, font.width(honbaStr)), font.width(sticksStr)) + padX * 2;
 		int h = padY * 2 + (tileH > 0 ? tileH + 3 : 0) + font.lineHeight * 2;
-		int x = 3, y = 3;
+		// 位置：客户端设置的四角预设（HUD_DORA_CORNER），默认左上
+		int margin = 3;
+		int gw = g.guiWidth(), gh = g.guiHeight();
+		int x, y;
+		switch (mcr.riichi_arise.RichiConfig.HUD_DORA_CORNER.get()) {
+			case TOP_RIGHT -> {
+				x = gw - w - margin;
+				y = margin;
+			}
+			case BOTTOM_LEFT -> {
+				x = margin;
+				y = gh - h - margin;
+			}
+			case BOTTOM_RIGHT -> {
+				x = gw - w - margin;
+				y = gh - h - margin;
+			}
+			default -> {
+				x = margin;
+				y = margin;
+			}
+		}
+		x = Math.max(0, x);
+		y = Math.max(0, y);
 		g.fill(x, y, x + w, y + h, 0x99000000);
 		int bc = 0xFFB8860B;
 		g.fill(x, y, x + w, y + 1, bc);

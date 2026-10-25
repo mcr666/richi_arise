@@ -94,11 +94,10 @@ public final class RichiTableSync {
 			}
 			tedashi[s] = st.lastTedashi[s];
 			names[s] = seatName(level, st, s);
-			// AI 形象只要座位是 AI 就下发（等待/终局阶段按预约标记，对局中按 aiSeat）：
-			// 终局（FINISHED）也放行，形象随形态保持展示，不消失；客户端据此创建/移除各 AI 座位的 RemotePlayer 假玩家
+			// AI 形象只要座位是 AI 就下发：对局中与终局都按本局 aiSeat（终局保持形象不消失）；
+			// 等待阶段再补充"下一局预约"（预约座位与洗牌后的实际座位无关，终局若按预约出形象会在人类座位上多出一个假玩家）
 			boolean aiSeat = st.aiSeat[s]
-					|| ((st.phase == RichiTableState.PHASE_WAITING
-							|| st.phase == RichiTableState.PHASE_FINISHED) && st.reservedAI[s]);
+					|| (st.phase == RichiTableState.PHASE_WAITING && st.reservedAI[s]);
 			if (aiSeat) {
 				avatarForms[s] = st.aiAvatarForms[s] == null ? "" : st.aiAvatarForms[s];
 				avatarNames[s] = st.aiAvatarNames[s] == null ? "" : st.aiAvatarNames[s];

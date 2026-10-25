@@ -105,14 +105,16 @@ public class VoicePayloads {
 				(RegistryFriendlyByteBuf buf, VoiceFanPayload msg) -> {
 					buf.writeLong(msg.originPacked());
 					buf.writeVarInt(msg.seat());
-					buf.writeVarInt(msg.keys().size());
-					for (String k : msg.keys())
-						buf.writeUtf(k, 32);
+					int n = Math.min(msg.keys().size(), 32); // 与读取端同一上限，避免多写导致后续包错位
+					buf.writeVarInt(n);
+					for (int i = 0; i < n; i++)
+						buf.writeUtf(msg.keys().get(i), 32);
 				},
 				(RegistryFriendlyByteBuf buf) -> {
 					long origin = buf.readLong();
 					int seat = buf.readVarInt();
-					int n = Math.min(buf.readVarInt(), 16);
+					// 宝牌计数键排在列表末尾，截断上限过低会把宝牌整段丢掉（最多 32 键，服务端同上限）
+					int n = Math.min(buf.readVarInt(), 32);
 					List<String> keys = new ArrayList<>(n);
 					for (int i = 0; i < n && buf.isReadable(); i++)
 						keys.add(buf.readUtf(32));

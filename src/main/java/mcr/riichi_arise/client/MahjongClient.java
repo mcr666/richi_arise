@@ -57,11 +57,12 @@ public class MahjongClient {
 				MahjongTileBlockRenderer::new);
 	}
 
-	/** 手持风盘时，扫描附近风盘并在每个桌面中心外围生成 astral_burst 粒子圈 */
+	/** 手持风盘（大/小型）时，扫描附近风盘并在每个桌面中心外围生成 astral_burst 粒子圈 */
 	@SubscribeEvent
 	public static void onClientTick(ClientTickEvent.Post event) {
 		tickCounter++;
 		MahjongTableClient.tick(); // 牌桌发牌/倒牌动画调度（逐 tick 驱动）
+		MahjongSettlementScreen.tickDeferredOpen(); // 和牌语音播完后再弹结算界面
 		Minecraft minecraft = Minecraft.getInstance();
 		LocalPlayer player = minecraft.player;
 		ClientLevel level = minecraft.level;
@@ -71,7 +72,9 @@ public class MahjongClient {
 		if (tickCounter % 4 != 0)
 			return;
 		boolean holding = player.getMainHandItem().is(MahjongItems.FENG_PAN.get().asItem())
-				|| player.getOffhandItem().is(MahjongItems.FENG_PAN.get().asItem());
+				|| player.getOffhandItem().is(MahjongItems.FENG_PAN.get().asItem())
+				|| player.getMainHandItem().is(MahjongItems.FENG_PAN_SMALL.get().asItem())
+				|| player.getOffhandItem().is(MahjongItems.FENG_PAN_SMALL.get().asItem());
 		if (!holding)
 			return;
 		BlockPos base = player.blockPosition();

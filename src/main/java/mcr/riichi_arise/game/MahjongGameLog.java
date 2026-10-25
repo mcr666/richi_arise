@@ -14,7 +14,7 @@ import net.minecraft.world.level.storage.LevelResource;
  * 写入 存档目录/data/mahjong/&lt;x&gt;_&lt;y&gt;_&lt;z&gt;.log（按风盘原点一桌一文件），IO 失败静默忽略。
  * <p>行格式（| 分隔，按位置解读）：</p>
  * <pre>
- * G|unix秒|总局数|名0|名1|名2|名3|点0|点1|点2|点3          （开局；AI 名带 (AI:流派)）
+ * G|unix秒|总局数|名0|名1|名2|名3|点0|点1|点2|点3          （开局；AI 直接用角色名，无前缀）
  * S|手0|手1|手2|手3|牌山|宝牌堆10张|岭上4张                  （每局开局，牌谱查看器回放用）
  * T|席|d|牌记法|旗                                       （切牌；旗 r=立直宣言，可空）
  * T|席|c/p/k|三张记法|来源席                              （吃/碰/明杠）
@@ -43,7 +43,7 @@ public final class MahjongGameLog {
 		}
 	}
 
-	/** G 行：开局（名称已含 AI 标注） */
+	/** G 行：开局（AI 座位名即角色名，无前缀） */
 	public static void gameStart(ServerLevel level, BlockPos origin, int totalHands, String[] names,
 			int[] points) {
 		StringBuilder sb = new StringBuilder("G|").append(System.currentTimeMillis() / 1000)

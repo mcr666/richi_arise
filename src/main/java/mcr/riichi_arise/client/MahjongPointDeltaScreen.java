@@ -36,6 +36,7 @@ public class MahjongPointDeltaScreen extends Screen {
 	}
 
 	public static void open(MahjongPointDeltaPayload.PointDeltaMessage data) {
+		mcr.riichi_arise.client.MahjongSettlementScreen.discardPendingOpen();
 		Minecraft mc = Minecraft.getInstance();
 		if (mc.player != null)
 			mc.setScreen(new MahjongPointDeltaScreen(data));

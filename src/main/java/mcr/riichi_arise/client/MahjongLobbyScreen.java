@@ -115,6 +115,10 @@ public class MahjongLobbyScreen extends Screen {
 					});
 			addBtn(colLX + 134, y, colW - 26, 18,
 					() -> Component.translatable("gui.riichi_arise.lobby.btn_close").getString(), this::onClose);
+			// 设置：对局中同样可打开（内容里的客户端配置切换后立即重建牌桌生效）
+			addBtn(colLX, top + 220, colW, 18,
+					() -> Component.translatable("gui.riichi_arise.lobby.btn_settings").getString(),
+					() -> RichiSettingsScreen.open(this.origin));
 			return;
 		}
 		// 左列：加入/退出队列、开始对局、查看牌谱

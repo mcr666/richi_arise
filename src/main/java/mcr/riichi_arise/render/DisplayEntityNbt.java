@@ -86,6 +86,9 @@ public final class DisplayEntityNbt {
 		nbt.putString("text", net.minecraft.network.chat.Component.Serializer.toJson(
 				net.minecraft.network.chat.Component.literal(text), access));
 		nbt.putString("billboard", "center");
+		// alignment 在 TextDisplay.readAdditionalSaveData 里是"无条件解码"，缺省会走 NbtOps 报
+		// "Display entityNot a string" 并把 error 刷到日志；显式写入与 billboard 一样的居中值
+		nbt.putString("alignment", "center");
 		nbt.putBoolean("default_background", true);
 		return nbt;
 	}

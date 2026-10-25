@@ -84,6 +84,24 @@ public class MahjongCommands {
 													.suggests((c, b) -> SharedSuggestionProvider.suggest(
 															new String[] { "e", "s", "w", "n" }, b))
 													.executes(ctx -> replaceHand(ctx, seatFromArg(ctx))))))
+							.then(Commands.literal("film")
+									// 剧本牌局（临时，拍视频用）：start = 布置并直接开局；stop = 关闭剧本
+									.requires(src -> src.hasPermission(2))
+									.then(Commands.literal("start").executes(MahjongCommands::filmStart))
+									.then(Commands.literal("stop").executes(ctx -> {
+										ServerLevel level = ctx.getSource().getLevel();
+										ServerPlayer player = ctx.getSource().getPlayerOrException();
+										BlockPos nearest = RichiTableManager.nearest(level, player.position(), 16);
+										RichiTableState st = nearest == null ? null : RichiTableManager.get(nearest);
+										if (st == null) {
+											ctx.getSource().sendFailure(Component.literal("§c16 格内没有牌桌"));
+											return 0;
+										}
+										st.film = null;
+										ctx.getSource().sendSuccess(
+												() -> Component.literal("§6<麻雀>§r 剧本已关闭（下一局按普通对局进行）"), false);
+										return 1;
+									})))
 							.then(Commands.literal("rank")
 									// 段位排行榜（天凤 pt）：无参 = 前 10 位；带玩家名 = 查询该玩家 pt 与总排名（离线可查）
 									.executes(ctx -> {
@@ -190,6 +208,37 @@ public class MahjongCommands {
 															ctx.getSource().sendSuccess(() -> Component.literal("§6<麻雀>§r token " + (mcr.riichi_arise.net.RichiNetConfig.TOKEN.isEmpty() ? "已清除" : "已设置")), true);
 															return 1;
 													})))));
+	}
+
+	/** /richi mahjong film start：布置拍视频用剧本牌局（临时）并直接开局 */
+	private static int filmStart(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+		ServerLevel level = ctx.getSource().getLevel();
+		ServerPlayer player = ctx.getSource().getPlayerOrException();
+		BlockPos nearest = RichiTableManager.nearest(level, player.position(), 16);
+		if (nearest == null) {
+			ctx.getSource().sendFailure(Component.literal("§c16 格内没有牌桌"));
+			return 0;
+		}
+		RichiTableState st = RichiTableManager.getOrCreate(level, nearest);
+		if (st.phase == RichiTableState.PHASE_PLAYING) {
+			ctx.getSource().sendFailure(Component.literal("§c该牌桌正在对局中"));
+			return 0;
+		}
+		st.film = new mcr.riichi_arise.game.riichi.FilmScenario();
+		st.gameType = 0; // 一局制：打完这一局即终局
+		st.aiSpeedIdx = 0;
+		st.thinkIdx = 0;
+		java.util.Arrays.fill(st.reservedAI, false);
+		for (int seat = 0; seat < 3; seat++) {
+			st.reservedAI[seat] = true;
+			st.aiAvatarModes[seat] = mcr.riichi_arise.game.riichi.FilmScenario.TARGET_CHARS[seat];
+		}
+		if (!st.queue.contains(player.getStringUUID()))
+			st.queue.add(player.getStringUUID());
+		MahjongLobby.startGame(level, nearest, st);
+		ctx.getSource().sendSuccess(() -> Component.literal(
+				"§6<麻雀>§r 剧本牌局已开局：前 10 巡三家手切，第 11 巡鹫巢岩/八木唯立直（赤木默听）后由你摸到发"), false);
+		return 1;
 	}
 
 	/** replace 指令座位参数解析：e/s/w/n → 0..3，其余抛异常 */

@@ -47,6 +47,8 @@ public final class YakuVoices {
 			Map.entry("RYUISO", "ryuuiisou"),
 			Map.entry("REACH", "riichi"),
 			Map.entry("DOUBLE_REACH", "daburii"),
+			// 门清自摸（需要 fan/tsumo.mp3；内置语音包未附带该条，缺文件时静默跳过）
+			Map.entry("TSUMO", "tsumo"),
 			// 机会役
 			Map.entry("CHANKAN", "chankan"),
 			Map.entry("RINSHANKAIHOH", "rinshan"),
@@ -84,14 +86,18 @@ public final class YakuVoices {
 	 * 把某角色某次和牌的报番键列表追加进报番队列（客户端调用）。
 	 * <ul>
 	 * <li>役种英文名（自风/场风带方位后缀）：有对应音频的按序播报，并进入界面显现映射；</li>
-	 * <li>宝牌计数键 {@code DORA/URA/RED + 数量}（表/里/红通用按数量报）：作为附加播报，
-	 * 不参与界面逐条映射（结算界面宝牌条目在全部播报完成后显现）。</li>
+	 * <li>宝牌计数键 {@code DORA/URA/RED + 数量}（表/里/红通用按数量报）：作为附加播报排在役种之后，
+	 * 结算列表末尾的宝牌条目随对应语音逐条显现（{@link FanAnnouncer#startedExtras()}）。</li>
 	 * </ul>
 	 * 一条役种音频都没有时通知界面回退固定节奏。
 	 */
 	public static void enqueue(String voiceId, List<String> keys) {
-		if (voiceId == null || voiceId.isEmpty() || keys == null)
+		if (voiceId == null || voiceId.isEmpty() || keys == null) {
+			// 该家没有语音（默认角色/未选语音）：清掉上一局残留的报番与段位语音状态，
+			// 否则结算界面会误判报番已完成（一次性显示）或沿用其他角色的段位语音
+			FanAnnouncer.invalidate();
 			return;
+		}
 		List<String> fanKeys = new ArrayList<>();
 		List<String> zh = new ArrayList<>();
 		List<String> extraKeys = new ArrayList<>();
@@ -113,16 +119,19 @@ public final class YakuVoices {
 			// 界面映射用不带方位后缀的基础役名（自风牌/场风牌，与结算列表条目一致）
 			zh.add(mcr.riichi_arise.game.riichi.YakuNames.zh(basicName(key)));
 		}
-		if (fanKeys.isEmpty()) {
-			if (!FanAnnouncer.isActive())
-				FanAnnouncer.invalidate(); // 界面回退固定节奏（不打断进行中的上一轮报番）
+		if (fanKeys.isEmpty() && extraKeys.isEmpty()) {
+			// 本轮没有任何报番音频：清掉上一轮遗留状态后回退固定节奏。
+			// 若不清（尤其上一轮已播完、done=true），结算界面会误判"报番已完成"而一次性显示全部役种。
+			FanAnnouncer.invalidate();
 			return;
 		}
-		FanAnnouncer.begin(zh, extraKeys.size(), voiceId);
-		for (String file : fanKeys)
-			VoicePlayer.enqueue(voiceId, file, FanAnnouncer::advance);
-		for (String file : extraKeys)
-			VoicePlayer.enqueue(voiceId, file, FanAnnouncer::advance);
+		// 语音文件按播出顺序排好（役种在前、宝牌计数在后），交给 FanAnnouncer 在界面弹出 1s 后开始。
+		// 只有宝牌没有役种音频（如役名无对应音频）时也要照常报宝牌，不能整轮丢弃。
+		List<String> files = new ArrayList<>(fanKeys);
+		files.addAll(extraKeys);
+		com.mojang.logging.LogUtils.getLogger().info("[voice] 报番计划 {} 役种={} 宝牌={} 文件={}",
+				voiceId, zh, extraKeys, files);
+		FanAnnouncer.begin(zh, files, extraKeys.size(), voiceId);
 	}
 
 	/** 去掉自风/场风的方位后缀（JIKAZE_TON → JIKAZE） */

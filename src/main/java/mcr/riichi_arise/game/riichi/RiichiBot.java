@@ -43,8 +43,8 @@ public final class RiichiBot {
 		return NAMES[seat];
 	}
 
-	/** 生成 AI 座位的服务端显示名（座位名与结算名同源）：
-	 * 取该座位所选角色的名字（默认角色 = 无名字，退回 AI·東/南/西/北）；同名重复时编号 AI:名字1 */
+	/** 生成 AI 座位的服务端显示名（座位名/结算名/播报名同源）：
+	 * 取该座位所选角色的名字（默认角色 = 无名字，退回 AI·東/南/西/北）；同名重复时编号为 名字1 / 名字2 */
 	public static String seatDisplayName(mcr.riichi_arise.game.RichiTableState st, int seat) {
 		String form = st.aiAvatarForms[seat];
 		if (form == null || form.isEmpty())
@@ -63,7 +63,7 @@ public final class RiichiBot {
 					idx = same;
 			}
 		}
-		return "AI:" + base + (same > 1 ? idx : "");
+		return base + (same > 1 ? idx : "");
 	}
 
 	/** 某家手牌的向听数（13/11/10 张等，按 count 折算副露） */

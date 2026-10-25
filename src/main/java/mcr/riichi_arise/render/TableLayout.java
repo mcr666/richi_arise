@@ -50,14 +50,14 @@ public final class TableLayout {
 	public static final double SMALL_OUTWARD = 3.0 / 16.0;
 	/** 小型风盘手牌区整体向玩家左侧（沿 lefts）偏移量（格，2 个模型单位 = 2/16 格） */
 	public static final double SMALL_HAND_LEFT_SHIFT = 2.0 / 16.0;
-	/** 小型风盘副露区外缘与桌沿（3×3 桌半宽 1.5）之间保留的间隙（格，1 个模型单位） */
-	public static final double SMALL_MELD_EDGE_GAP = 1.0 / 16.0;
+	/** 副露区外缘与桌沿之间保留的间隙（格，1 个模型单位；仅小型 3×3 桌贴沿时使用） */
+	public static final double MELD_EDGE_GAP = 1.0 / 16.0;
+	/** 副露行向桌心内收距离（格）——大风盘沿用原布局：与手牌行错开 z 带，避免占用同一条线 */
+	public static final double MELD_ROW_INSET = 0.20;
+	/** 大风盘副露区外缘上限（格，沿玩家右侧轴）：邻家行列带从 ±(edge - TILE_WIDTH/2)=±1.572 起，留隙取 1.55 */
+	public static final double MELD_EDGE_CAP = 1.55;
 	/** 手牌相邻牌间距（格）——牌宽 12px×s/16≈0.15625，紧贴（+0.0007 防共面闪烁） */
 	public static final double TILE_GAP = 0.157;
-	/** 副露行向桌心内收距离（格）——与手牌行错开 z 带，避免占用同一条线 */
-	public static final double MELD_ROW_INSET = 0.20;
-	/** 副露区外缘上限（格，沿玩家右侧轴）：邻家行列带从 ±(edge - TILE_WIDTH/2)=±1.572 起，留隙取 1.55，保证桌角两侧副露永不重叠 */
-	public static final double MELD_EDGE_CAP = 1.55;
 	/** 相邻副露组之间的最小间隙（格） */
 	public static final double MELD_GAP = 0.02;
 	/** 发牌间隔（tick） */
@@ -97,9 +97,16 @@ public final class TableLayout {
 			return RIVER_DIST;
 		}
 
-		/** 副露区外缘上限（小型按表宽等比收窄，防相邻两家副露重叠；3×3 桌半宽 1.5 只留 1 个模型单位） */
+		/** 副露区外缘上限：小型紧贴桌沿只留 MELD_EDGE_GAP；大风盘沿用原上限 MELD_EDGE_CAP */
 		public double meldEdgeCap() {
-			return small ? 1.5 - SMALL_MELD_EDGE_GAP : MELD_EDGE_CAP;
+			return small ? 1.5 - MELD_EDGE_GAP : MELD_EDGE_CAP;
+		}
+
+		/** 副露行中心距桌心：小型贴玩家侧桌沿（外缘距沿 MELD_EDGE_GAP）；大风盘沿用原内收布局 */
+		public double meldRowDist() {
+			return small
+					? 1.5 - MELD_EDGE_GAP - TILE_LONG / 2.0
+					: edgeFor(false) - MELD_ROW_INSET;
 		}
 
 		/** 第 rowIdx 排（内排 0 = 最靠玩家）行中心距桌心：内排增大即向桌心推进；第 RIVER_ROWS 排起为溢出行，置于最外内排外侧 */
@@ -133,9 +140,11 @@ public final class TableLayout {
 		Vec3 f = new Vec3(forward.getStepX(), 0, forward.getStepZ());
 		Vec3 r = new Vec3(right.getStepX(), 0, right.getStepZ());
 		boolean small = anyState.getBlock() instanceof FengPanSmallBlock;
-		// 桌面基准 = 风盘方块顶面（y=origin.y）；桌心：2x2 风盘取区域几何中心、小型单方块取方块中心
+		// 桌面基准 = 风盘方块顶面（y=origin.y）；小型风盘搭在下半砖上时整桌再下移半格（与模型一起贴合砖面）
+		double tableY = origin.getY() - (small ? FengPanSmallBlock.slabDrop(anyState) : 0);
+		// 桌心：2x2 风盘取区域几何中心、小型单方块取方块中心
 		Vec3 center = small
-				? new Vec3(origin.getX() + 0.5, origin.getY(), origin.getZ() + 0.5)
+				? new Vec3(origin.getX() + 0.5, tableY, origin.getZ() + 0.5)
 				: new Vec3(
 						origin.getX() + (forward.getStepX() + right.getStepX() + 1) / 2.0,
 						origin.getY(),
@@ -164,40 +173,50 @@ public final class TableLayout {
 
 	/** 同上（drawnGap = 该张为刚摸的牌：有副露时摸牌 index &lt; 13，由调用方按 drawnSeat 判定） */
 	public static Vec3 handTarget(Geom geom, int seat, int index, boolean drawnGap) {
-		double offset = (HAND_SIZE - 1) / 2.0 * TILE_GAP - index * TILE_GAP - (drawnGap ? 0.2 : 0);
+		// 刚摸的牌与手牌之间的额外间隔：大小风盘统一隔半个牌宽
+		double gap = TILE_WIDTH / 2.0;
+		double offset = (HAND_SIZE - 1) / 2.0 * TILE_GAP - index * TILE_GAP - (drawnGap ? gap : 0);
 		if (geom.small())
 			offset += SMALL_HAND_LEFT_SHIFT; // 小型风盘：整排手牌再向玩家左侧偏移 2 个模型单位
 		return geom.rows()[seat].add(geom.lefts()[seat].scale(offset));
 	}
 
+	/** 牌河会换行的内排数：大风盘 3 排；小型风盘只排 2 排，第三排起就一直往右延伸 */
+	private static int riverRowCount(boolean small) {
+		return small ? 2 : RIVER_ROWS;
+	}
+
 	/**
-	 * 牌河第 index 张所在排：内排三行 0 = 最靠玩家、RIVER_ROWS-1 = 最靠桌心，从内侧（靠桌心）往外排；
-	 * 前 RIVER_ROWS*RIVER_COLS（=18）张排满内排后不再新增排，第 4 排起统一返回 RIVER_ROWS，一直往右延伸。
+	 * 牌河第 index 张所在排：内排 0 = 最靠玩家、RIVER_ROWS-1 = 最靠桌心，从内侧（靠桌心）往外排；
+	 * 大风盘：前 RIVER_ROWS*RIVER_COLS（=18）张排满内排后不再新增排，第 4 排起统一返回 RIVER_ROWS，一直往右延伸；
+	 * 小型风盘：前 2*RIVER_COLS（=12）张排满两排后不再换行，第三排（row = 0，最靠玩家）起就一直往右。
 	 */
-	public static int riverRow(int index) {
-		if (index < RIVER_ROWS * RIVER_COLS)
+	public static int riverRow(int index, boolean small) {
+		int rows = riverRowCount(small);
+		if (index < rows * RIVER_COLS)
 			return RIVER_ROWS - 1 - index / RIVER_COLS; // 内排：先内（靠桌心）后外（靠玩家）
-		return RIVER_ROWS; // 第 4 排起：不再换行
+		return small ? 0 : RIVER_ROWS; // 排满后：小型就地第三排（最靠玩家一行）往右，大风盘另起溢出行
 	}
 
 	/**
 	 * 牌河第 index 张在本排中的列序（沿玩家视角自左向右，0 起）：内排 0..RIVER_COLS-1；
-	 * 第 4 排起自第 RIVER_COLS 列续增，一直往右（不再折排）。
+	 * 溢出排前 RIVER_COLS 张与内排对齐（列 0..RIVER_COLS-1），之后自第 RIVER_COLS 列续增，一直往右（不再折排）。
 	 */
-	public static int riverCol(int index) {
-		if (index < RIVER_ROWS * RIVER_COLS)
+	public static int riverCol(int index, boolean small) {
+		int rows = riverRowCount(small);
+		if (index < rows * RIVER_COLS)
 			return index % RIVER_COLS;
-		return RIVER_COLS + (index - RIVER_ROWS * RIVER_COLS); // 第 4 排：一直往右
+		return index - rows * RIVER_COLS; // 溢出排：先补齐本排前 6 列，再继续往右
 	}
 
 	/**
-	 * 牌河第 index 张的桌面位置（内排三行每排 6 张、自最靠桌心一排起逐排向玩家（从内往外）、每排沿玩家视角自左向右排；
-	 * 排满 18 张后第 4 排起不再换行，一直往右延伸；结算粒子定位用）。
+	 * 牌河第 index 张的桌面位置（内排每排 6 张、自最靠桌心一排起逐排向玩家（从内往外）、每排沿玩家视角自左向右排；
+	 * 大风盘 3 排共 18 张排满后另起第 4 排一直往右延伸，小型风盘 2 排共 12 张排满后就在第三排一直往右；结算粒子定位用）。
 	 */
 	public static Vec3 riverTarget(Geom geom, int seat, int index) {
 		return geom.rows()[seat]
-				.subtract(geom.outs()[seat].scale(geom.edge() - geom.riverRowDist(riverRow(index))))
-				.add(geom.lefts()[seat].scale(((RIVER_COLS - 1) / 2.0 - riverCol(index)) * 0.17));
+				.subtract(geom.outs()[seat].scale(geom.edge() - geom.riverRowDist(riverRow(index, geom.small()))))
+				.add(geom.lefts()[seat].scale(((RIVER_COLS - 1) / 2.0 - riverCol(index, geom.small())) * 0.17));
 	}
 
 	/** 手牌定位标签（显示实体与交互代理共用），选中升降时按标签精确找实体 */
@@ -274,24 +293,25 @@ public final class TableLayout {
 			}
 		}
 		int dealIndex = 4 + HAND_SIZE * 4; // 手牌区占用 4 标签 + 52 张的调度序号
-		// 2) 牌河：内排三行每排 6 张、自最靠桌心一排起逐排向玩家（从内往外）、每排沿玩家视角自左向右排；
-		//    排满 18 张后第 4 排起不再换行、一直往右延伸（不重叠、不越桌边）；立直宣言牌横摆（长轴沿切线）
+		// 2) 牌河：内排每排 6 张、自最靠桌心一排起逐排向玩家（从内往外）、每排沿玩家视角自左向右排；
+		//    大风盘排满 3 排（18 张）后另起第 4 排（先补齐前 6 列）再一直往右延伸（不重叠、不越桌边）；
+		//    小型风盘只排 2 排（12 张），第三排同样先补齐前 6 列再一直往右；立直宣言牌横摆（长轴沿切线）
 		for (int h = 0; h < 4; h++) {
 			Vec3 tangent = tangents[h];
 			Vec3 riverDir = outs[h].scale(-1); // 长轴指向桌心
 			List<Integer> river = st.riverCodes(h);
 			for (int i = 0; i < river.size(); i++) {
-				Vec3 target = rows[h].subtract(outs[h].scale(edge - geom.riverRowDist(riverRow(i))))
-						.add(geom.lefts()[h].scale(((RIVER_COLS - 1) / 2.0 - riverCol(i)) * flatStep));
+				Vec3 target = rows[h].subtract(outs[h].scale(edge - geom.riverRowDist(riverRow(i, geom.small()))))
+						.add(geom.lefts()[h].scale(((RIVER_COLS - 1) / 2.0 - riverCol(i, geom.small())) * flatStep));
 				boolean riichiSide = i == st.riichiRiverIdx[h];
 				Vec3 dir = riichiSide ? tangent : riverDir;
 				out.add(new Placement(KIND_RIVER, flatEntityPos(target, 0), target, river.get(i),
 						flatYaw(dir), dir, true, h, i, dealIndex++ * step));
 			}
 		}
-		// 3) 副露（吃碰杠）：副露行向桌心内收（与手牌行错开带），组序从外向内游标式排开——
-		//    每组按实际占宽（平躺自家牌 + 声明牌伸出方向）推进，外缘不超过 MELD_EDGE_CAP，
-		//    保证相邻两家副露在桌角处永不重叠；同一家的多组也不会因声明牌相对而压叠。
+		// 3) 副露（吃碰杠）：副露行在小型风盘贴近玩家侧桌沿（外缘只留 MELD_EDGE_GAP），大风盘仍向桌心内收，组序从外向内游标式排开——
+		//    每组按实际占宽（平躺自家牌 + 声明牌伸出方向）推进；小型右端贴桌沿只留 MELD_EDGE_GAP，大风盘不超过 MELD_EDGE_CAP，
+		//    同一家的多组也不会因声明牌相对而压叠。
 		//    所有副露整体靠右排列（游标自外缘内收），新的副露永远紧挨上一组，不插手牌中间。
 		//    组内全部平躺：自家牌长轴垂直副露行（水平面内"竖着"、朝桌心，同牌河牌）；
 		//    声明牌（副露串末尾那张，见 RiichiPlayer.displayOrder）长轴指向来源玩家——
@@ -302,7 +322,7 @@ public final class TableLayout {
 			Vec3 playerRight = new Vec3(-facingCenter.z, 0, facingCenter.x); // 面朝桌心时的右手（副露行 / 手牌向右延伸）
 			Vec3 playerLeft = playerRight.scale(-1);
 			List<RichiTableState.MeldGroup> groups = st.meldGroupInfos(h);
-			Vec3 meldRow = rows[h].subtract(outs[h].scale(MELD_ROW_INSET));
+			Vec3 meldRow = center.add(outs[h].scale(geom.meldRowDist())); // 贴近玩家侧桌沿（外缘距桌沿 MELD_EDGE_GAP）
 			double halfW = TILE_WIDTH / 2.0;
 			double halfL = TILE_LONG / 2.0;
 			double protrude = halfL - halfW; // 横放声明牌沿行伸出量（长轴与立牌同向时占用更长）

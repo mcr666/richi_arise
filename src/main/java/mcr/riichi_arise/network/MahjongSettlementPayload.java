@@ -63,7 +63,7 @@ public class MahjongSettlementPayload {
 							orEmpty(message.handCsv()), orEmpty(message.meldsGroups()),
 							message.winTile(), orEmpty(message.uraCsv()), orEmpty(message.doraCsv()),
 							orEmpty(message.yakuList()), message.han(), message.fu(), message.gain(), message.parent(), ns, pts);
-					mcr.riichi_arise.client.MahjongSettlementScreen.open();
+					mcr.riichi_arise.client.MahjongSettlementScreen.openWhenVoiceDone();
 				});
 			}
 		}

@@ -267,6 +267,20 @@ public final class MahjongTableClient {
 			applyInternal(msg, true);
 	}
 
+	/**
+	 * 客户端配置（观战摊手 / AI 形象姿态 / 观战显示牌局内容）变更后立刻按最近一次快照重建，
+	 * 不必等下一次服务端广播。发牌动画等有在途任务的桌跳过，等下一包自然生效。
+	 */
+	public static void refreshAll() {
+		for (Long key : new ArrayList<>(TABLES.keySet())) {
+			if (SCHEDULED.containsKey(key))
+				continue;
+			TableRender t = TABLES.get(key);
+			if (t != null && t.last != null)
+				apply(t.last);
+		}
+	}
+
 	/** 进入回放模式：此后该桌的实时 ViewMessage 被忽略 */
 	public static void beginReplay(long originPacked) {
 		replayOrigin = originPacked;
@@ -363,7 +377,8 @@ public final class MahjongTableClient {
 		st.drawnSeat = msg.drawnSeat();
 		st.phase = msg.phase();
 		// 观战摊手（客户端配置）：观战者视角把立牌手牌全部改为面朝上平摊显示
-		if (mcr.riichi_arise.RichiConfig.SPECTATOR_OPEN_HANDS.get() && msg.viewerSeat() < 0)
+		boolean forcedOpen = mcr.riichi_arise.RichiConfig.SPECTATOR_OPEN_HANDS.get() && msg.viewerSeat() < 0;
+		if (forcedOpen)
 			for (int s = 0; s < 4; s++)
 				if (st.handsExposed[s] == RichiTableState.HAND_STAND)
 					st.handsExposed[s] = RichiTableState.HAND_FACE_UP;
@@ -406,6 +421,10 @@ public final class MahjongTableClient {
 			for (Slot slot : slots)
 				spawnSlot(level, table, key, geom, slot, true, true);
 		} else {
+			// 强制摊手时服务端的"推倒/盖牌"（立→平）在客户端早已摊平、外观签名不变 → 推倒动画被吞掉；
+			// 先把这些家手牌复位成立牌（不播动画），再交给 diffApply 走推倒过渡动画（先复位再播放）
+			if (forcedOpen && prev != null && !synthetic)
+				resetHandsForReveal(level, table, geom, slots, msg, prev);
 			diffApply(level, table, geom, st, msg, slots);
 		}
 		// 对局状态：桌心悬浮文本显示局目/本场/牌山剩余；结算横幅由 boss 栏渲染
@@ -434,6 +453,8 @@ public final class MahjongTableClient {
 		Vec3 center = geom.center();
 		TABLE_CENTERS.put(key, center); // 记录桌心，供形象落地后重调视线
 		boolean waiting = msg.phase() == RichiTableState.PHASE_WAITING;
+		// 等待阶段（未开局/局间）恒为站姿：站立并受原版重力落地；对局中才按客户端"AI 形象姿态"配置
+		boolean wantStanding = waiting || mcr.riichi_arise.RichiConfig.MAHJONG_AVATAR_STANDING.get();
 		for (int seat = 0; seat < 4; seat++) {
 			String form = orEmpty(msg.avatarForms()[seat]);
 			Avatar cur = avatars.get(seat);
@@ -449,7 +470,7 @@ public final class MahjongTableClient {
 					// 等待阶段：预约后即出现，站在桌边随机位置（创建时定一次，不随同步重摆）；同座位标记向内收 0.25
 				? center.add(level.random.nextDouble() * 3.5 - 1.75, 0,
 						level.random.nextDouble() * 3.5 - 1.75)
-					: center.add(geom.outs()[seat].scale(geom.seatDist() - 0.25)); // AI 形象比座位标记更靠内 0.25 格
+					: center.add(geom.outs()[seat].scale(geom.seatDist() + (geom.small() ? 0.25 : -0.25))); // 小型外移 0.5 格；大风盘保持原内收 0.25 格
 			float yaw = (float) Math.toDegrees(Math.atan2(-(center.x - pos.x), center.z - pos.z));
 			UUID uuid = profileUuidOf(key, seat, msg);
 			// 显示名：默认角色 = 随机名、有角色 = 角色名（均由服务端解析下发）；缺失时才回退语言键
@@ -458,12 +479,12 @@ public final class MahjongTableClient {
 				name = Component.translatable("gui.riichi_arise.lobby.ch_" + form).getString();
 			if (cur == null || cur.player().isRemoved() || !cur.form().equals(form)
 					|| !cur.profileUuid().equals(uuid)
-					|| cur.standing() != mcr.riichi_arise.RichiConfig.MAHJONG_AVATAR_STANDING.get()) {
+					|| cur.standing() != wantStanding) {
 				if (cur != null) {
 					avatars.remove(seat);
 					removeAvatar(cur);
 				}
-				cur = createAvatar(level, form, uuid, name, pos, yaw);
+				cur = createAvatar(level, form, uuid, name, pos, yaw, wantStanding);
 				if (cur != null)
 					avatars.put(seat, cur);
 			}
@@ -525,12 +546,13 @@ public final class MahjongTableClient {
 	 * 创建客户端-only 假玩家（原版玩家模型）：注入 PlayerInfo（渲染/皮肤查询）→ 加入 ClientLevel。
 	 * 皮肤：有角色的座位用本地贴图 {@code textures/entity/ai/<角色id>.png}（缺文件回退档案/默认皮肤）；
 	 * 默认角色用档案皮肤（服务端下发的在线同名玩家 UUID，无则原版默认皮肤）。
-	 * 站姿模式（配置开启）：无载具，tick 跑原版（真实重力/碰撞自然落定），由 pinAvatar 每包钉水平站位；
-	 * 坐姿模式（默认）：隐形 marker 盔甲架作载具，isPassenger → riding 坐姿，tick 置空，位置由载具维护。
+	 * 站姿模式：无载具，tick 跑原版（真实重力/碰撞自然落定），由 pinAvatar 每包钉水平站位；
+	 * 坐姿模式：隐形 marker 盔甲架作载具，isPassenger → riding 坐姿，tick 置空，位置由载具维护。
+	 *
+	 * @param standing 是否站姿：对局中取客户端配置，等待阶段恒为 true（站立并受重力落地）
 	 */
 	private static Avatar createAvatar(ClientLevel level, String form, UUID uuid, String name,
-			Vec3 pos, float yaw) {
-		boolean standing = mcr.riichi_arise.RichiConfig.MAHJONG_AVATAR_STANDING.get();
+			Vec3 pos, float yaw, boolean standing) {
 		GameProfile profile = new GameProfile(uuid, name);
 		Minecraft mc = Minecraft.getInstance();
 		if (mc.getConnection() != null)
@@ -576,6 +598,13 @@ public final class MahjongTableClient {
 			public net.minecraft.client.resources.PlayerSkin getSkin() {
 				// 有角色的座位用本地贴图；默认角色走 PlayerInfo 的档案皮肤
 				return localSkin != null ? localSkin : super.getSkin();
+			}
+
+			@Override
+			public boolean isModelPartShown(net.minecraft.world.entity.player.PlayerModelPart part) {
+				// 皮肤外层（帽子/外套/袖子/裤腿）是否显示取决于服务端同步的部件位掩码，
+				// 客户端假玩家没有该同步（默认全 0）→ 只显示内层皮肤；这里强制全部显示
+				return true;
 			}
 
 			@Override
@@ -678,36 +707,62 @@ public final class MahjongTableClient {
 		}
 	}
 
-	/** AI 假玩家挥手驱动：swinging 期间每 tick 推进 swingTime，播完（约 6 tick）复位 */
+	/** 挥手动画时长（tick，与原版 LivingEntity#getCurrentSwingDuration 默认值一致） */
+	private static final int SWING_TICKS = 6;
+
+	/**
+	 * AI 假玩家挥手驱动：坐姿假玩家的 {@code tick()} 为空实现（乘客位置由载具维护、不走物理），
+	 * 原版的 {@code updateSwingTime()} 因此不会执行——只置 {@code swinging} 手臂不会动。
+	 * 这里按原版等价推进 {@code oAttackAnim/attackAnim}，渲染层（LivingEntityRenderer →
+	 * HumanoidModel.setupAttackAnimation）才会真正挥臂；站姿由原版 tick 自行推进。
+	 */
 	private static void driveAvatarWaves() {
 		for (Map<Integer, Avatar> seats : AVATARS.values()) {
 			for (Avatar a : seats.values()) {
 				if (a.standing())
 					continue; // 站姿：原版 tick 自行推进挥手动画
 				net.minecraft.client.player.RemotePlayer p = a.player();
-				if (p.isRemoved() || !p.swinging)
+				if (p.isRemoved())
 					continue;
-				p.swingTime++;
-				if (p.swingTime >= 6)
-					p.swinging = false;
+				p.oAttackAnim = p.attackAnim; // 原版在 baseTick 里做；坐姿不走 tick，须在此补
+				if (p.swinging) {
+					p.swingTime++;
+					if (p.swingTime >= SWING_TICKS) {
+						p.swingTime = 0;
+						p.swinging = false;
+					}
+				} else {
+					p.swingTime = 0;
+				}
+				p.attackAnim = p.swingTime / (float) SWING_TICKS;
 			}
 		}
 	}
 
-	/** 坐姿载具落定：载具有乘客时 aiStep 不会自动执行重力，改由本处逐 tick 用原版碰撞向下 move，
-	 *  可靠落定到脚下实际表面（不穿方块、不悬空）。站姿由 RemotePlayer 原版重力自行落定，不在此处理。 */
+	/**
+	 * 形象落地修正（每 tick）：坐姿载具与站姿假人都不会跑原版物理（{@code RemotePlayer#aiStep} 不调 super →
+	 * 没有 travel/重力），统一在此处理——先抬出方块（出生点低于地表时就是"沉进地里"），再让悬空的下落。
+	 */
 	private static void settleAvatars(ClientLevel level) {
 		for (Map<Integer, Avatar> seats : AVATARS.values()) {
 			for (Avatar a : seats.values()) {
-				if (a.standing())
-					continue; // 站姿：原版重力自行落定
-				net.minecraft.world.entity.Entity st = a.seat();
-				if (st == null || st.isRemoved())
+				// 站姿：假人本体；坐姿：隐形载具（乘客位置由载具挂点维护）
+				net.minecraft.world.entity.Entity body = a.standing() ? a.player() : a.seat();
+				if (body == null || body.isRemoved())
 					continue;
-				if (!st.onGround()) // 尚未落地：原版碰撞向下移动（受方块支撑即停）
-					st.move(net.minecraft.world.entity.MoverType.SELF, new net.minecraft.world.phys.Vec3(0.0, -0.04, 0.0));
-				st.setOldPosAndRot();
+				liftOutOfBlocks(level, body);
+				if (!body.onGround()) // 尚未落地：用原版碰撞向下移动（受方块支撑即停）
+					body.move(net.minecraft.world.entity.MoverType.SELF, new net.minecraft.world.phys.Vec3(0.0, -0.04, 0.0));
+				body.setOldPosAndRot();
 			}
+		}
+	}
+
+	/** 实体包围盒卡进方块时逐 1/16 抬出（最多 2 格）：修复出生点低于地表导致的"沉进地里"（只看方块，不算其他实体） */
+	private static void liftOutOfBlocks(ClientLevel level, net.minecraft.world.entity.Entity e) {
+		for (int i = 0; i < 32 && !level.noBlockCollision(e, e.getBoundingBox()); i++) {
+			e.setPos(e.getX(), e.getY() + 1.0 / 16.0, e.getZ());
+			e.setOldPosAndRot();
 		}
 	}
 
@@ -781,10 +836,19 @@ public final class MahjongTableClient {
 					if (occ == null)
 						occ = handOcc[p.seat()] = new HashMap<>();
 					int n = occ.merge(p.code(), 1, Integer::sum);
-					// 隐藏手牌 + 最近打牌为手切：牌背 occ 整体 +1 错位——牌行中一张牌背消失，
-					// 刚摸的那张（分离位）平滑滑回牌行尾；否则永远表现为刚摸的牌消失（摸切观感）
-					int shift = msg.hidden()[p.seat()] > 0 && msg.tedashi()[p.seat()] == 1 ? 1 : 0;
-					out.add(new Slot(p, "hand:" + p.seat() + ":" + p.code() + ":" + (n - 1 + shift), itemSig(p), null));
+					String key;
+					if (msg.hidden()[p.seat()] > 0) {
+						// 牌背全同（code=-1）：按槽位编号。刚摸的那张固定 "d"；手切后由牌行末位继承 "d"，
+						// 于是"分离的牌滑进牌行、牌行消失一张"——连续手切也不会退化成摸切观感
+						//（旧做法每帧统一 +1 偏移，连续手切时前后帧偏移相同，仍表现为刚摸的那张消失）
+						boolean last = p.index() == msg.hidden()[p.seat()] - 1;
+						boolean drawn = msg.drawnSeat() == p.seat() && last;
+						boolean handCut = msg.drawnSeat() != p.seat() && msg.tedashi()[p.seat()] == 1 && last;
+						key = "hand:" + p.seat() + ":h:" + (drawn || handCut ? "d" : String.valueOf(p.index()));
+					} else {
+						key = "hand:" + p.seat() + ":" + p.code() + ":" + (n - 1);
+					}
+					out.add(new Slot(p, key, itemSig(p), null));
 				}
 				case TableLayout.KIND_RIVER ->
 					out.add(new Slot(p, "river:" + p.seat() + ":" + p.index(), itemSig(p), null));
@@ -870,6 +934,38 @@ public final class MahjongTableClient {
 		}
 		table.keyed.clear();
 		table.keyed.putAll(fresh);
+	}
+
+	/**
+	 * 强制摊手（观战摊手选项）下的局终推倒：服务端把某家手牌从立牌改为推倒/盖牌时，
+	 * 客户端此前已被强制摊平（外观签名不变），推倒过渡动画会被吞掉。
+	 * 这里先把该家每张手牌就地复位为立牌（登记立牌签名），随后 diffApply 检测到"立牌 → 平躺"
+	 * 的签名变化即按原有逻辑播放推倒动画（先复位再播放）。
+	 */
+	private static void resetHandsForReveal(ClientLevel level, TableRender table, TableLayout.Geom geom,
+			List<Slot> slots, MahjongTablePayload.ViewMessage msg, MahjongTablePayload.ViewMessage prev) {
+		for (Slot slot : slots) {
+			TableLayout.Placement p = slot.p();
+			if (!TableLayout.KIND_HAND.equals(p.kind()) || p.axis() == null)
+				continue;
+			int seat = p.seat();
+			// 仅"服务端本包由立牌改为推倒/盖牌"的家需要复位
+			if (prev.handsExposed()[seat] != RichiTableState.HAND_STAND
+					|| msg.handsExposed()[seat] == RichiTableState.HAND_STAND)
+				continue;
+			Entry old = table.keyed.get(slot.slotKey());
+			if (old == null)
+				continue;
+			Entity e = level.getEntity(old.entityId());
+			if (e == null || e.isRemoved())
+				continue;
+			float standYaw = (float) Math.toDegrees(Math.atan2(-geom.outs()[seat].x, geom.outs()[seat].z));
+			TableLayout.Placement stand = new TableLayout.Placement(TableLayout.KIND_HAND,
+					TableLayout.standingEntityPos(p.base()), p.base(), p.code(), standYaw, null, p.faceUp(),
+					seat, p.index(), 0);
+			spawnKeyed(level, table, slot.slotKey(), itemSig(stand),
+					handNbt(p, true, TableLayout.handTag(seat, p.index()), level), stand.pos(), standYaw);
+		}
 	}
 
 	/** 位置或朝向是否变化（决定是否走插值移动） */

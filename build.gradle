@@ -77,13 +77,6 @@ neoForge {
     runs {
         client {
             client()
-
-            def mcreatorJvmOptions = System.getenv('MCREATOR_JVM_OPTIONS')
-            if (mcreatorJvmOptions) {
-                mcreatorJvmOptions.split("\\s+").findAll { it.trim() }.each { arg ->
-                    jvmArgument(arg)
-                }
-            }
         }
         server {
             server()
@@ -107,7 +100,7 @@ neoForge {
     }
 
     mods {
-        mcreator {
+        riichi_arise {
             sourceSet sourceSets.main
         }
     }
@@ -129,4 +122,13 @@ tasks.named('jar', Jar).configure {
     }
 }
 
-apply from: 'mcreator.gradle'
+// IDE 的 Java 扩展（JDT LS）默认把 dev 运行的 mod 目录指向 bin/main（Eclipse 风格输出目录），
+// 那边不会同步 src/main/resources，类也常是旧的，导致"改了没生效"。这里在每次 classes 结束后
+// 把最新产物（类 + 资源）镜像到 bin/main，让这种启动方式也能拿到最新内容。
+tasks.register('syncBinMain', Sync) {
+    from sourceSets.main.output
+    into layout.projectDirectory.dir('bin/main')
+}
+tasks.named('classes').configure {
+    finalizedBy 'syncBinMain'
+}

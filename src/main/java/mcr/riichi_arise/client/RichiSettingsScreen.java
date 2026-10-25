@@ -19,7 +19,7 @@ import mcr.riichi_arise.network.MahjongSettingsPayloads;
  * <ul>
  * <li><b>客户端</b>：观战摊手 / AI 形象姿态 / 观战显示牌局内容——本地配置（RichiConfig），点击切换并保存。</li>
  * <li><b>个人设定</b>：角色语音——点击进入语音选择界面（VoiceSettingsScreen）。</li>
- * <li><b>世界规则</b>：useAkochan / 网络接口自动开启 gamerule，以及内网端口手动开关（管理员可改，经服务端包）。</li>
+ * <li><b>世界规则</b>：网络接口自动开启 gamerule，以及内网端口手动开关（管理员可改，经服务端包）。</li>
  * </ul>
  * 样式与大厅管理界面一致：灰色半透明行（悬停高亮、禁用暗灰）+ 金色分隔线。
  */
@@ -32,7 +32,8 @@ public class RichiSettingsScreen extends Screen {
 	private final BlockPos origin;
 
 	/** 行类型 */
-	private static final int HEADER = 0, CLIENT_TOGGLE = 1, PERSONAL_VOICE = 2, WORLD_TOGGLE = 3, NET_TOGGLE = 4;
+	private static final int HEADER = 0, CLIENT_TOGGLE = 1, PERSONAL_VOICE = 2, WORLD_TOGGLE = 3, NET_TOGGLE = 4,
+			CLIENT_CORNER = 5;
 
 	private record Row(int kind, int cat, String labelKey, String value, boolean enabled, int extra) {
 	}
@@ -104,6 +105,17 @@ public class RichiSettingsScreen extends Screen {
 		return mcr.riichi_arise.voice.VoiceCharacters.displayName(s.ownVoice());
 	}
 
+	/** 宝牌指示叠加层位置（四角预设）当前值的显示名 */
+	private String cornerName() {
+		String key = switch (RichiConfig.HUD_DORA_CORNER.get()) {
+			case TOP_RIGHT -> "top_right";
+			case BOTTOM_LEFT -> "bottom_left";
+			case BOTTOM_RIGHT -> "bottom_right";
+			default -> "top_left";
+		};
+		return Component.translatable("gui.riichi_arise.settings.corner_" + key).getString();
+	}
+
 	private List<Row> rows() {
 		List<Row> r = new ArrayList<>();
 		// 客户端（本地配置）
@@ -112,6 +124,7 @@ public class RichiSettingsScreen extends Screen {
 			r.add(clientRow("gui.riichi_arise.settings.client_spectator_open", RichiConfig.SPECTATOR_OPEN_HANDS));
 			r.add(clientRow("gui.riichi_arise.settings.client_avatar_stand", RichiConfig.MAHJONG_AVATAR_STANDING));
 			r.add(clientRow("gui.riichi_arise.settings.client_spectator_show", RichiConfig.SPECTATOR_SHOW_TABLE));
+			r.add(new Row(CLIENT_CORNER, 0, "gui.riichi_arise.settings.client_hud_corner", cornerName(), true, 0));
 		}
 		// 个人设定
 		r.add(new Row(HEADER, 1, "gui.riichi_arise.settings.cat_personal", expanded[1] ? "▾" : "▸", true, 0));
@@ -122,11 +135,8 @@ public class RichiSettingsScreen extends Screen {
 		if (expanded[2]) {
 			boolean admin = this.sync != null && this.sync.canManage();
 			boolean loaded = this.sync != null;
-			boolean ako = loaded && this.sync.useAkochan();
 			boolean auto = loaded && this.sync.autoOpenNetPort();
 			boolean running = loaded && this.sync.netRunning();
-			r.add(new Row(WORLD_TOGGLE, 2, "gui.riichi_arise.settings.world_use_akochan",
-					loaded ? onOff(ako) : "...", admin, MahjongSettingsPayloads.RULE_USE_AKOCHAN));
 			r.add(new Row(WORLD_TOGGLE, 2, "gui.riichi_arise.settings.world_auto_net",
 					loaded ? onOff(auto) : "...", admin, MahjongSettingsPayloads.RULE_AUTO_NET));
 			String netVal = !loaded ? "..." : running
@@ -262,24 +272,24 @@ public class RichiSettingsScreen extends Screen {
 					v = RichiConfig.SPECTATOR_SHOW_TABLE;
 				v.set(!v.get());
 				RichiConfig.SPEC.save();
+				// 实时生效：按最近一次快照立即重建牌桌（观战摊手 / AI 形象姿态等无需等下一包）
+				MahjongTableClient.refreshAll();
 			}
 			case PERSONAL_VOICE -> VoiceSettingsScreen.open(this.origin);
+			case CLIENT_CORNER -> {
+				// 四角循环切换（HUD 逐帧读配置，切换即生效）
+				RichiConfig.HudCorner[] all = RichiConfig.HudCorner.values();
+				RichiConfig.HUD_DORA_CORNER.set(all[(RichiConfig.HUD_DORA_CORNER.get().ordinal() + 1) % all.length]);
+				RichiConfig.SPEC.save();
+			}
 			case WORLD_TOGGLE -> {
 				if (this.sync == null || !this.sync.canManage())
 					return;
-				int extra = row.extra();
-				boolean cur = extra == MahjongSettingsPayloads.RULE_AUTO_NET ? this.sync.autoOpenNetPort()
-						: this.sync.useAkochan();
-				send(MahjongSettingsPayloads.ACT_SET_GAMERULE, extra, cur ? 0 : 1);
+				boolean cur = this.sync.autoOpenNetPort();
+				send(MahjongSettingsPayloads.ACT_SET_GAMERULE, row.extra(), cur ? 0 : 1);
 				// 乐观更新，服务端 Sync 到达后校正
-				if (extra == MahjongSettingsPayloads.RULE_AUTO_NET)
-					this.sync = new MahjongSettingsPayloads.SettingsSync(this.sync.useAkochan(), !cur,
-							this.sync.netRunning(), this.sync.netPort(), this.sync.netBind(), this.sync.netConn(),
-							this.sync.canManage());
-				else
-					this.sync = new MahjongSettingsPayloads.SettingsSync(!cur, this.sync.autoOpenNetPort(),
-							this.sync.netRunning(), this.sync.netPort(), this.sync.netBind(), this.sync.netConn(),
-							this.sync.canManage());
+				this.sync = new MahjongSettingsPayloads.SettingsSync(!cur, this.sync.netRunning(),
+						this.sync.netPort(), this.sync.netBind(), this.sync.netConn(), this.sync.canManage());
 			}
 			case NET_TOGGLE -> {
 				if (this.sync == null || !this.sync.canManage())
@@ -287,8 +297,8 @@ public class RichiSettingsScreen extends Screen {
 				send(this.sync.netRunning() ? MahjongSettingsPayloads.ACT_NET_STOP : MahjongSettingsPayloads.ACT_NET_START,
 						0, 0);
 				// 乐观更新端口状态
-				this.sync = new MahjongSettingsPayloads.SettingsSync(this.sync.useAkochan(),
-						this.sync.autoOpenNetPort(), !this.sync.netRunning(), this.sync.netPort(), this.sync.netBind(),
+				this.sync = new MahjongSettingsPayloads.SettingsSync(this.sync.autoOpenNetPort(),
+						!this.sync.netRunning(), this.sync.netPort(), this.sync.netBind(),
 						this.sync.netConn(), this.sync.canManage());
 			}
 			default -> {

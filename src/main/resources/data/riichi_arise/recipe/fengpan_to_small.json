@@ -1,0 +1,11 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "misc",
+  "ingredients": [
+    { "item": "riichi_arise:fengpan" }
+  ],
+  "result": {
+    "id": "riichi_arise:fengpan_small",
+    "count": 1
+  }
+}

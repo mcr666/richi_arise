@@ -34,6 +34,16 @@ public class RichiTableState {
 	/** AI 打牌速度档：0=快(现行) 1=中(×2) 2=慢(×3)；AI 动作延迟统一乘该系数 */
 	public static final int[] AI_SPEED_MUL = { 1, 2, 3 };
 	public int aiSpeedIdx = 0;
+	/** 结算界面节奏（客户端渲染与服务端确认门控共用，刻）：弹出后延迟 1s 开始报番 */
+	public static final int SETTLE_ANNOUNCE_DELAY = 20;
+	/** 无报番语音时每条役种的显现间隔（0.5s） */
+	public static final int SETTLE_ANNOUNCE_STEP = 10;
+	/** 报番结束 → 番符/点数/段位依次显现的三段延迟合计（2s） */
+	public static final int SETTLE_TIER_OFFSET = 40;
+	/** 段位显现后的确认倒计时（5s）：归零时客户端自动回 settle_confirm */
+	public static final int SETTLE_CONFIRM_TICKS = 5 * 20;
+	/** 有真实客户端时的服务端兜底时限（防挂机/掉线；正常由客户端自动确认推进） */
+	public static final int SETTLE_FALLBACK_TICKS = 20 * 20;
 	/** 本场数（连庄/流局累加，庄家输牌清零；本场费 300/本场） */
 	public int honba = 0;
 
@@ -41,6 +51,8 @@ public class RichiTableState {
 	public int gamesStarted = 0;
 	/** 各座位独立 AI 形象模式（索引同座位；null/空 = 随机形态） */
 	public final String[] aiAvatarModes = new String[4];
+	/** 本局各座位的角色形象（开局洗牌时角色随 AI 迁移到此数组；不改 aiAvatarModes——它是"预约座位"的设置，存档按预约座位保存） */
+	public final String[] aiSeatModes = new String[4];
 	/** AI 形象脏标记：预约/形象模式变化后置 true，resolveAvatars 解析一次后清除（避免每次广播重复解析阻塞主线程） */
 	public transient boolean avatarsDirty = true;
 	/** 各 AI 座位最终形态 id（deal 时按 aiAvatarModes 解析随机并固定；空 = 非 AI/未开局）。随座位轮转迁移，经同步包下发客户端渲染假玩家 */
@@ -50,10 +62,8 @@ public class RichiTableState {
 	/** 各 AI 座位人类模式皮肤档案 UUID（空串 = 未解析到正版档案） */
 	public final String[] aiAvatarSkins = new String[4];
 	/**
-	 * 各 AI 座位流派（resolveAvatars 按形象/名字分配）：
-	 * 0 一般流(20%次优切牌，可副露可防守) / 1 野猪流(可副露无防守) / 2 门清流(无副露有防守) /
-	 * 3 御无双(无副露无防守) / 4 魂天流(可副露会防守) / 5 闪电流(只摸切) / 6 鬼神境(知他家手牌，可副露可防守) /
-	 * 7 akochan流(外部进程 AI，切牌/立直/鸣牌全由 akochan 决策，超时回落本地逻辑)
+	 * 各 AI 座位流派（resolveAvatars 按形象/名字分配）：下标与 {@link RiichiBot#FLOW_NAMES} 对应，
+	 * 0 一般流 / 1 野猪流 / 2 门清流 / 3 御无双 / 4 魂天流 / 5 鬼神境
 	 */
 	public final int[] aiFlows = new int[4];
 	/** 明牌（默认关）：关时参战雀士看不到他人手牌牌面（打出/推倒后可见），显示未知牌面；观战者始终可见全部 */
@@ -110,6 +120,8 @@ public class RichiTableState {
 	public int drawnSeat = -1;
 	/** 结算横幅文本（瞬态，客户端 text_display 渲染；finishRound 设置，resetHand 清空） */
 	public String banner = "";
+	/** 剧本牌局（临时，拍视频用）：null = 普通对局；不参与存档。见 FilmScenario */
+	public transient mcr.riichi_arise.game.riichi.FilmScenario film;
 
 	public RichiTableState() {
 		java.util.Arrays.fill(points, 25000);

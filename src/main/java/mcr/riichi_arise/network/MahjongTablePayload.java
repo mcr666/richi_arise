@@ -41,9 +41,13 @@ import mcr.riichi_arise.RichiiAriseMod;
 			if (context.flow() == PacketFlow.CLIENTBOUND) {
 				context.enqueueWork(() -> {
 					mcr.riichi_arise.client.MahjongTableClient.apply(message);
-					// 左上角宝牌/场供叠加层数据：参战玩家更新；或为当前叠加层所在桌（同 origin）
-					// 的观战/离桌包也同步 phase（用于隐藏）。观战其他桌不覆盖。
-					if (message.viewerSeat() >= 0 || MahjongTablePayload.gameOriginPacked == message.originPacked()) {
+					// 左上角宝牌/场供叠加层数据：参战玩家、开启"观战显示牌局内容"的观战者，
+					// 或为当前叠加层所在桌（同 origin）的观战/离桌包也同步 phase（用于隐藏）。
+					// 服务端只向桌心 16 格内的玩家发包，因此观战者收到的包必然就在附近。
+					boolean spectatorView = message.viewerSeat() < 0
+							&& mcr.riichi_arise.RichiConfig.SPECTATOR_SHOW_TABLE.get();
+					if (message.viewerSeat() >= 0 || spectatorView
+							|| MahjongTablePayload.gameOriginPacked == message.originPacked()) {
 						MahjongTablePayload.gameOriginPacked = message.originPacked();
 						MahjongTablePayload.gamePhase = message.phase();
 						MahjongTablePayload.gameViewerSeat = message.viewerSeat();

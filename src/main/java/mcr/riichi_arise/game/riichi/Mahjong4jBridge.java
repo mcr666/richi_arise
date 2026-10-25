@@ -236,6 +236,70 @@ public final class Mahjong4jBridge {
 					han += open ? NormalYaku.IKKITSUKAN.getKuisagari() : NormalYaku.IKKITSUKAN.getHan();
 				}
 			}
+			// 一杯口/二杯口（均须门清）：
+			// 1) mahjong4j 的 PeikoResolver 只比对顺子列表里前两个不同顺子，重复顺子排在第三个不同顺子之后
+			//    会漏判（123m456m789p789p55s 这种常见形只剩自摸）；
+			// 2) 它只看顺子本身是否副露，手里有明刻/明杠时仍会误判。
+			// 门清时按全部面子分解重算（二杯口优先、与一杯口互斥），非门清一律撤销。
+			boolean hasIpeiko = names.contains(NormalYaku.IPEIKO.name());
+			boolean hasRyanpeiko = names.contains(NormalYaku.RYANPEIKO.name());
+			if (open) {
+				if (hasIpeiko) {
+					names.remove(NormalYaku.IPEIKO.name());
+					han -= NormalYaku.IPEIKO.getKuisagari();
+				}
+				if (hasRyanpeiko) {
+					names.remove(NormalYaku.RYANPEIKO.name());
+					han -= NormalYaku.RYANPEIKO.getKuisagari();
+				}
+			} else {
+				int peiko = 0;
+				for (org.mahjong4j.hands.MentsuComp mc : hands.getMentsuCompSet())
+					peiko = Math.max(peiko, detectPeiko(mc.getShuntsuList()));
+				if (peiko >= 2) {
+					if (hasIpeiko) { // 升级为二杯口：撤掉已计的一杯口
+						names.remove(NormalYaku.IPEIKO.name());
+						han -= NormalYaku.IPEIKO.getHan();
+					}
+					if (!hasRyanpeiko) {
+						names.add(NormalYaku.RYANPEIKO.name());
+						han += NormalYaku.RYANPEIKO.getHan();
+					}
+				} else if (peiko == 1 && !hasIpeiko && !hasRyanpeiko) {
+					names.add(NormalYaku.IPEIKO.name());
+					han += NormalYaku.IPEIKO.getHan();
+				}
+			}
+			// 混全/纯全带幺九：mahjong4j 只看面子不看雀头，且两者会同时给出——按面子分解重算。
+			// 规则：所有面子 + 雀头都含 1/9（纯全）或 1/9+字牌（混全）；至少有一个顺子（全刻子属混老头/清老头）。
+			boolean hasChanta = names.contains(NormalYaku.CHANTA.name());
+			boolean hasJunchan = names.contains(NormalYaku.JUNCHAN.name());
+			if (hasChanta || hasJunchan) {
+				int idx = Integer.MAX_VALUE;
+				if (hasChanta)
+					idx = Math.min(idx, names.indexOf(NormalYaku.CHANTA.name()));
+				if (hasJunchan)
+					idx = Math.min(idx, names.indexOf(NormalYaku.JUNCHAN.name()));
+				if (hasChanta) {
+					names.remove(NormalYaku.CHANTA.name());
+					han -= open ? NormalYaku.CHANTA.getKuisagari() : NormalYaku.CHANTA.getHan();
+				}
+				if (hasJunchan) {
+					names.remove(NormalYaku.JUNCHAN.name());
+					han -= open ? NormalYaku.JUNCHAN.getKuisagari() : NormalYaku.JUNCHAN.getHan();
+				}
+				int chanta = 0;
+				for (org.mahjong4j.hands.MentsuComp mc : hands.getMentsuCompSet())
+					chanta = Math.max(chanta, detectChanta(mc));
+				if (chanta > 0) {
+					boolean junchan = chanta == 2;
+					names.add(idx >= names.size() ? names.size() : idx,
+							junchan ? NormalYaku.JUNCHAN.name() : NormalYaku.CHANTA.name());
+					han += junchan
+							? (open ? NormalYaku.JUNCHAN.getKuisagari() : NormalYaku.JUNCHAN.getHan())
+							: (open ? NormalYaku.CHANTA.getKuisagari() : NormalYaku.CHANTA.getHan());
+				}
+			}
 			// 三暗刻规则：荣和时由和牌张凑成的刻不算暗刻——若无不含和牌张的 3 暗刻分解则撤销该役
 			if (!tsumo && names.contains(NormalYaku.SANANKO.name())
 					&& !hasAnkoExcludingWin(hands, toTile(last), 3)) {
@@ -433,16 +497,80 @@ public final class Mahjong4jBridge {
 		return false;
 	}
 
-	/** 一气通贯补判：同花色 123/456/789 三顺齐即成立 */
+	/** 一气通贯补判：同花色 123/456/789 三顺齐即成立（顺子的标识牌是中张：123=2、456=5、789=8） */
 	private static boolean detectIttsu(List<Shuntsu> shuntsu) {
 		for (int suit = 0; suit < 3; suit++) {
 			int mask = 0;
 			for (Shuntsu s : shuntsu)
 				if (s.getTile().getType().ordinal() == suit)
-					mask |= 1 << (s.getTile().getNumber() - 1);
-			if ((mask & 0b100100011) == 0b100100011) // 1、4、7 起始顺齐
+					mask |= 1 << s.getTile().getNumber();
+			if ((mask & 0b100100100) == 0b100100100) // 2、5、8 三个顺子齐
 				return true;
 		}
 		return false;
+	}
+
+	/**
+	 * 一杯口/二杯口补判：成对的相同顺子组数（0/1/2）。
+	 * mahjong4j 的 PeikoResolver.peiko() 只跟踪前两个不同的顺子，重复顺子若排在第三个不同顺子之后
+	 * 会漏判（如 123m 456m 789p 789p 55s 只算自摸）；这里按全部顺子两两配对统计。
+	 * 有副露顺子时返回 0（一杯口/二杯口须门清）。
+	 */
+	private static int detectPeiko(List<Shuntsu> shuntsu) {
+		for (Shuntsu s : shuntsu)
+			if (s.isOpen())
+				return 0;
+		boolean[] used = new boolean[shuntsu.size()];
+		int pairs = 0;
+		for (int i = 0; i < shuntsu.size(); i++) {
+			if (used[i])
+				continue;
+			for (int j = i + 1; j < shuntsu.size(); j++) {
+				if (used[j] || !shuntsu.get(i).equals(shuntsu.get(j)))
+					continue;
+				used[i] = true;
+				used[j] = true;
+				pairs++;
+				break;
+			}
+		}
+		return Math.min(pairs, 2);
+	}
+
+	/**
+	 * 混全/纯全带幺九补判：0 = 不成立，1 = 混全带幺九，2 = 纯全带幺九。
+	 * 要求：所有面子与雀头都含老头牌(1/9)（纯全）或老头牌+字牌（混全）；至少有一个顺子
+	 * （全刻子的幺九手属混老头/清老头，交给 mahjong4j）；纯全还要求整手无字牌。
+	 */
+	private static int detectChanta(org.mahjong4j.hands.MentsuComp mc) {
+		if (mc.getShuntsuCount() == 0)
+			return 0;
+		boolean honor = false;
+		// 雀头
+		Tile janto = mc.getJanto().getTile();
+		if (!janto.isYaochu())
+			return 0;
+		if (isHonor(janto))
+			honor = true;
+		// 面子：顺子看是否 123/789（顺子的标识牌是中张：123=2、789=8），刻子/杠看牌面
+		for (org.mahjong4j.hands.Mentsu m : mc.getAllMentsu()) {
+			Tile t = m.getTile();
+			if (m instanceof Shuntsu) {
+				int n = t.getNumber();
+				if (n != 2 && n != 8)
+					return 0;
+			} else {
+				if (!t.isYaochu())
+					return 0;
+				if (isHonor(t))
+					honor = true;
+			}
+		}
+		return honor ? 1 : 2;
+	}
+
+	/** 字牌（东南西北白发中）：Tile 枚举里排在数牌之后 */
+	private static boolean isHonor(Tile t) {
+		return t.ordinal() >= Tile.TON.ordinal();
 	}
 }

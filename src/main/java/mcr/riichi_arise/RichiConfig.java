@@ -13,21 +13,38 @@ public class RichiConfig {
 	public static final ModConfigSpec.BooleanValue MAHJONG_AVATAR_STANDING;
 	/** 麻雀观战是否显示牌局内容：true=桌心 8 格内观战者也会被打开和牌/结算界面并收到牌局聊天（默认开），false=观战者仅旁观 */
 	public static final ModConfigSpec.BooleanValue SPECTATOR_SHOW_TABLE;
+	/** 宝牌指示叠加层位置（屏幕四角预设） */
+	public static final ModConfigSpec.EnumValue<HudCorner> HUD_DORA_CORNER;
+
+	/** 宝牌指示叠加层的四个角落预设 */
+	public enum HudCorner {
+		TOP_LEFT, TOP_RIGHT, BOTTOM_LEFT, BOTTOM_RIGHT
+	}
 
 	public static final ModConfigSpec SPEC;
 
 	static {
 		ModConfigSpec.Builder builder = new ModConfigSpec.Builder();
+		// NeoForge 内置配置屏的标签默认是 "riichi_arise.configuration.<path>"（未翻译 → 直接显示原始键），
+		// 这里为分类与每一项显式指定语言键，与游戏内自建设置面板共用同一套文本
+		builder.translation("gui.riichi_arise.settings.cat_client");
 		builder.push("client");
 		SPECTATOR_OPEN_HANDS = builder
 				.comment("Mahjong spectator view: display all four players' hands face-up (flat). Default: false")
+				.translation("gui.riichi_arise.settings.client_spectator_open")
 				.define("spectatorOpenHands", false);
 		MAHJONG_AVATAR_STANDING = builder
 				.comment("Mahjong AI avatar pose: true = standing (default standing animation), false = riding crouch pose. Default: false")
+				.translation("gui.riichi_arise.settings.client_avatar_stand")
 				.define("mahjongAvatarStanding", false);
 		SPECTATOR_SHOW_TABLE = builder
 				.comment("Mahjong spectator shows table content: when true, spectators within 8 blocks of the table are also shown the win/settlement screens and table chat. Default: true")
+				.translation("gui.riichi_arise.settings.client_spectator_show")
 				.define("spectatorShowTable", true);
+		HUD_DORA_CORNER = builder
+				.comment("Mahjong HUD: corner where the dora indicator overlay is drawn. Default: TOP_LEFT")
+				.translation("gui.riichi_arise.settings.client_hud_corner")
+				.defineEnum("hudDoraCorner", HudCorner.TOP_LEFT);
 		builder.pop();
 		SPEC = builder.build();
 	}

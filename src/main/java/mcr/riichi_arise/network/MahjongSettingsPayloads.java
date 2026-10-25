@@ -26,11 +26,11 @@ import mcr.riichi_arise.net.RichiNetManager;
 public class MahjongSettingsPayloads {
 	/** C→S 动作：请求同步 / 设 gamerule / 开端口 / 关端口 */
 	public static final int ACT_REQUEST_SYNC = 0, ACT_SET_GAMERULE = 1, ACT_NET_START = 2, ACT_NET_STOP = 3;
-	/** gamerule 下标（ACT_SET_GAMERULE 的 extra）：useAkochan / autoOpenNetPort */
-	public static final int RULE_USE_AKOCHAN = 0, RULE_AUTO_NET = 1;
+	/** gamerule 下标（ACT_SET_GAMERULE 的 extra）：autoOpenNetPort */
+	public static final int RULE_AUTO_NET = 0;
 
 	/** S→C：设置状态同步 */
-	public record SettingsSync(boolean useAkochan, boolean autoOpenNetPort,
+	public record SettingsSync(boolean autoOpenNetPort,
 			boolean netRunning, int netPort, String netBind, int netConn, boolean canManage)
 			implements CustomPacketPayload {
 		public static final Type<SettingsSync> TYPE = new Type<>(
@@ -38,7 +38,6 @@ public class MahjongSettingsPayloads {
 
 		public static final StreamCodec<RegistryFriendlyByteBuf, SettingsSync> STREAM_CODEC = StreamCodec.of(
 				(RegistryFriendlyByteBuf buf, SettingsSync m) -> {
-					buf.writeBoolean(m.useAkochan());
 					buf.writeBoolean(m.autoOpenNetPort());
 					buf.writeBoolean(m.netRunning());
 					buf.writeVarInt(m.netPort());
@@ -46,7 +45,7 @@ public class MahjongSettingsPayloads {
 					buf.writeVarInt(m.netConn());
 					buf.writeBoolean(m.canManage());
 				},
-				(RegistryFriendlyByteBuf buf) -> new SettingsSync(buf.readBoolean(), buf.readBoolean(),
+				(RegistryFriendlyByteBuf buf) -> new SettingsSync(buf.readBoolean(),
 						buf.readBoolean(), buf.readVarInt(), buf.readUtf(64), buf.readVarInt(), buf.readBoolean()));
 
 		@Override
@@ -101,8 +100,6 @@ public class MahjongSettingsPayloads {
 					server.getGameRules().getRule(RichiGameRules.AUTO_OPEN_NET_PORT).set(val, server);
 					if (val && !RichiNetManager.isRunning())
 						RichiNetManager.start(server, RichiNetConfig.PORT, RichiNetConfig.BIND);
-				} else if (msg.extra() == RULE_USE_AKOCHAN) {
-					server.getGameRules().getRule(RichiGameRules.USE_AKOCHAN).set(val, server);
 				}
 				sendSync(sp);
 			}
@@ -128,7 +125,6 @@ public class MahjongSettingsPayloads {
 	public static void sendSync(ServerPlayer sp) {
 		MinecraftServer server = sp.getServer();
 		SettingsSync sync = new SettingsSync(
-				server.getGameRules().getBoolean(RichiGameRules.USE_AKOCHAN),
 				server.getGameRules().getBoolean(RichiGameRules.AUTO_OPEN_NET_PORT),
 				RichiNetManager.isRunning(),
 				RichiNetManager.port(),

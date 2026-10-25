@@ -183,7 +183,9 @@ public class FengPanBlock extends Block {
 	/** 桌面几何中心（正常 2x2 区域中点；小型单方块取方块中心），y 取桌面顶面 */
 	public static Vec3 getTableCenter(BlockState state, BlockPos pos) {
 		if (isSmall(state))
-			return new Vec3(pos.getX() + 0.5, pos.getY() + 0.0625, pos.getZ() + 0.5);
+			return new Vec3(pos.getX() + 0.5,
+					pos.getY() + 0.0625 - FengPanSmallBlock.slabDrop(state),
+					pos.getZ() + 0.5);
 		BlockPos origin = getOrigin(state, pos);
 		Direction forward = state.getValue(FACING);
 		Direction right = forward.getClockWise();
@@ -215,7 +217,7 @@ public class FengPanBlock extends Block {
 		}
 	}
 
-	/** 准心触及范围：各部分的选中框均覆盖整张桌子（2x2 平面、高 1 格），任意部分都能选中全桌 */
+	/** 准心触及范围：各部分的选中框均覆盖整张桌子（2x2 平面、高 1 单位＝模型薄板厚度），任意部分都能选中全桌 */
 	@Override
 	protected net.minecraft.world.phys.shapes.VoxelShape getShape(BlockState state, BlockGetter level,
 			BlockPos pos, net.minecraft.world.phys.shapes.CollisionContext context) {
@@ -230,7 +232,7 @@ public class FengPanBlock extends Block {
 		double z2 = 0.5 + forward.getStepZ() * (SIZE - 1 - tx) + right.getStepZ() * (SIZE - 1 - tz);
 		return net.minecraft.world.phys.shapes.Shapes.box(
 				Math.min(x1, x2), 0, Math.min(z1, z2),
-				Math.max(x1, x2), 1.0, Math.max(z1, z2));
+				Math.max(x1, x2), 1.0 / 16.0, Math.max(z1, z2));
 	}
 
 	/**
@@ -531,11 +533,9 @@ public class FengPanBlock extends Block {
 	 */
 	public static void resolveAvatars(net.minecraft.server.level.ServerLevel level, RichiTableState st) {
 		for (int seat = 0; seat < 4; seat++) {
-			// 等待/终局阶段：预约 AI 或本局 AI 座位都算（终局未清桌时本局 AI 形象不应凭空消失）。
-			// 判定须与 RichiTableSync#sendTo 下发形象的条件保持一致，否则 form 被清空 → 客户端移除假玩家。
+			// 等待阶段补充"下一局预约"；终局只认本局 aiSeat（预约席是洗牌前的座位号，与终局实际座位无关）
 			boolean ai = st.aiSeat[seat]
-					|| ((st.phase == RichiTableState.PHASE_WAITING
-							|| st.phase == RichiTableState.PHASE_FINISHED) && st.reservedAI[seat]);
+					|| (st.phase == RichiTableState.PHASE_WAITING && st.reservedAI[seat]);
 			if (!ai) {
 				st.aiAvatarForms[seat] = "";
 				st.aiAvatarNames[seat] = "";
@@ -552,7 +552,8 @@ public class FengPanBlock extends Block {
 				continue;
 			}
 			// 每座位独立角色；空/未知 = 默认（一般流 + 随机名 + 在线玩家皮肤）
-			String mode = st.aiAvatarModes[seat];
+			// 对局中/终局取"本局座位角色"（开局洗牌时随 AI 迁移），等待阶段取预约设置
+			String mode = st.phase == RichiTableState.PHASE_WAITING ? st.aiAvatarModes[seat] : st.aiSeatModes[seat];
 			if (!mcr.riichi_arise.game.riichi.AiCharacters.isKnown(mode))
 				mode = mcr.riichi_arise.game.riichi.AiCharacters.DEFAULT;
 			String name;
