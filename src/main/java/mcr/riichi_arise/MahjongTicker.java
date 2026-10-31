@@ -148,6 +148,11 @@ public class MahjongTicker {
 		if (!event.getEntity().level().isClientSide())
 			mcr.riichi_arise.game.MahjongLobby.handlePlayerLeave(event.getEntity().getServer(),
 					event.getEntity().getStringUUID());
+		// 清掉该观看者的网络去重记录（形象索引 / 上次已发包），重连后重新下发
+		try {
+			mcr.riichi_arise.game.RichiTableSync.forget(java.util.UUID.fromString(event.getEntity().getStringUUID()));
+		} catch (IllegalArgumentException ignored) {
+		}
 	}
 
 	/** 玩家切换维度：自动退出牌局 */
@@ -156,6 +161,12 @@ public class MahjongTicker {
 		if (!event.getEntity().level().isClientSide())
 			mcr.riichi_arise.game.MahjongLobby.handlePlayerLeave(event.getEntity().getServer(),
 					event.getEntity().getStringUUID());
+		// 换维度后原桌可能仍在附近范围内：清掉去重记录，避免"上次已发包"挡住新桌面重发
+		// （注意：刚退出牌局途中可能还有一包要发，因此只清"整包比对"记录，保留形象索引缓存）
+		try {
+			mcr.riichi_arise.game.RichiTableSync.forgetViewer(java.util.UUID.fromString(event.getEntity().getStringUUID()));
+		} catch (IllegalArgumentException ignored) {
+		}
 	}
 
 	/** 服务端停止：关闭内网接入端口（net 模块） */

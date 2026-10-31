@@ -64,6 +64,7 @@ public class RichiiAriseMod {
 
 		// 麻雀网络包注册
 		MahjongCountdownPayload.register();
+		mcr.riichi_arise.network.WinEffectPayload.register();
 		FengPanMusicPayload.register();
 		MahjongLobbyPayloads.register();
 		MahjongGamePayloads.register();

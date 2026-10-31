@@ -21,7 +21,14 @@ import net.minecraft.client.gui.components.LerpingBossEvent;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.client.player.RemotePlayer;
+import net.minecraft.client.renderer.RenderType;
+import net.minecraft.client.renderer.block.model.BakedQuad;
+import net.minecraft.client.renderer.block.model.ItemOverrides;
+import net.minecraft.client.renderer.texture.TextureAtlasSprite;
+import net.minecraft.client.resources.model.BakedModel;
+import net.minecraft.client.resources.model.ModelResourceLocation;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.DoubleTag;
 import net.minecraft.nbt.FloatTag;
@@ -29,11 +36,23 @@ import net.minecraft.nbt.ListTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.SynchedEntityData;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.Mth;
+import net.minecraft.util.RandomSource;
 import net.minecraft.world.entity.Display;
 import net.minecraft.world.entity.Display.TextDisplay;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.item.ItemDisplayContext;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
+
+import net.neoforged.neoforge.client.event.ModelEvent;
+import net.neoforged.bus.api.SubscribeEvent;
+
+import com.mojang.blaze3d.vertex.PoseStack;
+
+import mcr.riichi_arise.MahjongComponents;
 
 import mcr.riichi_arise.client.MahjongTileBlockRenderer;
 import mcr.riichi_arise.MahjongTileItem;
@@ -80,6 +99,8 @@ public final class MahjongTableClient {
 	}
 
 	private static final Map<Long, TableRender> TABLES = new HashMap<>();
+	/** 各桌牌背是否为玻璃牌背（玻璃之间）：牌背需换成玻璃牌背模型 */
+	private static final Map<Long, Boolean> GLASS_BACK_TABLES = new HashMap<>();
 	/** 各桌 AI 座位假玩家（key = 桌 originPacked，value = 座位 → 假玩家记录） */
 	private static final Map<Long, Map<Integer, Avatar>> AVATARS = new HashMap<>();
 	/** 各桌牌桌中心（桌 key → 桌心世界坐标），供形象落地后重调视线使用 */
@@ -242,11 +263,15 @@ public final class MahjongTableClient {
 	 * <li>加杠新增牌（index=-2）→ 该家手牌位置；</li>
 	 * <li>拔北牌 → 该家手牌位置。</li></ul>
 	 */
-	private static Vec3 flightSource(TableLayout.Placement p, Vec3[] handSrc, Vec3 claimSrc) {
+	private static Vec3 flightSource(TableLayout.Placement p, Vec3[] handSrc, Vec3[] kitaSrc, Vec3 claimSrc) {
 		int seat = p.seat();
 		if (seat < 0 || seat >= 4)
 			return null;
-		if (TableLayout.KIND_RIVER.equals(p.kind()) || TableLayout.KIND_KITA.equals(p.kind()))
+		if (TableLayout.KIND_KITA.equals(p.kind()))
+			// 拔北牌不是"上一包手牌少一张"：拔北后同一包内又摸了岭上补牌，手牌张数不变，
+			// 只靠张数差推不出起点；改为对比本包手牌逐张取新出现的北风（kitaSrc[seat]），失败时取整行
+			return kitaSrc[seat] != null ? kitaSrc[seat] : handSrc[seat];
+		if (TableLayout.KIND_RIVER.equals(p.kind()))
 			return handSrc[seat];
 		if (TableLayout.KIND_MELD.equals(p.kind())) {
 			if (p.index() == -3)
@@ -601,30 +626,29 @@ public final class MahjongTableClient {
 					backs.add(-1);
 				handCodes.add(backs);
 			} else if (msg.hidden()[s] > 0) {
-				// 隐藏手牌：服务端下发"透明牌真实牌面 + 其余未知占位"的记法：透明牌保持原位（玻璃牌面可透视），
-				// 普通牌统一排到末尾显示为牌背——既向对手隐藏牌面，也隐藏"哪几个位置是透明牌"之外的排列信息
-				List<Integer> masked = null;
+				// 隐藏手牌：服务端只给牌数 + 透明位掩码（按观者洗牌，见 RichiTableSync#glassShuffle）。
+				// 掩码位为"透明牌"（玻璃牌面，能看穿）+ 真实牌面；其余位为普通牌背（-1）。
+				// 透明牌与牌背混排，且牌背本身是用户贴图（如玻璃牌背），因此对手看到的只是一排玻璃牌/牌背，
+				// 既保留了"透明牌"这一公开信息，又不泄露它摆在手牌第几位。
+				List<Integer> glassCodes = null;
 				try {
-					masked = MahjongTileNotation.parse(orEmpty(msg.hands()[s]));
+					glassCodes = MahjongTileNotation.parse(orEmpty(msg.hands()[s]));
 				} catch (RuntimeException ignored) {
 				}
-				if (masked == null || masked.size() != msg.hidden()[s]) {
-					List<Integer> backs = new ArrayList<>();
-					for (int k = 0; k < msg.hidden()[s]; k++)
-						backs.add(-1);
-					handCodes.add(backs);
-				} else {
-					List<Integer> ordered = new ArrayList<>(masked.size());
-					int backCount = 0;
-					for (int c : masked)
-						if (c < 0)
-							backCount++;
-						else
-							ordered.add(c);
-					for (int k = 0; k < backCount; k++)
-						ordered.add(-1);
-					handCodes.add(ordered);
+				java.util.List<Integer> visible = new ArrayList<>();
+				if (glassCodes != null)
+					for (int c : glassCodes)
+						if (c >= 0 && mcr.riichi_arise.game.TileFlag.isGlass(c))
+							visible.add(c);
+				int mask = msg.glassMask()[s];
+				int n = msg.hidden()[s];
+				List<Integer> ordered = new ArrayList<>(n);
+				int vi = 0;
+				for (int k = 0; k < n; k++) {
+					boolean glass = k < 31 && (mask & (1 << k)) != 0 && vi < visible.size();
+					ordered.add(glass ? visible.get(vi++) : -1);
 				}
+				handCodes.add(ordered);
 			} else {
 				try {
 					handCodes.add(MahjongTileNotation.parse(orEmpty(msg.hands()[s])));
@@ -633,9 +657,13 @@ public final class MahjongTableClient {
 				}
 			}
 		}
+		// 玻璃之间：该桌隐藏手牌与牌山用玻璃牌背模型（贴图为 cover_glass）
+		boolean tableGlassBack = msg.roomType() == RichiTableState.ROOM_GLASS;
+		GLASS_BACK_TABLES.put(key, tableGlassBack);
 		List<Slot> slots = slotPlan(TableLayout.plan(geom, st, handCodes, msg.dealAnim() > 0, handSlots), msg);
 		// 牌位飞行动画的起点（打牌/加杠/拔北 = 上一包手牌里被移出那张的位置；副露声明牌 = 牌河被取走那张的位置）
 		Vec3[] handSrc = new Vec3[4];
+		Vec3[] kitaSrc = new Vec3[4]; // 拔北牌飞行起点（逐张对比本包手牌取新出现的北风）
 		Vec3 claimSrc = null;
 		if (prev != null && !synthetic && msg.dealAnim() == 0) {
 			for (int s = 0; s < 4; s++) {
@@ -661,6 +689,18 @@ public final class MahjongTableClient {
 				// 牌河少一张 = 被副露：起点为被取走那张在牌河中的位置
 				if (newRiver.size() < prevRiver.size())
 					claimSrc = TableLayout.riverTarget(geom, s, prevRiver.size() - 1);
+				// 拔北增多 = 该家拔北：取本包手牌里"按顺序对比上一包新出现的北风"所在槽位作为飞行起点
+				// （拔北同一包内岭上补牌，手牌张数不变，张数差法永远推不出起点）
+				if (s < msg.kita().length && s < prev.kita().length && msg.kita()[s] > prev.kita()[s]
+						&& msg.hidden()[s] == 0 && prev.hidden()[s] == 0) {
+					for (int k = 0; k < newHand.size(); k++) {
+						boolean same = k < prevHand.size() && prevHand.get(k).equals(newHand.get(k));
+						if (!same && mcr.riichi_arise.game.TileFlag.base(newHand.get(k)) == TableLayout.TILE_PEI) {
+							kitaSrc[s] = TableLayout.standingEntityPos(TableLayout.handTarget(geom, s, k));
+							break;
+						}
+					}
+				}
 			}
 		}
 		if (msg.dealAnim() > 0) {
@@ -673,8 +713,8 @@ public final class MahjongTableClient {
 			// 隐藏手牌亮牌时 key 由"牌背"变成"牌面"（旧实体不在新 key 下）→ 同样没有立牌可倒。
 			// 两种情形都先按新 key 生成一张立牌，再交给 diffApply 走推倒过渡动画（先复位再播放）
 			if (prev != null && !synthetic)
-				resetHandsForReveal(level, table, geom, slots, msg, prev, forcedOpen);
-			diffApply(level, table, geom, st, msg, slots, handSrc, claimSrc);
+				resetHandsForReveal(level, table, geom, slots, msg, prev, forcedOpen, key);
+			diffApply(level, table, geom, st, msg, slots, handSrc, kitaSrc, claimSrc, key);
 		}
 		// 对局状态：桌心悬浮文本显示局目/本场/牌山剩余；结算横幅由 boss 栏渲染
 		updateCenterInfo(level, table, geom.center(), st, msg);
@@ -1134,9 +1174,9 @@ public final class MahjongTableClient {
 	 * 签名变化/实体丢失 → 只重建该实体（同帧替换）；新 key → 生成；消失 key → 删除。
 	 * 座位标签为文本牌位，内容变化就地 load 更新。
 	 */
-	private static void diffApply(ClientLevel level, TableRender table, TableLayout.Geom geom,
-			RichiTableState st, MahjongTablePayload.ViewMessage msg, List<Slot> slots,
-			Vec3[] handSrc, Vec3 claimSrc) {
+	private static void diffApply(ClientLevel level, TableRender table, TableLayout.Geom geom, RichiTableState st,
+			MahjongTablePayload.ViewMessage msg, List<Slot> slots,
+			Vec3[] handSrc, Vec3[] kitaSrc, Vec3 claimSrc, long tableKey) {
 		Map<String, Entry> fresh = new HashMap<>();
 		table.handIds.clear();
 		for (Slot slot : slots) {
@@ -1167,9 +1207,11 @@ public final class MahjongTableClient {
 				e = null;
 			}
 			if (e == null) {
-				e = spawnSlot(level, table, 0, geom, slot, false, false);
-				// 新生成的牌：播放"浮起→飞到目标位→降落"的短动画
-				Vec3 src = flightSource(p, handSrc, claimSrc);
+				// 新生成的牌：播放"浮起→飞到目标位→降落"的短动画。
+				// 起点必须在创建实体前确定：先把实体生成在目标位、之后再 setPos 到起点，
+				// 会让实体加入世界的那一帧出现在目标坐标（观感上是"瞬移到原位再飞"）。
+				Vec3 src = flightSource(p, handSrc, kitaSrc, claimSrc);
+				e = spawnSlot(level, table, tableKey, geom, slot, false, false, src);
 				if (e != null && src != null)
 					startTileFlight(e, p, src);
 			} else if (!FLIGHTS.containsKey(e.getId()) && moved(e, p)) {
@@ -1202,7 +1244,7 @@ public final class MahjongTableClient {
 	 */
 	private static void resetHandsForReveal(ClientLevel level, TableRender table, TableLayout.Geom geom,
 			List<Slot> slots, MahjongTablePayload.ViewMessage msg, MahjongTablePayload.ViewMessage prev,
-			boolean forcedOpen) {
+			boolean forcedOpen, long tableKey) {
 		for (Slot slot : slots) {
 			TableLayout.Placement p = slot.p();
 			if (!TableLayout.KIND_HAND.equals(p.kind()) || p.axis() == null)
@@ -1220,7 +1262,8 @@ public final class MahjongTableClient {
 					TableLayout.standingEntityPos(p.base()), p.base(), p.code(), standYaw, null, p.faceUp(),
 					seat, p.index(), 0);
 			spawnKeyed(level, table, slot.slotKey(), itemSig(stand),
-					handNbt(p, true, TableLayout.handTag(seat, p.index()), level), stand.pos(), standYaw);
+						handNbt(p, true, TableLayout.handTag(seat, p.index()), level, tableKey),
+						stand.pos(), standYaw);
 		}
 	}
 
@@ -1286,6 +1329,15 @@ public final class MahjongTableClient {
 
 	private static Entity spawnSlot(ClientLevel level, TableRender table, long tableKey, TableLayout.Geom geom,
 			Slot slot, boolean animate, boolean deal) {
+		return spawnSlot(level, table, tableKey, geom, slot, animate, deal, null);
+	}
+
+	/**
+	 * 同上；src 非空时表示该牌位要播放飞行动画，实体直接以 src（起点）为初始坐标生成，
+	 * 避免"先生成在目标位再拉回起点"造成的瞬移闪烁（飞行本身由 {@link #startTileFlight} 驱动）。
+	 */
+	private static Entity spawnSlot(ClientLevel level, TableRender table, long tableKey, TableLayout.Geom geom,
+			Slot slot, boolean animate, boolean deal, Vec3 src) {
 		TableLayout.Placement p = slot.p();
 		Entity out = null;
 		switch (p.kind()) {
@@ -1309,24 +1361,25 @@ public final class MahjongTableClient {
 							if (deal && p.index() % 4 == 0)
 								playDealSound(level, p.pos());
 							recordHand(table, p,
-									spawnKeyed(level, table, slot.slotKey(), slot.sig(), handNbt(p, true, tag, level),
+									spawnKeyed(level, table, slot.slotKey(), slot.sig(),
+											handNbt(p, true, tag, level, tableKey),
 											p.pos(), p.yRot()));
 						});
 					else
 						out = recordHand(table, p, spawnKeyed(level, table, slot.slotKey(), slot.sig(),
-								handNbt(p, true, tag, level), p.pos(), p.yRot()));
+								handNbt(p, true, tag, level, tableKey), p.pos(), p.yRot()));
 				} else if (animate) {
 					// 局终推倒/盖牌：先立牌后平躺（级联），立牌登记过渡签名以便中途 diff 重建
 					float standYaw = (float) Math.toDegrees(
 							Math.atan2(-geom.outs()[p.seat()].x, geom.outs()[p.seat()].z));
 					Vec3 standPos = TableLayout.standingEntityPos(p.base());
 					schedule(tableKey, p.delay(), () -> recordHand(table, p, spawnKeyed(level, table, slot.slotKey(),
-							"standing:" + slot.sig(), handNbt(p, true, tag, level), standPos, standYaw)));
+							"standing:" + slot.sig(), handNbt(p, true, tag, level, tableKey), standPos, standYaw)));
 					schedule(tableKey, p.delay() + 10, () -> recordHand(table, p, spawnKeyed(level, table,
-							slot.slotKey(), slot.sig(), handNbt(p, false, null, level), p.pos(), p.yRot())));
+							slot.slotKey(), slot.sig(), handNbt(p, false, null, level, tableKey), p.pos(), p.yRot())));
 				} else {
 					out = recordHand(table, p, spawnKeyed(level, table, slot.slotKey(), slot.sig(),
-							handNbt(p, false, null, level), p.pos(), p.yRot()));
+							handNbt(p, false, null, level, tableKey), p.pos(), p.yRot()));
 				}
 			}
 			case TableLayout.KIND_RIVER, TableLayout.KIND_MELD, TableLayout.KIND_KITA, TableLayout.KIND_DORA -> {
@@ -1335,10 +1388,11 @@ public final class MahjongTableClient {
 						if (deal)
 							playDealSound(level, p.pos());
 						spawnKeyed(level, table, slot.slotKey(), slot.sig(),
-								flatNbt(p, level), p.pos(), p.yRot());
+								flatNbt(p, level, tableKey), p.pos(), p.yRot());
 					});
 				else
-					out = spawnKeyed(level, table, slot.slotKey(), slot.sig(), flatNbt(p, level), p.pos(), p.yRot());
+					out = spawnKeyed(level, table, slot.slotKey(), slot.sig(), flatNbt(p, level, tableKey),
+							src != null ? src : p.pos(), p.yRot());
 			}
 			default -> {
 				// KIND_STICK：立直点棒
@@ -1353,17 +1407,142 @@ public final class MahjongTableClient {
 	}
 
 	/** 手牌立牌/平躺 item_display NBT */
-	private static CompoundTag handNbt(TableLayout.Placement p, boolean standing, String tag, ClientLevel level) {
-		return DisplayEntityNbt.itemDisplay(MahjongTileItem.create(p.code()),
+	private static CompoundTag handNbt(TableLayout.Placement p, boolean standing, String tag, ClientLevel level,
+			long tableKey) {
+		return DisplayEntityNbt.itemDisplay(tileStack(p, tableKey),
 				standing ? DisplayEntityNbt.standingMatrix(TableLayout.TILE_SCALE)
 						: DisplayEntityNbt.flatMatrix(TableLayout.TILE_SCALE, p.faceUp()),
 				standing ? tag : null, null, level.registryAccess());
 	}
 
 	/** 平躺牌（牌河/副露/宝牌）item_display NBT */
-	private static CompoundTag flatNbt(TableLayout.Placement p, ClientLevel level) {
-		return DisplayEntityNbt.itemDisplay(MahjongTileItem.create(p.code()),
+	private static CompoundTag flatNbt(TableLayout.Placement p, ClientLevel level, long tableKey) {
+		return DisplayEntityNbt.itemDisplay(tileStack(p, tableKey),
 				DisplayEntityNbt.flatMatrix(TableLayout.TILE_SCALE, p.faceUp()), null, null, level.registryAccess());
+	}
+
+	/**
+	 * 牌位物品堆：牌背（code&nbsp;&lt;&nbsp;0）在玻璃之间改用玻璃牌背模型，
+	 * 其余（含透明牌）走普通/玻璃牌体模型。
+	 */
+	private static ItemStack tileStack(TableLayout.Placement p, long tableKey) {
+		if (p.code() < 0 && Boolean.TRUE.equals(GLASS_BACK_TABLES.get(tableKey)))
+			return MahjongTileItem.createGlassBack(p.code());
+		return MahjongTileItem.create(p.code());
+	}
+
+	/**
+	 * 玻璃牌背模型（供 {@link MahjongClient#onModifyBakedModel} 使用）：
+	 * 每张牌面一个独立模型（内侧 #front 为对应牌面纹理，
+	 * 玻璃牌背上看到的就是这张牌的真实牌面）；未知牌使用基础模型。
+	 */
+	static final Map<Integer, ResourceLocation> GLASS_BACK_MODEL_IDS = new HashMap<>();
+
+	static {
+		for (int c = 0; c < MahjongTileItem.CODE_TO_NAME.size(); c++)
+			GLASS_BACK_MODEL_IDS.put(c, ResourceLocation.fromNamespaceAndPath(
+					mcr.riichi_arise.RichiiAriseMod.MODID,
+					"item/mahjong_tile_glass_back_" + MahjongTileItem.CODE_TO_NAME.get(c)));
+	}
+
+	/** 注册玻璃牌背模型包装（在 ModifyBakingResult 中调用） */
+	static void wrapTileModel(ModelEvent.ModifyBakingResult event) {
+		BakedModel base = event.getModels()
+				.get(ModelResourceLocation.inventory(ResourceLocation.fromNamespaceAndPath(
+						mcr.riichi_arise.RichiiAriseMod.MODID, "mahjong_tile_glass_back")));
+		if (base == null)
+			return;
+		BakedModel unknown = event.getModels()
+				.get(ModelResourceLocation.inventory(ResourceLocation.fromNamespaceAndPath(
+						mcr.riichi_arise.RichiiAriseMod.MODID, "mahjong_tile_glass_back_base")));
+		event.getModels().put(ModelResourceLocation.inventory(ResourceLocation.fromNamespaceAndPath(
+				mcr.riichi_arise.RichiiAriseMod.MODID, "mahjong_tile")), new GlassBackBakedModel(base,
+						unknown == null ? base : unknown));
+	}
+
+	/**
+	 * 麻将牌模型包装：带 {@link mcr.riichi_arise.MahjongComponents#TILE_GLASS_BACK} 的牌
+	 * （玻璃之间的牌背）改用"玻璃牌背 + 内侧牌面"模型，其余物品堆（手持/背包/掉落物）回落原模型。
+	 * 烘焙阶段只记下底模，首次渲染时再从模型管理器取各牌面的玻璃牌背模型（烘焙中不可嵌套烘焙）。
+	 */
+	public static final class GlassBackBakedModel implements BakedModel {
+		private final BakedModel fallback;
+		private final BakedModel unknown;
+		private Map<String, BakedModel> byName;
+
+		GlassBackBakedModel(BakedModel fallback, BakedModel unknown) {
+			this.fallback = fallback;
+			this.unknown = unknown;
+		}
+
+		/** 牌面纹理名 → 玻璃牌背模型（懒加载，未知牌用基础模型） */
+		private BakedModel face(String name) {
+			if (name == null)
+				return unknown;
+			if (byName == null) {
+				Map<String, BakedModel> map = new HashMap<>();
+				for (Map.Entry<Integer, ResourceLocation> e : GLASS_BACK_MODEL_IDS.entrySet()) {
+					map.put(MahjongTileItem.CODE_TO_NAME.get(e.getKey()), Minecraft.getInstance().getModelManager()
+							.getModel(ModelResourceLocation.standalone(e.getValue())));
+				}
+				byName = map;
+			}
+			BakedModel m = byName.get(name);
+			return m == null ? unknown : m;
+		}
+
+		@Override
+		public List<BakedQuad> getQuads(BlockState state, Direction side, RandomSource rand) {
+			return List.of();
+		}
+
+		@Override
+		public boolean useAmbientOcclusion() {
+			return fallback.useAmbientOcclusion();
+		}
+
+		@Override
+		public boolean isGui3d() {
+			return fallback.isGui3d();
+		}
+
+		@Override
+		public boolean usesBlockLight() {
+			return fallback.usesBlockLight();
+		}
+
+		@Override
+		public boolean isCustomRenderer() {
+			return fallback.isCustomRenderer();
+		}
+
+		@Override
+		public TextureAtlasSprite getParticleIcon() {
+			return fallback.getParticleIcon();
+		}
+
+		@Override
+		public ItemOverrides getOverrides() {
+			return fallback.getOverrides();
+		}
+
+		@Override
+		public BakedModel applyTransform(ItemDisplayContext ctx, PoseStack pose, boolean leftHand) {
+			BakedModel f = fallback.applyTransform(ctx, pose, leftHand);
+			return f == fallback ? this : f;
+		}
+
+		@Override
+		public List<RenderType> getRenderTypes(ItemStack stack, boolean fabulous) {
+			return fallback.getRenderTypes(stack, fabulous);
+		}
+
+		@Override
+		public List<BakedModel> getRenderPasses(ItemStack stack, boolean fabulous) {
+			if (!stack.has(MahjongComponents.TILE_GLASS_BACK.get()))
+				return fallback.getRenderPasses(stack, fabulous);
+			return List.of(face(MahjongTileItem.glassFaceTexture(stack)));
+		}
 	}
 
 	/** 立直点棒 item_display NBT */
@@ -1547,32 +1726,7 @@ public final class MahjongTableClient {
 
 	/** 除 selectedSeat/Index 外全部渲染相关字段一致（record 含数组需逐项比较） */
 	private static boolean sameExceptSelection(MahjongTablePayload.ViewMessage a, MahjongTablePayload.ViewMessage b) {
-		return a.dealAnim() == b.dealAnim()
-				&& Arrays.equals(a.hands(), b.hands())
-				&& Arrays.equals(a.hidden(), b.hidden())
-				&& Arrays.equals(a.rivers(), b.rivers())
-				&& Arrays.equals(a.melds(), b.melds())
-				&& Arrays.equals(a.kita(), b.kita())
-				&& Arrays.equals(a.riichiRiverIdx(), b.riichiRiverIdx())
-				&& Arrays.equals(a.riichiSticks(), b.riichiSticks())
-				&& Arrays.equals(a.handsExposed(), b.handsExposed())
-				&& Arrays.equals(a.points(), b.points())
-				&& Arrays.equals(a.names(), b.names())
-				&& Arrays.equals(a.avatarForms(), b.avatarForms())
-				&& Arrays.equals(a.avatarNames(), b.avatarNames())
-				&& Arrays.equals(a.avatarSkins(), b.avatarSkins())
-				&& orEmpty(a.doraWall()).equals(orEmpty(b.doraWall()))
-				&& a.revealedIndicators() == b.revealedIndicators()
-				&& a.wallCount() == b.wallCount()
-				&& a.turnSeat() == b.turnSeat()
-				&& a.round() == b.round()
-				&& a.roundWind() == b.roundWind()
-				&& a.honba() == b.honba()
-				&& a.carriedSticks() == b.carriedSticks()
-				&& a.drawnSeat() == b.drawnSeat()
-				&& a.phase() == b.phase()
-				&& a.playerCount() == b.playerCount()
-				&& orEmpty(a.bannerText()).equals(orEmpty(b.bannerText()));
+		return a.sameExceptSelection(b);
 	}
 
 	private static String orEmpty(String s) {

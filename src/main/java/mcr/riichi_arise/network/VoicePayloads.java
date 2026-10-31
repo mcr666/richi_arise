@@ -53,6 +53,30 @@ public class VoicePayloads {
 		}
 	}
 
+	/** C→S：设置自己的和牌特效风格（0..3，个人设定；全桌可见） */
+	public record WinEffectSetMessage(int style) implements CustomPacketPayload {
+		public static final Type<WinEffectSetMessage> TYPE = new Type<>(
+				ResourceLocation.fromNamespaceAndPath(RichiiAriseMod.MODID, "richi_win_effect_set"));
+
+		public static final StreamCodec<RegistryFriendlyByteBuf, WinEffectSetMessage> STREAM_CODEC = StreamCodec.of(
+				(RegistryFriendlyByteBuf buf, WinEffectSetMessage msg) -> buf.writeVarInt(msg.style()),
+				(RegistryFriendlyByteBuf buf) -> new WinEffectSetMessage(buf.readVarInt()));
+
+		@Override
+		public Type<WinEffectSetMessage> type() {
+			return TYPE;
+		}
+
+		public static void handleData(final WinEffectSetMessage message, final IPayloadContext context) {
+			if (context.flow() == PacketFlow.SERVERBOUND) {
+				context.enqueueWork(() -> {
+					if (context.player() instanceof ServerPlayer sp)
+						MahjongLobby.setWinEffect(sp, message.style());
+				});
+			}
+		}
+	}
+
 	/** S→C：对局事件 → 播报某座位玩家的语音 */
 	public record VoiceEventPayload(long originPacked, int seat, int event) implements CustomPacketPayload {
 		public static final Type<VoiceEventPayload> TYPE = new Type<>(
@@ -159,5 +183,7 @@ public class VoicePayloads {
 		RichiiAriseMod.addNetworkMessage(VoiceSetMessage.TYPE, VoiceSetMessage.STREAM_CODEC, VoiceSetMessage::handleData);
 		RichiiAriseMod.addNetworkMessage(VoiceEventPayload.TYPE, VoiceEventPayload.STREAM_CODEC, VoiceEventPayload::handleData);
 		RichiiAriseMod.addNetworkMessage(VoiceFanPayload.TYPE, VoiceFanPayload.STREAM_CODEC, VoiceFanPayload::handleData);
+		RichiiAriseMod.addNetworkMessage(WinEffectSetMessage.TYPE, WinEffectSetMessage.STREAM_CODEC,
+				WinEffectSetMessage::handleData);
 	}
 }

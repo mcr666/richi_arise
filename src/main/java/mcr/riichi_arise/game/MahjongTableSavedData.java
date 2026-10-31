@@ -29,6 +29,11 @@ public final class MahjongTableSavedData extends SavedData {
 
 	private static final String VOICES_KEY = "player_voices";
 
+	/** 每玩家和牌特效风格（UUID → 0..3；全局跨桌持久化，缺省 = 星陨华彩） */
+	private final Map<String, Integer> playerWinEffects = new HashMap<>();
+
+	private static final String WIN_EFFECTS_KEY = "player_win_effects";
+
 	/** 一张风盘的可持久化设置（RichiTableState 中对应字段的快照） */
 	public record Entry(int gameType, int playerCount, int thinkIdx, int aiSpeedIdx, boolean openHand,
 			int roomType, boolean[] reservedAI, String[] avatarModes) {
@@ -91,6 +96,21 @@ public final class MahjongTableSavedData extends SavedData {
 		setDirty();
 	}
 
+	/** 玩家当前和牌特效风格（0..3）；未设置时返回 fallback */
+	public int getWinEffect(String uuid, int fallback) {
+		Integer v = playerWinEffects.get(uuid);
+		return v == null ? fallback : v;
+	}
+
+	/** 设置玩家和牌特效风格（0..3）；等于默认值时不留条目 */
+	public void setWinEffect(String uuid, int style) {
+		if (style <= 0)
+			playerWinEffects.remove(uuid);
+		else
+			playerWinEffects.put(uuid, style);
+		setDirty();
+	}
+
 	private static MahjongTableSavedData load(CompoundTag tag, HolderLookup.Provider registries) {
 		MahjongTableSavedData data = new MahjongTableSavedData();
 		for (String k : tag.getAllKeys()) {
@@ -100,6 +120,21 @@ public final class MahjongTableSavedData extends SavedData {
 					String[] kv = voices.getString(i).split("=", 2);
 					if (kv.length == 2 && !kv[1].isEmpty())
 						data.playerVoices.put(kv[0], kv[1]);
+				}
+				continue;
+			}
+			if (k.equals(WIN_EFFECTS_KEY)) {
+				ListTag effects = tag.getList(k, Tag.TAG_STRING);
+				for (int i = 0; i < effects.size(); i++) {
+					String[] kv = effects.getString(i).split("=", 2);
+					if (kv.length == 2) {
+						try {
+							int v = Integer.parseInt(kv[1]);
+							if (v > 0)
+								data.playerWinEffects.put(kv[0], v);
+						} catch (NumberFormatException ignored) {
+						}
+					}
 				}
 				continue;
 			}
@@ -144,6 +179,10 @@ public final class MahjongTableSavedData extends SavedData {
 		for (Map.Entry<String, String> e : playerVoices.entrySet())
 			voices.add(StringTag.valueOf(e.getKey() + "=" + e.getValue()));
 		tag.put(VOICES_KEY, voices);
+		ListTag effects = new ListTag();
+		for (Map.Entry<String, Integer> e : playerWinEffects.entrySet())
+			effects.add(StringTag.valueOf(e.getKey() + "=" + e.getValue()));
+		tag.put(WIN_EFFECTS_KEY, effects);
 		return tag;
 	}
 }

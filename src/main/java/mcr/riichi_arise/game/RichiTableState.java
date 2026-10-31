@@ -8,6 +8,12 @@ package mcr.riichi_arise.game;
 public class RichiTableState {
 	/** 各家手牌（13 张） */
 	public final String[] hands = new String[4];
+	/**
+	 * 各家手牌中"透明牌"的真实牌面（玻璃之间，理牌序；空串 = 该家无透明牌）。
+	 * 同步层对不可见座位只下发此串：对手能透过玻璃牌背看到透明牌的牌面，
+	 * 其余位置渲染玻璃牌背（{@link mcr.riichi_arise.game.RichiTableSync}）。
+	 */
+	public final String[] glassHands = { "", "", "", "" };
 	/** 各家牌河（切出的牌，面朝上） */
 	public final String[] rivers = new String[4];
 	/** 各家副露（吃碰杠，含声明牌） */
@@ -125,6 +131,8 @@ public class RichiTableState {
 	public final int[] lastTedashi = new int[4];
 	/** 各家最近一次打出的牌在手牌中的位置，编码 seat&lt;&lt;8|index（-1 = 无）：客户端播放切牌飞出的起点 */
 	public final int[] lastDiscardPos = { -1, -1, -1, -1 };
+	/** 各家和牌特效风格（0..3，来自各自"个人设定"，随快照下发，全桌都按和牌者的设置渲染） */
+	public final int[] winEffects = new int[4];
 	/** 手牌展示常量 */
 	public static final int HAND_STAND = 0, HAND_FACE_UP = 1, HAND_FACE_DOWN = 2;
 	/** 已揭开的宝牌指示牌叠数（开局 1，杠后 +1；渲染翻开对应上张） */

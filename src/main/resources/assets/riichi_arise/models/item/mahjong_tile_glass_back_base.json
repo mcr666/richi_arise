@@ -1,0 +1,39 @@
+{
+	"credit": "玻璃牌背（玻璃之间）：牌体整体使用玻璃牌背贴图 cover_glass（cutout）。隐藏手牌的第二块为玻璃内侧的牌面，朝南渲染当前物品的牌面纹理——从背面也能透过玻璃看到牌面（未透明化的牌面渲染为未知牌背纹理）",
+	"parent": "minecraft:block/block",
+	"render_type": "minecraft:cutout",
+	"textures": {
+		"front": "riichi_arise:item/mahjong/unknown",
+		"cover": "riichi_arise:item/mahjong/cover_glass",
+		"particle": "riichi_arise:item/mahjong/cover_glass"
+	},
+	"elements": [
+		{
+			"from": [2, 0, 5],
+			"to": [14, 16, 11],
+			"faces": {
+				"north": { "uv": [0, 0, 16, 16], "texture": "#front" },
+				"east": { "uv": [0, 0, 16, 16], "texture": "#cover" },
+				"south": { "uv": [0, 0, 16, 16], "texture": "#cover" },
+				"west": { "uv": [0, 0, 16, 16], "texture": "#cover" },
+				"up": { "uv": [0, 0, 16, 16], "texture": "#cover" },
+				"down": { "uv": [0, 0, 16, 16], "texture": "#cover" }
+			}
+		},
+		{
+			"from": [2, 0, 5.2],
+			"to": [14, 16, 5.4],
+			"faces": {
+				"south": { "uv": [0, 0, 16, 16], "texture": "#front" }
+			}
+		}
+	],
+	"display": {
+		"gui": { "rotation": [30, 225, 0], "translation": [0, 0, 0], "scale": [0.625, 0.625, 0.625] },
+		"ground": { "translation": [0, 3, 0], "scale": [0.25, 0.25, 0.25] },
+		"thirdperson_righthand": { "rotation": [75, 45, 0], "translation": [0, 2.5, 0], "scale": [0.375, 0.375, 0.375] },
+		"thirdperson_lefthand": { "rotation": [75, 45, 0], "translation": [0, 2.5, 0], "scale": [0.375, 0.375, 0.375] },
+		"firstperson_righthand": { "rotation": [0, 45, 0], "translation": [0, 0, 0], "scale": [0.4, 0.4, 0.4] },
+		"firstperson_lefthand": { "rotation": [0, 225, 0], "translation": [0, 0, 0], "scale": [0.4, 0.4, 0.4] }
+	}
+}

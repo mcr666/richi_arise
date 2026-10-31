@@ -126,6 +126,20 @@ public final class VoiceCache {
 		return null;
 	}
 
+	/**
+	 * 是否已装入报番语音资源包：在所有已启用资源包里找任一 {@code sounds/voice/<id>/fan/*.mp3}
+	 * （含主命名空间）。未安装时结算报番会回退固定节奏，客户端据此在进游戏时提示玩家。
+	 */
+	public static boolean hasFanVoicePack() {
+		try {
+			return !Minecraft.getInstance().getResourceManager()
+					.listResources("sounds/voice", l -> l.getPath().endsWith(".mp3")).keySet().stream()
+					.anyMatch(l -> l.getPath().contains("/fan/"));
+		} catch (Throwable e) {
+			return false;
+		}
+	}
+
 	/** 兜底索引所属的资源管理器（F3+T 重载后实例变化 → 自动重建索引） */
 	private static Object fanIndexOwner;
 	/** 「角色id|音键」→ 其他命名空间里的报番语音定位符 */

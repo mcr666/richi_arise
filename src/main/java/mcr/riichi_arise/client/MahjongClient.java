@@ -37,6 +37,10 @@ public class MahjongClient {
 	private static final int CIRCLE_POINTS = 12;
 	/** 粒子圈半径（格） */
 	private static final double CIRCLE_RADIUS = 0.5;
+	/** 报番语音资源包下载/说明页（进游戏时缺包提示里给出的可点击链接） */
+	private static final String FAN_VOICE_PACK_URL = "https://github.com/your-name/richi_arise/releases";
+	/** 本次进服是否已检查（只在进游戏时提示一次，断开重进重新检查） */
+	private static boolean fanPackChecked;
 
 	@SubscribeEvent
 	public static void onClientSetup(FMLClientSetupEvent event) {
@@ -51,9 +55,21 @@ public class MahjongClient {
 					ResourceLocation.withDefaultNamespace("glass"),
 					(stack, level, entity, seed) -> Boolean.TRUE.equals(
 							stack.get(mcr.riichi_arise.MahjongComponents.TILE_GLASS.get())) ? 1f : 0f);
+			// 玻璃之间：玻璃牌背标记（隐藏手牌/牌山/飞牌渲染为玻璃质感牌背）
+			ItemProperties.register(
+					MahjongItems.MAHJONG_TILE.get(),
+					ResourceLocation.withDefaultNamespace("glass_back"),
+					(stack, level, entity, seed) -> Boolean.TRUE.equals(
+							stack.get(mcr.riichi_arise.MahjongComponents.TILE_GLASS_BACK.get())) ? 1f : 0f);
 			// 内置 mp3 播放器预热：后台初始化音频子系统并加载 jlayer，消除首次角色语音的播放延迟
 			mcr.riichi_arise.voice.VoicePlayer.warmup();
 		});
+	}
+
+	/** 玻璃之间的玻璃牌背：按物品堆的牌面切换独立模型（见 MahjongTableClient.GlassBackBakedModel） */
+	@SubscribeEvent
+	public static void onModifyBakedModel(net.neoforged.neoforge.client.event.ModelEvent.ModifyBakingResult event) {
+		MahjongTableClient.wrapTileModel(event);
 	}
 
 	@SubscribeEvent
@@ -62,6 +78,28 @@ public class MahjongClient {
 		event.registerAboveAll(net.minecraft.resources.ResourceLocation.fromNamespaceAndPath(
 				mcr.riichi_arise.RichiiAriseMod.MODID, "table_overlay"),
 				(guiGraphics, partialTick) -> MahjongTableOverlay.render(guiGraphics));
+	}
+
+	/**
+	 * 进游戏时提示：未安装报番语音资源包则发一条可点击的聊天提示（含 GitHub 链接）。
+	 * 报番语音完全由资源包提供，缺包时结算只按固定节奏显示役种、没有念白。
+	 */
+	private static void noticeMissingFanVoicePack(LocalPlayer player) {
+		if (mcr.riichi_arise.voice.VoiceCache.hasFanVoicePack())
+			return;
+		net.minecraft.network.chat.Component link = net.minecraft.network.chat.Component
+				.literal(FAN_VOICE_PACK_URL)
+				.withStyle(s -> s.withColor(net.minecraft.ChatFormatting.AQUA)
+						.withUnderlined(true)
+						.withClickEvent(new net.minecraft.network.chat.ClickEvent(
+								net.minecraft.network.chat.ClickEvent.Action.OPEN_URL, FAN_VOICE_PACK_URL))
+						.withHoverEvent(new net.minecraft.network.chat.HoverEvent(
+								net.minecraft.network.chat.HoverEvent.Action.SHOW_TEXT,
+								net.minecraft.network.chat.Component.literal("点击打开下载页面"))));
+		player.displayClientMessage(
+				net.minecraft.network.chat.Component.translatable("message.riichi_arise.fan_voice_missing")
+						.append(link),
+				false);
 	}
 
 	/** 平放麻将牌方块实体渲染器（按牌面代码渲染躺平的麻将牌） */
@@ -81,8 +119,16 @@ public class MahjongClient {
 		Minecraft minecraft = Minecraft.getInstance();
 		LocalPlayer player = minecraft.player;
 		ClientLevel level = minecraft.level;
-		if (player == null || level == null)
+		if (player == null || level == null) {
+			fanPackChecked = false; // 离开世界/未进游戏：下次进入时重新检查
 			return;
+		}
+		if (!fanPackChecked) {
+			fanPackChecked = true;
+			// 资源包异步加载：进入世界后下一 tick 再判断，避免刚进服时资源管理器还没就绪
+			minecraft.execute(() -> noticeMissingFanVoicePack(player));
+		}
+		WinEffectClient.tick(); // 推进和牌特效时间线
 		// 每 4 tick 刷新一轮粒子圈（粒子本身有寿命，持续补充保持可见）
 		if (tickCounter % 4 != 0)
 			return;

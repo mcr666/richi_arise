@@ -56,6 +56,8 @@ public final class TableLayout {
 	public static final double MELD_ROW_INSET = 0.20;
 	/** 大风盘副露区外缘上限（格，沿玩家右侧轴）：邻家行列带从 ±(edge - TILE_WIDTH/2)=±1.572 起，留隙取 1.55 */
 	public static final double MELD_EDGE_CAP = 1.55;
+	/** 大风盘副露区向自家方向（远离桌心，沿 outs）外移量（格，2 个模型单位 = 2/16 格）；小型 3×3 桌不受影响 */
+	public static final double LARGE_MELD_OUTWARD = 2.0 / 16.0;
 	/** 手牌相邻牌间距（格）——牌宽 12px×s/16≈0.15625，紧贴（+0.0007 防共面闪烁） */
 	public static final double TILE_GAP = 0.157;
 	/** 相邻副露组之间的最小间隙（格） */
@@ -101,16 +103,16 @@ public final class TableLayout {
 			return RIVER_DIST;
 		}
 
-		/** 副露区外缘上限：小型紧贴桌沿只留 MELD_EDGE_GAP；大风盘沿用原上限 MELD_EDGE_CAP */
+		/** 副露区外缘上限：小型紧贴桌沿只留 MELD_EDGE_GAP；大风盘在原上限 MELD_EDGE_CAP 外再外移 LARGE_MELD_OUTWARD */
 		public double meldEdgeCap() {
-			return small ? 1.5 - MELD_EDGE_GAP : MELD_EDGE_CAP;
+			return small ? 1.5 - MELD_EDGE_GAP : MELD_EDGE_CAP + LARGE_MELD_OUTWARD;
 		}
 
-		/** 副露行中心距桌心：小型贴玩家侧桌沿（外缘距沿 MELD_EDGE_GAP）；大风盘沿用原内收布局 */
+		/** 副露行中心距桌心：小型贴玩家侧桌沿（外缘距沿 MELD_EDGE_GAP）；大风盘沿用原内收布局，再向自家方向外移 LARGE_MELD_OUTWARD */
 		public double meldRowDist() {
 			return small
 					? 1.5 - MELD_EDGE_GAP - TILE_LONG / 2.0
-					: edgeFor(false) - MELD_ROW_INSET;
+					: edgeFor(false) - MELD_ROW_INSET + LARGE_MELD_OUTWARD;
 		}
 
 		/** 第 rowIdx 排（内排 0 = 最靠玩家）行中心距桌心：内排增大即向桌心推进；第 RIVER_ROWS 排起为溢出行，置于最外内排外侧 */

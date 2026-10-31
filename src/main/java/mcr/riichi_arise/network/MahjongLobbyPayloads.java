@@ -33,7 +33,8 @@ public class MahjongLobbyPayloads {
 	public record LobbySync(int phase, String[] seatNames, boolean[] seatAI,
 			List<String> queueNames, boolean canManage, int gameType, int voteCount,
 			boolean openHand, String[] seatAvatarModes, int thinkIdx,
-			int aiSpeedIdx, String ownVoice, String[] seatVoices, int playerCount, int roomType) {
+			int aiSpeedIdx, String ownVoice, String[] seatVoices, int playerCount, int roomType,
+			int ownWinEffect) {
 	}
 
 	/** C→S 动作类型 */
@@ -46,7 +47,7 @@ public class MahjongLobbyPayloads {
 			List<String> queueNames, boolean canManage, int gameType, int voteCount,
 			boolean openHand, List<String> seatAvatarModes,
 			int thinkIdx, int aiSpeedIdx, String ownVoice, List<String> seatVoices, int playerCount,
-			int roomType) implements CustomPacketPayload {
+			int roomType, int ownWinEffect) implements CustomPacketPayload {
 		public static final Type<SyncMessage> TYPE = new Type<>(
 				ResourceLocation.fromNamespaceAndPath(RichiiAriseMod.MODID, "richi_lobby_sync"));
 
@@ -78,7 +79,7 @@ public class MahjongLobbyPayloads {
 									message.canManage(), message.gameType(), message.voteCount(),
 									message.openHand(), seatModes,
 									message.thinkIdx(), message.aiSpeedIdx(), message.ownVoice(), seatVoices,
-									message.playerCount(), message.roomType()));
+									message.playerCount(), message.roomType(), message.ownWinEffect()));
 					// 对局开始：确保入座玩家语音已下载到本地缓存（幂等，仅缺时下载）
 					if (message.phase() == mcr.riichi_arise.game.RichiTableState.PHASE_PLAYING)
 						mcr.riichi_arise.voice.VoiceClient.onGameStart(message.originPacked());
@@ -142,19 +143,20 @@ public class MahjongLobbyPayloads {
 	}
 
 	/**
-	 * S→C：对局开始时的房间类型标题（大厅样式的屏幕中央大字）。
-	 * langKey = 标题语言键（铁之间 / 玻璃之间）；color = ARGB 颜色。
+	 * S→C：对局开始时的房间类型标题（原版 toast）。
+	 * headerKey = 顶行语言键（铁之间 / 玻璃之间）；bodyKey = 正文语言键；color = 正文颜色。
 	 */
-	public record RoomTitlePayload(String langKey, int color) implements CustomPacketPayload {
+	public record RoomTitlePayload(String headerKey, String bodyKey, int color) implements CustomPacketPayload {
 		public static final Type<RoomTitlePayload> TYPE = new Type<>(
 				ResourceLocation.fromNamespaceAndPath(RichiiAriseMod.MODID, "richi_room_title"));
 
 		public static final StreamCodec<RegistryFriendlyByteBuf, RoomTitlePayload> STREAM_CODEC = StreamCodec.of(
 				(RegistryFriendlyByteBuf buf, RoomTitlePayload msg) -> {
-					buf.writeUtf(msg.langKey() == null ? "" : msg.langKey(), 64);
+					buf.writeUtf(msg.headerKey() == null ? "" : msg.headerKey(), 64);
+					buf.writeUtf(msg.bodyKey() == null ? "" : msg.bodyKey(), 64);
 					buf.writeInt(msg.color());
 				},
-				(RegistryFriendlyByteBuf buf) -> new RoomTitlePayload(buf.readUtf(64), buf.readInt()));
+				(RegistryFriendlyByteBuf buf) -> new RoomTitlePayload(buf.readUtf(64), buf.readUtf(64), buf.readInt()));
 
 		@Override
 		public Type<RoomTitlePayload> type() {
@@ -164,7 +166,8 @@ public class MahjongLobbyPayloads {
 		public static void handleData(final RoomTitlePayload message, final IPayloadContext context) {
 			if (context.flow() == PacketFlow.CLIENTBOUND) {
 				context.enqueueWork(() -> mcr.riichi_arise.client.RoomTitleOverlay.show(
-						net.minecraft.network.chat.Component.translatable(message.langKey()), message.color()));
+						net.minecraft.network.chat.Component.translatable(message.headerKey()),
+						net.minecraft.network.chat.Component.translatable(message.bodyKey()), message.color()));
 			}
 		}
 	}
@@ -198,6 +201,7 @@ public class MahjongLobbyPayloads {
 		}
 		buf.writeVarInt(msg.playerCount());
 		buf.writeVarInt(msg.roomType());
+		buf.writeVarInt(msg.ownWinEffect());
 	}
 
 	private static SyncMessage readSync(RegistryFriendlyByteBuf buf) {
@@ -226,8 +230,10 @@ public class MahjongLobbyPayloads {
 			seatVoices.add(buf.readUtf(64));
 		int playerCount = buf.readVarInt();
 		int roomType = buf.readVarInt();
+		int ownWinEffect = buf.readVarInt();
 		return new SyncMessage(origin, phase, seats, aiMask, queue, canManage, gameType, voteCount,
-				openHand, seatModes, thinkIdx, aiSpeedIdx, ownVoice, seatVoices, playerCount, roomType);
+				openHand, seatModes, thinkIdx, aiSpeedIdx, ownVoice, seatVoices, playerCount, roomType,
+				ownWinEffect);
 	}
 
 	public static void register() {

@@ -397,13 +397,14 @@ public final class PaipuReplay {
 		}
 		MahjongTableClient.applyReplay(new MahjongTablePayload.ViewMessage(
 				s.originPacked, 0, true, 0, // viewerSeat/openHand/dealAnim（回放全部明牌）
-				hands, new int[4], new int[4], rivers, melds, snap.kita.clone(),
+				hands, new int[4], new int[4], new int[4], rivers, melds, snap.kita.clone(),
 				snap.riichiRiverIdx.clone(), snap.riichiSticks.clone(),
 				new int[] { 1, 1, 1, 1 }, snap.points.clone(), // handsExposed=1：回放手牌全部摊开朝上
-				names, new String[4], new String[4], new String[4], // 回放无 AI 形象
+				names, new int[4], new String[4], new String[4], new String[4], // 回放无 AI 形象
 				h.dora, snap.indicators, snap.wallCount,
 				snap.turnSeat, Math.floorMod(s.handIdx, 4) + 1, Math.floorMod(s.handIdx / 4, 4), 0, 0,
-				-1, -1, -1, RichiTableState.PHASE_PLAYING, g.playerCount, banner, new int[] { -1, -1, -1, -1 }));
+				-1, -1, -1, RichiTableState.PHASE_PLAYING, g.playerCount, banner, new int[] { -1, -1, -1, -1 },
+				RichiTableState.ROOM_TIE, new int[4]));
 	}
 
 	private static boolean sameTile(int a, int b) {

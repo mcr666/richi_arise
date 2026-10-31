@@ -658,6 +658,22 @@ public final class MahjongLobby {
 	}
 
 	/**
+	 * 和牌特效（个人设定，0..3）：仅可设置自己的；全局持久化并广播各桌 Sync，
+	 * 使他人也按其设置看到和牌特效。
+	 */
+	public static void setWinEffect(ServerPlayer sp, int style) {
+		if (style < 0 || style > 3)
+			return;
+		ServerLevel level = sp.serverLevel();
+		MahjongTableSavedData.get(level).setWinEffect(sp.getUUID().toString(), style);
+		for (BlockPos origin : RichiTableManager.originsIn(level)) {
+			RichiTableState st = RichiTableManager.get(origin);
+			if (st != null)
+				broadcastSync(level, origin, st);
+		}
+	}
+
+	/**
 	 * 玩家退出游戏或切换维度时自动退出牌局：
 	 * 对局中座位由 AI 接管（makeAI），等待/结束阶段清空座位并移出队列。
 	 */
@@ -887,15 +903,20 @@ public final class MahjongLobby {
 				voice = mcr.riichi_arise.game.riichi.AiCharacters.voice(mode);
 			}
 			seatVoices[seat] = voice;
+			// 和牌特效风格：人类 = 个人设定（全局持久化），AI/空座 = 0（粒子环）
+			st.winEffects[seat] = st.players[seat] != null && !st.aiSeat[seat]
+					? sd.getWinEffect(st.players[seat], 0)
+					: 0;
 		}
 		for (ServerPlayer p : nearby) {
 			String ownVoice = sd.getVoice(p.getUUID().toString());
+			int ownWinEffect = sd.getWinEffect(p.getUUID().toString(), 0);
 			net.neoforged.neoforge.network.PacketDistributor.sendToPlayer(p,
 					new MahjongLobbyPayloads.SyncMessage(origin.asLong(), st.phase,
 						java.util.Arrays.asList(seatNames), aiMask, queueNames, canManage(p), st.gameType,
 						voteCount, st.openHand, seatModes, st.thinkIdx, st.aiSpeedIdx,
 						ownVoice == null ? "" : ownVoice, java.util.Arrays.asList(seatVoices), st.playerCount,
-						st.roomType));
+						st.roomType, ownWinEffect));
 		}
 		// 悬浮提示随状态同步：等待期显示（空队列给加入提示），其它阶段清除
 		if (st.phase == RichiTableState.PHASE_WAITING)

@@ -52,6 +52,23 @@ public class MahjongTileItem extends BlockItem {
 		return code == null ? -1 : code;
 	}
 
+	/**
+	 * 玻璃牌背物品堆（玻璃之间的牌背/隐藏手牌）：带牌面代码但附加 back 标记，
+	 * 模型 overrides 据此选玻璃牌背模型（六面玻璃，内侧朝南渲染 #front 牌面，
+	 * 因此从背面也能看到透出来的牌面）。code&nbsp;&lt;&nbsp;0 = 未知牌。
+	 */
+	public static ItemStack createGlassBack(int code) {
+		ItemStack stack = create(code);
+		stack.set(MahjongComponents.TILE_GLASS_BACK.get(), true);
+		return stack;
+	}
+
+	/** 玻璃牌背 → 当前牌面纹理名（如 1m / 0m / 5z）；未知牌返回 null */
+	public static String glassFaceTexture(ItemStack stack) {
+		int code = getCode(stack);
+		return code >= 0 && code < CODE_TO_NAME.size() ? CODE_TO_NAME.get(code) : null;
+	}
+
 	/** 按牌面显示名称（复用旧 34 张牌的翻译键） */
 	@Override
 	public Component getName(ItemStack stack) {

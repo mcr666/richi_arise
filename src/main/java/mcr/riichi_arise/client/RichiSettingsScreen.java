@@ -33,7 +33,7 @@ public class RichiSettingsScreen extends Screen {
 
 	/** 行类型 */
 	private static final int HEADER = 0, CLIENT_TOGGLE = 1, PERSONAL_VOICE = 2, WORLD_TOGGLE = 3, NET_TOGGLE = 4,
-			VOICE_VOLUME = 5;
+			VOICE_VOLUME = 5, WIN_EFFECT = 6;
 
 	private record Row(int kind, int cat, String labelKey, String value, boolean enabled, int extra) {
 	}
@@ -113,12 +113,13 @@ public class RichiSettingsScreen extends Screen {
 			r.add(clientRow("gui.riichi_arise.settings.client_spectator_open", RichiConfig.SPECTATOR_OPEN_HANDS));
 			r.add(clientRow("gui.riichi_arise.settings.client_avatar_stand", RichiConfig.MAHJONG_AVATAR_STANDING));
 			r.add(clientRow("gui.riichi_arise.settings.client_spectator_show", RichiConfig.SPECTATOR_SHOW_TABLE));
+			r.add(new Row(VOICE_VOLUME, 0, "gui.riichi_arise.voice.volume", voiceVolumeText(), true, 0));
 		}
 		// 个人设定
 		r.add(new Row(HEADER, 1, "gui.riichi_arise.settings.cat_personal", expanded[1] ? "▾" : "▸", true, 0));
 		if (expanded[1]) {
 			r.add(new Row(PERSONAL_VOICE, 1, "gui.riichi_arise.settings.personal_voice", ownVoice(), true, 0));
-			r.add(new Row(VOICE_VOLUME, 1, "gui.riichi_arise.voice.volume", voiceVolumeText(), true, 0));
+			r.add(new Row(WIN_EFFECT, 1, "gui.riichi_arise.settings.personal_win_effect", winEffectText(), true, 0));
 		}
 		// 世界规则（gamerule + 端口，需管理员；数据来自服务端 Sync）
 		r.add(new Row(HEADER, 2, "gui.riichi_arise.settings.cat_world", expanded[2] ? "▾" : "▸", true, 0));
@@ -145,6 +146,17 @@ public class RichiSettingsScreen extends Screen {
 	/** 角色语音音量显示（百分比） */
 	private String voiceVolumeText() {
 		return Math.round(RichiConfig.VOICE_VOLUME.get() * 100) + "%";
+	}
+
+	/** 和牌特效风格显示名（0=粒子环，1=星陨华彩，2=金阁爆华，3=极光回旋）：取服务端同步的自己当前值 */
+	private String winEffectText() {
+		String[] keys = { "gui.riichi_arise.settings.win_effect.ring",
+				"gui.riichi_arise.settings.win_effect.starfall",
+				"gui.riichi_arise.settings.win_effect.golden",
+				"gui.riichi_arise.settings.win_effect.aurora" };
+		MahjongLobbyPayloads.LobbySync s = MahjongLobbyPayloads.CLIENT_SYNC.get(origin.asLong());
+		int v = s == null ? 0 : Math.max(0, Math.min(keys.length - 1, s.ownWinEffect()));
+		return Component.translatable(keys[v]).getString();
 	}
 
 	private int maxScroll() {
@@ -271,6 +283,14 @@ public class RichiSettingsScreen extends Screen {
 				MahjongTableClient.refreshAll();
 			}
 			case PERSONAL_VOICE -> VoiceSettingsScreen.open(this.origin);
+			case WIN_EFFECT -> {
+				// 和牌特效：单击循环切换（0 粒子环 → 1 星陨华彩 → 2 金阁爆华 → 3 极光回旋 → 0）
+				// 提交给服务端持久化并广播，使他人也按自己的设置看到特效
+				MahjongLobbyPayloads.LobbySync s = MahjongLobbyPayloads.CLIENT_SYNC.get(origin.asLong());
+				int cur = s == null ? 0 : s.ownWinEffect();
+				net.neoforged.neoforge.network.PacketDistributor.sendToServer(
+						new mcr.riichi_arise.network.VoicePayloads.WinEffectSetMessage((cur + 1) % 4));
+			}
 			case VOICE_VOLUME -> {
 				// 角色语音音量：每次点击 +10%，100% 后回到 0%（VoicePlayer 逐次读取，立即生效）
 				double v = RichiConfig.VOICE_VOLUME.get();
