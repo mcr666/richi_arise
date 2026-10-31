@@ -183,9 +183,12 @@ public final class RiichiBot {
 	 * @param doraCodes    当前宝牌 code 列表（可重复 = 多重宝牌）
 	 * @param roundWindIdx 场风 34 索引（27=東..30=北）
 	 * @param dealerSeat   庄家座位（推各家自风）
+	 * @param kitaCounts   各立直家拔北数（与 riichiSeats 平行；三麻拔北 ≥2 的对手打点更高，
+	 *                     其铳率表权重上调 1.2 倍；四麻全 0 不修正）
 	 */
 	public static double[] defenseDanger(List<Integer> riichiSeats, List<List<Integer>> rivers,
-			int[] visible34, List<Integer> doraCodes, int roundWindIdx, int dealerSeat) {
+			int[] visible34, List<Integer> doraCodes, int roundWindIdx, int dealerSeat,
+			List<Integer> kitaCounts) {
 		double[] risk = new double[34];
 		if (riichiSeats == null || riichiSeats.isEmpty())
 			return risk;
@@ -203,7 +206,9 @@ public final class RiichiBot {
 				safe[TileEfficiency.codeToIndex(c)] = true;
 			int selfWind = 27 + Math.floorMod(s - dealerSeat + 4, 4);
 			int turns = Math.max(1, river.size());
-			double[] r = TileDanger.calculateRisk(turns, safe, left, doraIdx, roundWindIdx, selfWind);
+			// 三麻打点修正：拔北 ≥2 的立直家每张北 +1 翻、打点更高，危险度权重上调约 1.2 倍
+			double weight = kitaCounts != null && k < kitaCounts.size() && kitaCounts.get(k) >= 2 ? 1.2 : 1.0;
+			double[] r = TileDanger.calculateRisk(turns, safe, left, doraIdx, roundWindIdx, selfWind, weight);
 			for (int i = 0; i < 34; i++)
 				risk[i] = Math.max(risk[i], r[i]);
 		}

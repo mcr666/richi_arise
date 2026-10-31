@@ -16,6 +16,8 @@ import javazoom.jl.decoder.Decoder;
 import javazoom.jl.decoder.Header;
 import javazoom.jl.decoder.SampleBuffer;
 
+import mcr.riichi_arise.RichiConfig;
+
 /**
  * 内置 mp3 播放器（客户端）。
  * <p>
@@ -54,8 +56,8 @@ public final class VoicePlayer {
 	/** 报番代次：清掉报番语音时递增，只中止报番类任务（不影响正在播的荣/自摸等 act 语音） */
 	private static volatile long fanToken;
 
-	/** 一次播放请求：音频流 + 其代次 + 是否报番类 + 报番代次 + 播完回调（被新语音打断则不回调；可为 null） */
-	private record Job(InputStream in, long gen, boolean fan, long fanToken, Runnable onDone) {
+	/** 一次播放请求：音频流 + 其代次 + 是否报番类 + 报番代次 + 开始播放回调 + 播完回调（均可为 null） */
+	private record Job(InputStream in, long gen, boolean fan, long fanToken, Runnable onStart, Runnable onDone) {
 	}
 
 	/** 播报某角色某事件的语音；无可用音频（文件缺失/未下载）时写日志并跳过 */
@@ -69,15 +71,17 @@ public final class VoicePlayer {
 			return;
 		InputStream in = VoiceCache.open(charId, ev);
 		if (in == null) {
-			LogUtils.getLogger().warn("[voice] 无可用语音文件: {} {}（离线内置缺文件或在线未下载成功）",
-					charId, ev.act());
+			// 听牌/未听属于可选语音（多数角色没有），缺失时不打扰日志
+			if (ev != VoiceEvents.TENPAI && ev != VoiceEvents.NOTEN)
+				LogUtils.getLogger().warn("[voice] 无可用语音文件: {} {}（离线内置缺文件或在线未下载成功）",
+						charId, ev.act());
 			return;
 		}
 		long gen = ++generation; // 先递增：当前播放中的语音随即失效
 		synchronized (PENDING) {
 			while (!PENDING.isEmpty())
 				closeQuietly(PENDING.poll().in()); // 丢弃未播的积压
-			PENDING.add(new Job(in, gen, false, 0, onDone));
+			PENDING.add(new Job(in, gen, false, 0, null, onDone));
 			PENDING.notifyAll();
 		}
 		startWorker();
@@ -93,18 +97,26 @@ public final class VoicePlayer {
 
 	/** 同上；该条语音自然播完后回调 onDone（播放线程调用，被新语音打断则不回调） */
 	public static void enqueue(String charId, String fanKey, Runnable onDone) {
-		enqueueOrSkip(charId, fanKey, onDone);
+		enqueueOrSkip(charId, fanKey, null, onDone);
 	}
 
 	/** 入队一条报番语音；音频缺失时返回 false（由调用方决定如何补齐进度） */
 	public static boolean enqueueOrSkip(String charId, String fanKey, Runnable onDone) {
+		return enqueueOrSkip(charId, fanKey, null, onDone);
+	}
+
+	/**
+	 * 入队一条报番语音：onStart 在该条真正开始播放时回调（用于让界面文字与语音同时出现），
+	 * onDone 在自然播完后回调；音频缺失时返回 false（由调用方决定如何补齐进度）。
+	 */
+	public static boolean enqueueOrSkip(String charId, String fanKey, Runnable onStart, Runnable onDone) {
 		if (charId == null || charId.isEmpty() || fanKey == null || fanKey.isEmpty())
 			return false;
 		InputStream in = VoiceCache.openFan(charId, fanKey);
 		if (in == null)
 			return false;
 		synchronized (PENDING) {
-			PENDING.add(new Job(in, generation, true, fanToken, onDone));
+			PENDING.add(new Job(in, generation, true, fanToken, onStart, onDone));
 			PENDING.notifyAll();
 		}
 		startWorker();
@@ -305,6 +317,14 @@ public final class VoicePlayer {
 			}
 			try {
 				playing = true;
+				// 该条真正开始播放时回调（报番界面据此让文字与语音同时出现）
+				if (!cancelled(job) && job.onStart() != null) {
+					try {
+						job.onStart().run();
+					} catch (Throwable e) {
+						LogUtils.getLogger().warn("[voice] 播放开始回调失败: {}", e.toString());
+					}
+				}
 				if (decodeAndWrite(job) && job.onDone() != null)
 					job.onDone().run();
 			} catch (Throwable e) {
@@ -409,11 +429,16 @@ public final class VoicePlayer {
 		}
 	}
 
-	/** short[]（PCM 小端有符号）→ byte[]，供 SourceDataLine.write */
+	/** short[]（PCM 小端有符号）→ byte[]，供 SourceDataLine.write；按 {@link RichiConfig#VOICE_VOLUME} 应用增益 */
 	private static byte[] toBytes(short[] s, int len) {
+		double gain = RichiConfig.VOICE_VOLUME.get().doubleValue();
 		byte[] b = new byte[len * 2];
 		for (int i = 0; i < len; i++) {
 			short v = s[i];
+			if (gain != 1.0) {
+				double g = Math.round(v * gain);
+				v = (short) Math.max(-32768, Math.min(32767, g));
+			}
 			b[i * 2] = (byte) (v & 0xFF);
 			b[i * 2 + 1] = (byte) ((v >> 8) & 0xFF);
 		}

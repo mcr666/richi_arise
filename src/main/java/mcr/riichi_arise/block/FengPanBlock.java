@@ -603,6 +603,16 @@ public class FengPanBlock extends Block {
 		return TableLayout.handTarget(TableLayout.of(level, origin), seat, index);
 	}
 
+	/** 立即清掉某玩家的回合/响应倒计时叠加层：发一次 0/0（客户端即刻隐藏），
+	 *  并把去重键置为 "0:0"，避免下一巡首包因键相同被当成重复而漏发 */
+	public static void clearCountdown(net.minecraft.server.level.ServerPlayer p) {
+		if (p == null)
+			return;
+		LAST_COUNTDOWN.put(p.getUUID(), "0:0");
+		net.neoforged.neoforge.network.PacketDistributor.sendToPlayer(p,
+				new mcr.riichi_arise.network.MahjongCountdownPayload.CountdownMessage(0, 0));
+	}
+
 	/** 每服务端 tick 调用：回合倒计时（经验条显示）+ 超时自动摸切 */
 	public static void processTurnTimers(net.minecraft.server.MinecraftServer server) {
 		for (net.minecraft.server.level.ServerLevel lvl : server.getAllLevels()) {
@@ -673,7 +683,7 @@ public class FengPanBlock extends Block {
 		setGameActive(level, origin, true);
 		spawnHandInteractors(level, origin, st, true);
 		RichiTableSync.broadcast(level, origin, 1);
-		return 4 + 52 * TableLayout.DEAL_INTERVAL_TICKS; // 座位标记 4 + 手牌 52（空牌河/副露）
+		return 4 + 52 * TableLayout.DEAL_INTERVAL_TICKS; // 座位标记 4 + 手牌 52（空牌河/副露）：总时长与逐张发牌一致
 	}
 
 	/**

@@ -13,13 +13,8 @@ public class RichiConfig {
 	public static final ModConfigSpec.BooleanValue MAHJONG_AVATAR_STANDING;
 	/** 麻雀观战是否显示牌局内容：true=桌心 8 格内观战者也会被打开和牌/结算界面并收到牌局聊天（默认开），false=观战者仅旁观 */
 	public static final ModConfigSpec.BooleanValue SPECTATOR_SHOW_TABLE;
-	/** 宝牌指示叠加层位置（屏幕四角预设） */
-	public static final ModConfigSpec.EnumValue<HudCorner> HUD_DORA_CORNER;
-
-	/** 宝牌指示叠加层的四个角落预设 */
-	public enum HudCorner {
-		TOP_LEFT, TOP_RIGHT, BOTTOM_LEFT, BOTTOM_RIGHT
-	}
+	/** 角色语音播放音量（0.0~1.0，默认 0.5）：客户端本地播放，实时作用于 VoicePlayer 输出，不经过原版主音量 */
+	public static final ModConfigSpec.DoubleValue VOICE_VOLUME;
 
 	public static final ModConfigSpec SPEC;
 
@@ -41,10 +36,10 @@ public class RichiConfig {
 				.comment("Mahjong spectator shows table content: when true, spectators within 8 blocks of the table are also shown the win/settlement screens and table chat. Default: true")
 				.translation("gui.riichi_arise.settings.client_spectator_show")
 				.define("spectatorShowTable", true);
-		HUD_DORA_CORNER = builder
-				.comment("Mahjong HUD: corner where the dora indicator overlay is drawn. Default: TOP_LEFT")
-				.translation("gui.riichi_arise.settings.client_hud_corner")
-				.defineEnum("hudDoraCorner", HudCorner.TOP_LEFT);
+		VOICE_VOLUME = builder
+				.comment("Mahjong character voice playback volume, 0.0-1.0 (default 0.5). Applies in real time to the character voice player output.")
+				.translation("gui.riichi_arise.voice.volume")
+				.defineInRange("voiceVolume", 0.5, 0.0, 1.0);
 		builder.pop();
 		SPEC = builder.build();
 	}

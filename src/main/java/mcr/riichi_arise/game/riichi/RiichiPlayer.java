@@ -36,6 +36,8 @@ public class RiichiPlayer {
 	public int discardCount;
 	/** 本局是否已摸过第一次牌（九种九牌判定用） */
 	public boolean firstDrawDone;
+	/** 本局拔北数（三麻）：每张 +1 翻，和牌时由对局层附加（不计入 melds，不破坏门清）；每局清零 */
+	public int kitaCount;
 	/** 本局点数 */
 	public int points;
 
@@ -57,8 +59,12 @@ public class RiichiPlayer {
 
 	/** 理牌：1-9m → 1-9p → 1-9s → 1-7z，红五（code=0）按 5 排序 */
 	public void sortHand() {
-		// 归一化排序键：红5万(0)→5、红5饼(10)→15、红5索(20)→25，否则红5饼/索会排到花色开头
-		hand.sort(java.util.Comparator.comparingInt(c -> c == 0 ? 5 : c == 10 ? 15 : c == 20 ? 25 : c));
+		// 归一化排序键：红5万(0)→5、红5饼(10)→15、红5索(20)→25，否则红5饼/索会排到花色开头；
+		// 透明牌先去掉标志位再比较（同等牌面的透明/不透明牌相邻）
+		hand.sort(java.util.Comparator.comparingInt(c -> {
+			int b = mcr.riichi_arise.game.TileFlag.base(c);
+			return b == 0 ? 5 : b == 10 ? 15 : b == 20 ? 25 : b;
+		}));
 	}
 
 	/** 手牌记法（渲染用）：理牌序 + 摸牌在末尾 */
@@ -66,7 +72,8 @@ public class RiichiPlayer {
 		return MahjongTileNotation.format(hand);
 	}
 
-	/** 副露记法（渲染用）：组间 ";"，每组 = "声明家:牌码"，组内声明牌（纵牌）在末尾 */
+	/** 副露记法（渲染用）：组间 ";"，每组 = "声明家:牌码"，组内声明牌（纵牌）在末尾；
+	 *  加杠组末尾追加 '!'，供渲染层把第 4 张叠在横放牌上（不做成明杠样） */
 	public String meldNotation() {
 		StringBuilder sb = new StringBuilder();
 		for (Fuuro f : melds) {
@@ -77,6 +84,8 @@ public class RiichiPlayer {
 			for (int t : f.displayOrder())
 				codes.add(t);
 			sb.append(MahjongTileNotation.format(codes));
+			if (f.type == Fuuro.Type.KAKAN)
+				sb.append('!');
 		}
 		return sb.toString();
 	}

@@ -132,3 +132,16 @@ tasks.register('syncBinMain', Sync) {
 tasks.named('classes').configure {
     finalizedBy 'syncBinMain'
 }
+
+// 报番语音资源包：源码在 resourcepacks/riichi_arise_fan_voice/，打成可直接放进原版 resourcepacks 目录的 zip。
+// mod JAR 不再包含报番音频（吃碰杠等 act 语音仍随 mod 打包）。
+tasks.register('fanVoicePack', Zip) {
+    group = 'build'
+    description = '打包报番语音资源包到 build/resourcepacks/riichi_arise_fan_voice.zip'
+    from layout.projectDirectory.dir('resourcepacks/riichi_arise_fan_voice')
+    archiveFileName = 'riichi_arise_fan_voice.zip'
+    destinationDirectory = layout.buildDirectory.dir('resourcepacks')
+}
+tasks.named('build').configure {
+    dependsOn 'fanVoicePack'
+}

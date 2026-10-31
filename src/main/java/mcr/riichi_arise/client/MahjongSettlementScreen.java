@@ -34,6 +34,8 @@ public class MahjongSettlementScreen extends Screen {
 	private boolean tierPlayed;
 	/** 是否已发出 settle_confirm（倒计时归零自动确认 / 手动点"确定"，只发一次） */
 	private boolean confirmSent;
+	/** "确定"按钮：报番+番符/点数/段位全部显现（tierAt）前隐藏，防止播报进行中误点跳过 */
+	private Button confirmButton;
 
 	private MahjongSettlementScreen() {
 		super(Component.translatable("gui.riichi_arise.settlement.title"));
@@ -82,18 +84,30 @@ public class MahjongSettlementScreen extends Screen {
 	@Override
 	protected void init() {
 		this.data = MahjongSettlementPayload.last;
-		// 单一"确定"按钮：回传确认（服务端全员确认后推进）并关闭界面；关闭界面等同确认
-		addRenderableWidget(Button.builder(Component.translatable("gui.riichi_arise.settlement.confirm"), b -> onClose())
+		// 单一"确定"按钮：回传确认（服务端全员确认后推进）并关闭界面；关闭界面等同确认。
+		// 初始隐藏，等全部播报完（番符/点数/段位显现的 tierAt 时刻）后才由 tick 显示，
+		// 避免役种报番 / 段位播报进行中误点跳过。
+		this.confirmButton = addRenderableWidget(Button.builder(
+				Component.translatable("gui.riichi_arise.settlement.confirm"), b -> onClose())
 				.bounds(this.width / 2 - 40, Math.min(this.height - 26, this.height / 2 + 78), 80, 20).build());
+		this.confirmButton.visible = false;
 	}
 
 	@Override
 	public void onClose() {
 		// 关闭界面（含 ESC / 确定按钮）= 确认，否则服务端要等满兜底时限才推进；
 		// 同时停掉没播完的报番语音，避免残留在下一局番名之前先响
+		boolean win = this.data != null && this.data.mode() == MahjongSettlementPayload.MODE_HAND_WIN;
+		long originPacked = this.data == null ? 0L : this.data.originPacked();
 		sendConfirmIfNeeded();
 		mcr.riichi_arise.voice.FanAnnouncer.cancel();
 		super.onClose();
+		// 和牌结算关闭后立即进入点数变化界面（数据由服务端预置），不必等其他玩家确认
+		if (win) {
+			var prepared = mcr.riichi_arise.network.MahjongPointDeltaPayload.preparedFor(originPacked);
+			if (prepared != null)
+				MahjongPointDeltaScreen.openPrepared(prepared);
+		}
 	}
 
 	/** 回传 settle_confirm（同一局只发一次） */
@@ -108,9 +122,7 @@ public class MahjongSettlementScreen extends Screen {
 
 	@Override
 	public void tick() {
-		// 报番推进门控：相邻番种至少间隔 12 tick（音频缺失的角色也逐条显现，不会一次性全显示）
-		mcr.riichi_arise.voice.FanAnnouncer.tick();
-		// 报番延迟 1s 开始：界面弹出满延迟才入队语音并显现第一条（幂等）
+		// 报番延迟 1s 开始：界面弹出满延迟才入队语音（幂等）；之后文字随各条语音开始同时显现
 		if (age >= RichiTableState.SETTLE_ANNOUNCE_DELAY)
 			mcr.riichi_arise.voice.FanAnnouncer.start();
 		age++;
@@ -120,6 +132,11 @@ public class MahjongSettlementScreen extends Screen {
 			voiceEndAge = age;
 		int tierAt = tierAtNow();
 		boolean timingReady = tierAt < Integer.MAX_VALUE - 1000;
+		// 全部播报完（番符/点数/段位显现的 tierAt 时刻）后才显示"确定"按钮；
+		// 终局结算无报番，直接显示（不必等固定节奏）
+		boolean finalMode = this.data != null && this.data.mode() == MahjongSettlementPayload.MODE_FINAL;
+		if (this.confirmButton != null && (finalMode || (timingReady && age >= tierAt)))
+			this.confirmButton.visible = true;
 		// 倒计时归零 → 自动回确认（与"确定"按钮同一条包），保证界面上的倒计时就是真实推进时刻；
 		// 服务端在全员确认（或兜底时限）后推进到点数变化界面
 		if (timingReady && age >= tierAt + RichiTableState.SETTLE_CONFIRM_TICKS)
@@ -128,8 +145,10 @@ public class MahjongSettlementScreen extends Screen {
 		if (timingReady
 				&& age >= tierAt + RichiTableState.SETTLE_CONFIRM_TICKS + RichiTableState.SETTLE_FALLBACK_TICKS)
 			onClose();
-		// 报番音效：每新出现一条役种播放一次木板放置声（可见条数由 age 推导，与渲染一致）
-		if (this.data != null && !this.data.yakuList().isBlank()) {
+		// 无报番语音时的固定节奏音效：每新出现一条役种播放一次木板放置声（可见条数由 age 推导，与渲染一致）；
+		// 有报番语音时由 FanAnnouncer 在每条语音开始时播打点音，这里不再另响
+		if (!mcr.riichi_arise.voice.FanAnnouncer.isActive()
+				&& this.data != null && !this.data.yakuList().isBlank()) {
 			int n = this.data.yakuList().split(";").length;
 			int visible = 0;
 			for (int i = 0; i < n; i++)
@@ -153,10 +172,10 @@ public class MahjongSettlementScreen extends Screen {
 				Minecraft.getInstance().getSoundManager().play(
 						net.minecraft.client.resources.sounds.SimpleSoundInstance.forUI(sound, 1.0F));
 		}
-		// 段位语音（满贯/跳满/倍满/三倍满/累计役满/N倍役满）：音效播完 1s 后再念，避免与音效重叠
+		// 段位语音（满贯/跳满/倍满/三倍满/累计役满/N倍役满）：音效播完 0.5s 后再念，避免与音效重叠
 		if (!this.levelPlayed && timingReady && this.data != null
 				&& this.data.mode() == MahjongSettlementPayload.MODE_HAND_WIN
-				&& age >= tierAt + 20) {
+				&& age >= tierAt + 10) {
 			this.levelPlayed = true;
 			mcr.riichi_arise.voice.FanAnnouncer.playLevel(tierVoiceKey());
 		}
@@ -183,81 +202,85 @@ public class MahjongSettlementScreen extends Screen {
 		return end >= Integer.MAX_VALUE - 1000 ? Integer.MAX_VALUE : end + RichiTableState.SETTLE_TIER_OFFSET;
 	}
 
-	/** 打点段位（雀魂按点数段位判定，gain=番符点数本体不含本场）：役满符=0（含累计役满 13n翻/0符） */
-	private net.minecraft.sounds.SoundEvent tierSound() {
+	/** 打点段位等级：0=满贯 1=跳满 2=倍满 3=三倍满 4=役满；-1=满贯以下。
+	 *  按翻/符判定而非实际收入点数——三麻自摸有自摸损，收入点数会比同等打点低一档。 */
+	private int tierRank() {
 		if (this.data == null)
-			return null;
+			return -1;
 		if (this.data.fu() == 0)
-			return net.minecraft.sounds.SoundEvents.TOTEM_USE; // 役满
+			return 4; // 役满（符=0；han 为倍数）
 		if ("nagashi".equals(this.data.winType()))
-			return net.minecraft.sounds.SoundEvents.SLIME_BLOCK_PLACE; // 流局满贯 = 满贯段位
-		int gain = this.data.gain();
-		// 庄家打点 = 子家 ×1.5：满贯 12000/跳满 18000/倍满 24000/三倍满 36000（子家 8000/12000/16000/24000）
-		boolean parent = this.data.parent();
-		int sanbaiman = parent ? 36000 : 24000;
-		int baiman = parent ? 24000 : 16000;
-		int haneman = parent ? 18000 : 12000;
-		int mangan = parent ? 12000 : 8000;
-		if (gain >= sanbaiman)
-			return net.minecraft.sounds.SoundEvents.BEACON_ACTIVATE; // 三倍满
-		if (gain >= baiman)
-			return net.minecraft.sounds.SoundEvents.ANVIL_PLACE; // 倍满
-		if (gain >= haneman)
-			return net.minecraft.sounds.SoundEvents.SPLASH_POTION_BREAK; // 跳满
-		if (gain >= mangan)
-			return net.minecraft.sounds.SoundEvents.SLIME_BLOCK_PLACE; // 满贯
-		return null;
+			return 0; // 流局满贯
+		int han = this.data.han();
+		if (han >= 13)
+			return 4; // 累计役满
+		if (han >= 11)
+			return 3;
+		if (han >= 8)
+			return 2;
+		if (han >= 6)
+			return 1;
+		if (han >= 5)
+			return 0;
+		// 3~4 翻按基本点判定切上满贯（4 翻 40 符、3 翻 70 符 = 2000 基本点）
+		int base = this.data.fu() << (2 + Math.max(0, han));
+		return base >= 2000 ? 0 : -1;
+	}
+
+	/** 打点段位音效（按 tierRank 映射） */
+	private net.minecraft.sounds.SoundEvent tierSound() {
+		return switch (tierRank()) {
+			case 4 -> net.minecraft.sounds.SoundEvents.TOTEM_USE; // 役满
+			case 3 -> net.minecraft.sounds.SoundEvents.BEACON_ACTIVATE; // 三倍满
+			case 2 -> net.minecraft.sounds.SoundEvents.ANVIL_PLACE; // 倍满
+			case 1 -> net.minecraft.sounds.SoundEvents.SPLASH_POTION_BREAK; // 跳满
+			case 0 -> net.minecraft.sounds.SoundEvents.SLIME_BLOCK_PLACE; // 满贯（含流局满贯）
+			default -> null;
+		};
 	}
 
 	/** 打点段位名（役种播报完显示于番符行；满贯以下返回 null 保持番符点数格式） */
 	private String tierLabel() {
-		if (this.data == null)
-			return null;
-		if (this.data.fu() == 0) {
-			// 役满（han 编码倍数）：1 倍"役满"，n 倍"n倍役满"
-			int count = Math.max(1, this.data.han());
-			return count > 1
-					? Component.translatable("gui.riichi_arise.settlement.yakuman_n", count).getString()
-					: Component.translatable("gui.riichi_arise.settlement.yakuman").getString();
+		switch (tierRank()) {
+			case 4:
+				if (this.data.fu() == 0) {
+					// 役满（han 编码倍数）：1 倍"役满"，n 倍"n倍役满"
+					int count = Math.max(1, this.data.han());
+					return count > 1
+							? Component.translatable("gui.riichi_arise.settlement.yakuman_n", count).getString()
+							: Component.translatable("gui.riichi_arise.settlement.yakuman").getString();
+				}
+				return Component.translatable("gui.riichi_arise.settlement.yakuman").getString(); // 累计役满
+			case 3:
+				return Component.translatable("gui.riichi_arise.settlement.sanbaiman").getString();
+			case 2:
+				return Component.translatable("gui.riichi_arise.settlement.baiman").getString();
+			case 1:
+				return Component.translatable("gui.riichi_arise.settlement.haneman").getString();
+			case 0:
+				return Component.translatable("gui.riichi_arise.settlement.mangan").getString();
+			default:
+				return null;
 		}
-		int gain = this.data.gain();
-		// 庄家打点 = 子家 ×1.5：满贯 12000/跳满 18000/倍满 24000/三倍满 36000（子家 8000/12000/16000/24000）
-		boolean parent = this.data.parent();
-		int sanbaiman = parent ? 36000 : 24000;
-		int baiman = parent ? 24000 : 16000;
-		int haneman = parent ? 18000 : 12000;
-		int mangan = parent ? 12000 : 8000;
-		if (gain >= sanbaiman)
-			return Component.translatable("gui.riichi_arise.settlement.sanbaiman").getString();
-		if (gain >= baiman)
-			return Component.translatable("gui.riichi_arise.settlement.baiman").getString();
-		if (gain >= haneman)
-			return Component.translatable("gui.riichi_arise.settlement.haneman").getString();
-		if (gain >= mangan)
-			return Component.translatable("gui.riichi_arise.settlement.mangan").getString();
-		return null;
 	}
 
 	/** 点数等级播报键（与实际打点段位一致；未达满贯返回 null） */
 	private String tierVoiceKey() {
 		if (this.data == null || "nagashi".equals(this.data.winType()))
 			return null; // 流局满贯无役种报番，不播等级语音
-		if (this.data.fu() == 0) {
+		if (tierRank() == 4 && this.data.fu() == 0) {
 			// 役满（han 编码倍数）：13 番以上为累计役满，否则 N 倍役满（6 倍以上用 6 倍音频）
 			int count = Math.max(1, this.data.han());
 			return count >= 13 ? "leijiyiman" : "yiman" + Math.min(6, count);
 		}
-		int gain = this.data.gain();
-		boolean parent = this.data.parent();
-		if (gain >= (parent ? 36000 : 24000))
-			return "sanbeiman";
-		if (gain >= (parent ? 24000 : 16000))
-			return "beiman";
-		if (gain >= (parent ? 18000 : 12000))
-			return "tiaoman";
-		if (gain >= (parent ? 12000 : 8000))
-			return "mangan";
-		return null;
+		return switch (tierRank()) {
+			case 4 -> "leijiyiman"; // 累计役满（13 翻以上、符非 0）
+			case 3 -> "sanbeiman";
+			case 2 -> "beiman";
+			case 1 -> "tiaoman";
+			case 0 -> "mangan";
+			default -> null;
+		};
 	}
 
 	/** 报番语音模式下的播报结束时刻（最后一次 FanAnnouncer.done 时记录） */
@@ -299,15 +322,15 @@ public class MahjongSettlementScreen extends Screen {
 		List<String> yakus = win && !this.data.yakuList().isBlank()
 				? List.of(this.data.yakuList().split(";"))
 				: List.of();
-		// 报番同步：有报番任务时役种随语音进度显现（念完一条显现下一条+打点音）；
+		// 报番同步：有报番任务时役种随语音进度显现（每条语音一开始，对应条目同时出现+打点音）；
 		// 语音播完或超时后回退固定节奏
 		boolean fanActive = mcr.riichi_arise.voice.FanAnnouncer.isActive();
 		boolean fanEnded = fanActive && voiceEndAge != null;
 		int announceEnd = announceEndNow();
-		// 报番结束后分三段显现：+1s 番数符数 → +0.5s 点数 → +0.5s 段位名（满贯/跳满等）
+		// 报番结束后分三段显现：+5tick 番数符数 → +5tick 点数 → +5tick 段位名（满贯/跳满等）
 		boolean pending = announceEnd >= Integer.MAX_VALUE - 1000; // 报番尚未结束（哨兵值），避免加法溢出
-		int hanFuAt = pending ? Integer.MAX_VALUE : announceEnd + 20;
-		int pointAt = pending ? Integer.MAX_VALUE : announceEnd + 30;
+		int hanFuAt = pending ? Integer.MAX_VALUE : announceEnd + 5; // 番数符数
+		int pointAt = pending ? Integer.MAX_VALUE : announceEnd + 10;
 		int tierAt = pending ? Integer.MAX_VALUE : announceEnd + RichiTableState.SETTLE_TIER_OFFSET;
 		// 役种网格：固定每列 4 个（排满一列再排下一列，≤4 条目单列）
 		int cols = yakus.size() <= 4 ? 1 : (yakus.size() + 3) / 4;
@@ -324,8 +347,9 @@ public class MahjongSettlementScreen extends Screen {
 		int naturalRow = rowUnits * TILE_STEP + melds.size() * MELD_GAP; // 手牌行自然宽度（等比缩放前）
 		int indRows = win && (!doraTiles.isEmpty() || !uraTiles.isEmpty()) ? 1 : 0;
 		int indW = (doraTiles.size() + uraTiles.size()) * TILE_STEP + 110;
+		int seats = Math.max(1, Math.min(4, this.data.playerCount())); // 参战人数（三麻 3 / 四麻 4）
 		int h = pad + 12 + (win ? 12 + (indRows * 32) + 22
-				+ (yakuRows == 0 ? 0 : yakuRows * 13 + 4) + 14 : 4 * 18 + 8) + pad;
+				+ (yakuRows == 0 ? 0 : yakuRows * 13 + 4) + 14 : seats * 18 + 8) + pad;
 		int w = Math.min(this.width - 8, win
 				? Math.max(220, Math.max(naturalRow,
 						yakus.size() > 1 ? cols * COL_W : 0) + pad * 2)
@@ -431,40 +455,40 @@ public class MahjongSettlementScreen extends Screen {
 							limit = i;
 				}
 				// 列优先且每列固定 4 个：col = i/4, row = i%4（播报顺序与排布一致）
+				// 役满：役种逐字彩色渐变（顺序色相），便于与普通役区分
+				boolean yakumanHand = tierRank() == 4;
 				for (int i = 0; i < shown; i++) {
 					if (i > limit)
 						break;
 					int col = i / 4;
 					int row = i % 4;
-					g.drawString(this.font, yakus.get(i), left + pad + col * COL_W, y + row * 13, 0x7FFF7F, true);
+					if (yakumanHand)
+						drawRainbow(g, yakus.get(i), left + pad + col * COL_W, y + row * 13, i * 4);
+					else
+						g.drawString(this.font, yakus.get(i), left + pad + col * COL_W, y + row * 13, 0x7FFF7F, true);
 				}
 				if (shown < yakus.size() && limit >= shown - 1)
 					g.drawString(this.font, "+" + (yakus.size() - shown), left + pad, y + yakuRows * 13, 0xAAAAAA, true);
 				y += yakuRows * 13 + 4;
 			}
-			// 底部三段式显现：报番结束 → +1s 番数符数 → +0.5s 点数 → +0.5s 段位名（满贯/跳满等）
-			// （段位语音由 tick 在音效后 1s 播放）
+			// 底部两段式显现：报番结束 → +5tick 番数符数 → +5tick 点数；段位名单独画在屏幕右下角（大字橙色）
 			boolean nagashi = "nagashi".equals(this.data.winType());
 			String tier = nagashi ? null : tierLabel();
-			// 三段按最终宽度一次性排好位置，逐段到时才绘制：后出现的段落不会把已显现的文字挤开。
+			// 两段按最终宽度一次性排好位置，逐段到时才绘制：后出现的段落不会把已显现的文字挤开。
 			// 整行贴在窗口下半部分（窗口底边往上留 24px）。
 			String hanFuText = (!nagashi && this.data.fu() != 0)
 					? Component.translatable("gui.riichi_arise.settlement.han_fu",
 							this.data.han(), this.data.fu()).getString()
 					: null;
 			String ptsText = Component.translatable("gui.riichi_arise.settlement.pts_only", this.data.gain()).getString();
-			List<String> parts = new ArrayList<>(3);
-			List<Integer> showAt = new ArrayList<>(3);
+			List<String> parts = new ArrayList<>(2);
+			List<Integer> showAt = new ArrayList<>(2);
 			if (hanFuText != null) {
 				parts.add(hanFuText);
 				showAt.add(hanFuAt);
 			}
 			parts.add(ptsText);
 			showAt.add(pointAt);
-			if (tier != null) {
-				parts.add(tier);
-				showAt.add(tierAt);
-			}
 			int sepW = this.font.width("　");
 			int totalW = sepW * (parts.size() - 1);
 			for (String s : parts)
@@ -476,11 +500,25 @@ public class MahjongSettlementScreen extends Screen {
 					g.drawString(this.font, parts.get(i), px, infoY, 0xFFFF55, true);
 				px += this.font.width(parts.get(i)) + sepW;
 			}
+			// 打点段位（满贯/跳满/倍满/三倍满/役满）：两倍字号、橙色，紧贴结算界面右下角
+			if (tier != null && age >= tierAt) {
+				float scale = 2.0f;
+				int tw = (int) (this.font.width(tier) * scale);
+				int th = (int) (this.font.lineHeight * scale);
+				var pose = g.pose();
+				pose.pushPose();
+				pose.translate(left + w - tw - 6, top + h - th - 6, 0);
+				pose.scale(scale, scale, 1.0f);
+				g.drawString(this.font, tier, 0, 0, 0xFFFF8C00, true);
+				pose.popPose();
+			}
 		} else {
-			// 终局排名：按点数高→低
-			Integer[] order = { 0, 1, 2, 3 };
+			// 终局排名：按点数高→低（只列本局参战人数，三麻不显示第 4 人）
+			Integer[] order = new Integer[seats];
+			for (int i = 0; i < seats; i++)
+				order[i] = i;
 			java.util.Arrays.sort(order, (a, b) -> Integer.compare(this.data.points()[b], this.data.points()[a]));
-			for (int rank = 0; rank < 4; rank++) {
+			for (int rank = 0; rank < seats; rank++) {
 				int seat = order[rank];
 				String line = (rank + 1) + ". " + this.data.names()[seat]
 						+ "　" + this.data.points()[seat]
@@ -489,6 +527,19 @@ public class MahjongSettlementScreen extends Screen {
 				g.drawString(this.font, line, left + pad, y, color, true);
 				y += 18;
 			}
+		}
+	}
+
+	/** 逐字彩虹渐变（彩虹羊式）：整体色相随时间循环，字与字之间只做小幅偏移 */
+	private void drawRainbow(GuiGraphics g, String text, int x, int y, int startIndex) {
+		float base = (age * 0.006f) % 1.0f; // 随时间缓慢循环（约 8 秒一轮）
+		int cx = x;
+		for (int k = 0; k < text.length(); k++) {
+			String ch = String.valueOf(text.charAt(k));
+			int color = 0xFF000000
+					| net.minecraft.util.Mth.hsvToRgb((base + (startIndex + k) * 0.02f) % 1.0f, 0.7f, 1.0f);
+			g.drawString(this.font, ch, cx, y, color, true);
+			cx += this.font.width(ch);
 		}
 	}
 

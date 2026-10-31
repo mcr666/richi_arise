@@ -23,4 +23,10 @@ public class MahjongComponents {
 			COMPONENTS.registerComponentType("mahjong_tile_code", builder -> builder
 					.persistent(Codec.INT)
 					.networkSynchronized(ByteBufCodecs.VAR_INT));
+
+	/** 透明牌（玻璃之间）：true = 该牌渲染为玻璃牌体（牌面保留、其余面半透明） */
+	public static final DeferredHolder<DataComponentType<?>, DataComponentType<Boolean>> TILE_GLASS =
+			COMPONENTS.registerComponentType("mahjong_tile_glass", builder -> builder
+					.persistent(Codec.BOOL)
+					.networkSynchronized(ByteBufCodecs.BOOL));
 }

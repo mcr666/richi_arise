@@ -7,23 +7,28 @@ import java.io.OutputStream;
 import java.net.URL;
 import java.net.URLConnection;
 import java.nio.file.Files;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.packs.resources.ResourceManager;
 
 import mcr.riichi_arise.network.MahjongLobbyPayloads;
 
 /**
  * 角色语音本地缓存与获取（客户端）。
  * <ul>
- * <li>离线内置角色：语音随 mod 打包于 {@code assets/riichi_arise/sounds/voice/<id>/act_<ev>.mp3}，
+ * <li>离线内置角色的 act 语音（吃/碰/杠/立直/荣/自摸）：随 mod 打包于
+ * {@code assets/riichi_arise/sounds/voice/<id>/act_<ev>.mp3}，
  * 经资源管理器（Minecraft.getResourceManager）直接读取，无需下载。</li>
- * <li>在线角色：语音从 {@code https://chen310.github.io/tenhou-se/character/<id>/act_<ev>.mp3}
+ * <li>在线角色：act 语音从 {@code https://chen310.github.io/tenhou-se/character/<id>/act_<ev>.mp3}
  * 下载到 {@code <游戏目录>/riichi_arise-voice/<id>/act_<ev>.mp3} 本地缓存，对局开始前/手动点击时后台下载。</li>
+ * <li>报番语音（{@code fan/<key>.mp3}）：完全由资源包提供，见 {@link #openFan}——mod 不再自带报番音频。</li>
  * </ul>
  * 全部为客户端专用，方法在客户端线程或下载线程调用均安全。
  */
@@ -51,13 +56,14 @@ public final class VoiceCache {
 		return new File(cacheDir(), id + "/" + ev.act() + ".mp3");
 	}
 
-	/** 该角色 6 条语音是否全部就绪（在线 = 6 条缓存文件齐全；离线 = 内置资源，始终可用） */
+	/** 该角色基础语音（6 条）是否全部就绪（在线 = 6 条缓存文件齐全；离线 = 内置资源，始终可用） */
 	public static boolean isReady(String id) {
 		if (id == null || id.isEmpty())
 			return false;
 		if (VoiceCharacters.isOffline(id))
 			return true; // 内置角色随 mod 打包，直接可用
-		for (VoiceEvents ev : VoiceEvents.values()) {
+		// act_babei 仅内置角色打包，不参与在线角色的齐全校验（tenhou-se 无该文件）
+		for (VoiceEvents ev : VoiceEvents.core()) {
 			File f = cachedFile(id, ev);
 			if (f == null || !f.isFile() || f.length() == 0)
 				return false;
@@ -97,13 +103,71 @@ public final class VoiceCache {
 	}
 
 	/**
-	 * 报番语音（仅内置/资源包）：{@code riichi_arise:sounds/voice/<id>/fan/<key>.mp3}。
-	 * 报番音频不提供在线下载，找不到返回 null（调用方静默跳过）。
+	 * 报番语音（资源包驱动）：文件路径 {@code sounds/voice/<角色id>/fan/<音键>.mp3}。
+	 * <ol><li>先按主命名空间 {@code riichi_arise} 查找——资源包沿用该路径即可覆盖/补充（遵循资源包优先级）；</li>
+	 * <li>找不到时，再在所有已启用资源包里按「角色 id + 音键」兜底查找，允许资源包用自己的命名空间。</li></ol>
+	 * 都没有返回 null（调用方静默跳过该条）。
 	 */
 	public static InputStream openFan(String id, String key) {
-		if (id == null || id.isEmpty())
+		if (id == null || id.isEmpty() || key == null || key.isEmpty())
 			return null;
-		return openResource(id, "fan/" + key);
+		InputStream in = openResource(id, "fan/" + key);
+		if (in != null)
+			return in;
+		ResourceLocation external = externalFan(id, key);
+		if (external == null)
+			return null;
+		try {
+			var opt = Minecraft.getInstance().getResourceManager().getResource(external);
+			if (opt.isPresent())
+				return opt.get().open();
+		} catch (Exception ignored) {
+		}
+		return null;
+	}
+
+	/** 兜底索引所属的资源管理器（F3+T 重载后实例变化 → 自动重建索引） */
+	private static Object fanIndexOwner;
+	/** 「角色id|音键」→ 其他命名空间里的报番语音定位符 */
+	private static Map<String, ResourceLocation> fanIndex = Map.of();
+
+	private static ResourceLocation externalFan(String id, String key) {
+		try {
+			ResourceManager rm = Minecraft.getInstance().getResourceManager();
+			synchronized (VoiceCache.class) {
+				if (fanIndexOwner != rm) {
+					fanIndex = buildFanIndex(rm);
+					fanIndexOwner = rm;
+				}
+				return fanIndex.get(id + "|" + key);
+			}
+		} catch (Throwable e) {
+			return null;
+		}
+	}
+
+	/** 扫描所有资源包的 sounds/voice/<id>/fan/<key>.mp3（主命名空间除外，那条走直接查找） */
+	private static Map<String, ResourceLocation> buildFanIndex(ResourceManager rm) {
+		final String prefix = "sounds/voice/";
+		final String mid = "/fan/";
+		Map<String, ResourceLocation> out = new HashMap<>();
+		try {
+			for (ResourceLocation loc : rm.listResources("sounds/voice",
+					l -> l.getPath().endsWith(".mp3")).keySet()) {
+				String ns = loc.getNamespace();
+				if ("riichi_arise".equals(ns) || "minecraft".equals(ns))
+					continue; // 主命名空间走 openResource 直接查找（遵循资源包优先级）
+				String path = loc.getPath();
+				int at = path.lastIndexOf(mid);
+				if (!path.startsWith(prefix) || at < 0)
+					continue;
+				String cid = path.substring(prefix.length(), at);
+				String file = path.substring(at + mid.length(), path.length() - ".mp3".length());
+				out.putIfAbsent(cid + "|" + file, loc);
+			}
+		} catch (Throwable ignored) {
+		}
+		return out;
 	}
 
 	/** 读 mod 资源 {@code sounds/voice/<id>/<path>.mp3}；不存在返回 null */
@@ -119,7 +183,7 @@ public final class VoiceCache {
 		return null;
 	}
 
-	/** 对局开始前/切换语音后，确保该角色 6 条语音已缓存（在线角色下载；离线角色内置无需下载） */
+	/** 对局开始前/切换语音后，确保该角色基础语音（6 条）已缓存（在线角色下载；离线角色内置无需下载） */
 	public static void ensureCached(String id) {
 		ensureCached(id, null);
 	}
@@ -148,7 +212,8 @@ public final class VoiceCache {
 		}
 		DOWNLOADER.execute(() -> {
 			try {
-				for (VoiceEvents ev : VoiceEvents.values()) {
+				// act_babei 不参与在线下载（tenhou-se 无该文件）
+				for (VoiceEvents ev : VoiceEvents.core()) {
 					File f = cachedFile(id, ev);
 					if (f != null && f.isFile() && f.length() > 0)
 						continue;

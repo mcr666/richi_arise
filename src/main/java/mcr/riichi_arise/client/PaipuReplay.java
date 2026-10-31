@@ -134,6 +134,7 @@ public final class PaipuReplay {
 	private static final class Game {
 		final String[] names = new String[4];
 		final int[] startPoints = { 25000, 25000, 25000, 25000 };
+		int playerCount = 4; // 三麻判定：G 行第 4 席名占位 "-"（见 MahjongGameLog.gameStart）
 		final List<Hand> hands = new ArrayList<>();
 		String end = ""; // E 行
 	}
@@ -148,6 +149,7 @@ public final class PaipuReplay {
 		final boolean[] riichi = new boolean[4];
 		final int[] riichiRiverIdx = { -1, -1, -1, -1 };
 		final int[] riichiSticks = new int[4];
+		final int[] kita = new int[4]; // 各家拔北数（三麻，T|席|b 行累加）
 		final int[] points = new int[4];
 		int indicators = 1;
 		int discards;
@@ -176,6 +178,7 @@ public final class PaipuReplay {
 						g.names[i] = t[3 + i];
 					for (int i = 0; i < 4 && 7 + i < t.length; i++)
 						g.startPoints[i] = parseInt(t[7 + i]);
+					g.playerCount = "-".equals(g.names[3]) ? 3 : 4; // 三麻第 4 席名占位 "-"
 				}
 				case "S" -> {
 					if (g == null)
@@ -334,10 +337,22 @@ public final class PaipuReplay {
 				case "a", "g" -> {
 					for (int code : tryParse(t.length > 3 ? t[3] : ""))
 						snap.hands[seat].remove(Integer.valueOf(code));
-					snap.melds[seat] = appendMeld(snap.melds[seat], t.length > 3 ? t[3] : "");
+					// 加杠（g）追加 '!'：渲染层把第 4 张叠在横放牌上，不做成明杠
+					snap.melds[seat] = appendMeld(snap.melds[seat],
+							(t.length > 3 ? t[3] : "") + ("g".equals(t[2]) ? "!" : ""));
 					snap.indicators = Math.min(5, snap.indicators + 1); // 暗杠/加杠揭新宝
 					snap.turnSeat = seat;
 					lastKong = true; // 下一步摸岭上
+				}
+				case "b" -> {
+				// 拔北（三麻）：北风从手牌移出（拔北数累加，syncToTable 经独立 kita 字段交给渲染，不算副露）；
+					// 与内核 actionKita 一致：拔北后摸岭上补牌、不翻新宝牌（指示牌数仅暗杠/加杠递增）
+					List<Integer> tiles = tryParse(t.length > 3 ? t[3] : "");
+					for (int code : tiles)
+						snap.hands[seat].remove(Integer.valueOf(code));
+					snap.kita[seat] += Math.max(1, tiles.size());
+					snap.turnSeat = seat;
+					lastKong = true; // 下一步摸岭上（与暗杠/加杠同路径）
 				}
 			}
 			out.add(snap);
@@ -368,6 +383,10 @@ public final class PaipuReplay {
 			hands[i] = mcr.riichi_arise.game.MahjongTileNotation.format(snap.hands[i]);
 			rivers[i] = mcr.riichi_arise.game.MahjongTileNotation.format(snap.rivers[i]);
 		}
+		// 拔北不算副露：走快照独立 kita 字段（由 T|席|b| 行累加），副露串保持纯净
+		String[] melds = new String[4];
+		for (int i = 0; i < 4; i++)
+			melds[i] = snap.melds[i];
 		String[] names = new String[4];
 		for (int i = 0; i < 4; i++)
 			names[i] = g.names[i] == null ? "" : g.names[i];
@@ -378,16 +397,18 @@ public final class PaipuReplay {
 		}
 		MahjongTableClient.applyReplay(new MahjongTablePayload.ViewMessage(
 				s.originPacked, 0, true, 0, // viewerSeat/openHand/dealAnim（回放全部明牌）
-				hands, new int[4], new int[4], rivers, snap.melds.clone(),
+				hands, new int[4], new int[4], rivers, melds, snap.kita.clone(),
 				snap.riichiRiverIdx.clone(), snap.riichiSticks.clone(),
 				new int[] { 1, 1, 1, 1 }, snap.points.clone(), // handsExposed=1：回放手牌全部摊开朝上
 				names, new String[4], new String[4], new String[4], // 回放无 AI 形象
 				h.dora, snap.indicators, snap.wallCount,
-				snap.turnSeat, Math.floorMod(s.handIdx, 4) + 1, Math.floorMod(s.handIdx / 4, 4), 0,
-				-1, -1, -1, RichiTableState.PHASE_PLAYING, banner));
+				snap.turnSeat, Math.floorMod(s.handIdx, 4) + 1, Math.floorMod(s.handIdx / 4, 4), 0, 0,
+				-1, -1, -1, RichiTableState.PHASE_PLAYING, g.playerCount, banner, new int[] { -1, -1, -1, -1 }));
 	}
 
 	private static boolean sameTile(int a, int b) {
+		a = mcr.riichi_arise.game.TileFlag.base(a);
+		b = mcr.riichi_arise.game.TileFlag.base(b);
 		int na = a == 0 ? 5 : a, nb = b == 0 ? 5 : b;
 		if (na == nb)
 			return true;
@@ -397,6 +418,7 @@ public final class PaipuReplay {
 
 	/** 手牌理牌序：红五（code 0/10/20）按数字 5 归位（原自然排序会使其排到花色最前） */
 	private static int handOrder(int c) {
+		c = mcr.riichi_arise.game.TileFlag.base(c);
 		int suit = c / 10, d = c % 10;
 		int n = d == 0 ? 5 : d;
 		return suit * 20 + n * 2 - (d == 0 ? 1 : 0); // 红五紧挨普通五之前
@@ -415,6 +437,7 @@ public final class PaipuReplay {
 			s.riichi[i] = p.riichi[i];
 			s.riichiRiverIdx[i] = p.riichiRiverIdx[i];
 			s.riichiSticks[i] = p.riichiSticks[i];
+			s.kita[i] = p.kita[i];
 			s.points[i] = p.points[i];
 		}
 		s.indicators = p.indicators;
@@ -463,6 +486,7 @@ public final class PaipuReplay {
 			case "k" -> name + " 明杠 " + detail + "（← " + nameOf(g, parseInt(t.length > 4 ? t[4] : "0")) + "）";
 			case "a" -> name + " 暗杠 " + detail;
 			case "g" -> name + " 加杠 " + detail;
+			case "b" -> name + " 拔北"; // 三麻拔北（每次一张北风）
 			case "q" -> name + " 九种九牌途中流局";
 			default -> "";
 		};
@@ -665,12 +689,15 @@ public final class PaipuReplay {
 		gfx.drawString(font, "←→ 对局　P 播放　End 退出", left + 6, bottom - 12, 0x909090, false);
 	}
 
-	/** 单座位展示行：点数 + 副露（手牌/牌河由风盘实体渲染，不再显示文本） */
+	/** 单座位展示行：点数 + 副露（拔北数单列显示；手牌/牌河由风盘实体渲染，不再显示文本） */
 	private static List<String> seatLines(Snap s, int seat) {
 		List<String> out = new ArrayList<>();
 		out.add(s.points[seat] + " 点");
-		if (!s.melds[seat].isEmpty())
-			out.add(s.melds[seat].toString());
+		String melds = s.melds[seat].replace("!", ""); // 加杠标记只给渲染层用，文本流不显示
+		if (s.kita[seat] > 0) // 拔北（三麻）：文本流显示"拔北×n"，桌面实体由独立 kita 字段渲染（不算副露）
+			melds = (melds.isEmpty() ? "" : melds + " ") + "拔北×" + s.kita[seat];
+		if (!melds.isEmpty())
+			out.add(melds);
 		return out;
 	}
 }

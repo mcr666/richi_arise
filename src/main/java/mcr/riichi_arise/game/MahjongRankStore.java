@@ -15,14 +15,15 @@ import net.minecraft.world.level.storage.LevelResource;
 
 /**
  * 麻雀段位战绩（天凤算法）：存档目录/data/mahjong/ranks.json，IO 失败静默忽略。
- * <p>pt = (素点 - 30000) / 1000 + 顺位马（{@link #UMA}，天凤四般：1位+20 / 2位+10 / 3位-10 / 4位-30）。
- * 每名非 AI 参战者一条记录（uuid 键），累计 pt、对局数与各顺位次数；查询按 pt 降序排名。</p>
+ * <p>pt = (素点 - 返点) / 1000 + 顺位马：四麻基准 30000、马 {@link #UMA}（1位+20 / 2位+10 / 3位-10 / 4位-30）；
+ * 三麻基准 40000、马 +15 / 0 / -15。每名非 AI 参战者一条记录（uuid 键），累计 pt、对局数与各顺位次数；
+ * 查询按 pt 降序排名（三麻/四麻暂共用一份榜，不按模式分 key）。</p>
  */
 public final class MahjongRankStore {
 	private MahjongRankStore() {
 	}
 
-	/** 顺位马（按最终顺位 1..4，天凤半庄战马点） */
+	/** 顺位马·四麻（按最终顺位 1..4）；三麻用 { 15, 0, -15 }（recordEnd 内按人数选取） */
 	public static final int[] UMA = { 20, 10, -10, -30 };
 
 	/** 一名玩家的战绩：累计 pt、对局数、顺位分布（ranks[0..3] = 1..4 位次数） */
@@ -77,24 +78,37 @@ public final class MahjongRankStore {
 
 	// ---- 存取 ----
 
+	/** 终局结算（uuid 版·旧签名）：等价 {@link #recordEnd(ServerLevel, String[], String[], int[], int, int)} 传 playerCount=4 */
+	public static double[][] recordEnd(ServerLevel level, String[] names, String[] uuids, int[] points, int gameLen) {
+		return recordEnd(level, names, uuids, points, gameLen, 4);
+	}
+
 	/** 终局结算（uuid 版）：uuids 按席序，AI 席传 null。pt 增量按对局长度缩放：
 	 *  一局战 ×0、东风战 ×0.5、半庄战 ×1（gameLen 与 RichiTableState.gameLen 对应）。
+	 *  素点基准 = 返点（{@link RichiTableState#returnPoints}：三麻 40000 / 四麻 30000），
+	 *  顺位马按人数取值（三麻 +15/0/-15、四麻 {@link #UMA}）；三麻只结算前 3 席。
 	 *  返回各席 [顺位1..4, 马, pt]（pt 为缩放后小数） */
-	public static double[][] recordEnd(ServerLevel level, String[] names, String[] uuids, int[] points, int gameLen) {
+	public static double[][] recordEnd(ServerLevel level, String[] names, String[] uuids, int[] points, int gameLen,
+			int playerCount) {
 		double scale = switch (gameLen) {
 			case 2 -> 1.0;
 			case 1 -> 0.5;
 			default -> 0.0;
 		};
-		Integer[] order = { 0, 1, 2, 3 };
+		int n = Math.min(uuids.length, playerCount); // 三麻只结算前 3 席（顺位马/点数数组也只有 3 项）
+		int[] uma = playerCount == 3 ? new int[] { 15, 0, -15 } : UMA;
+		int base = RichiTableState.returnPoints(playerCount);
+		Integer[] order = new Integer[n];
+		for (int i = 0; i < n; i++)
+			order[i] = i;
 		java.util.Arrays.sort(order, (a, b) -> Integer.compare(points[b], points[a]));
 		JsonObject root = load(level);
 		double[][] result = new double[4][3];
-		for (int rank = 0; rank < 4; rank++) {
+		for (int rank = 0; rank < n; rank++) {
 			int seat = order[rank];
-			int uma = UMA[rank];
-			double pt = Math.round(((points[seat] - 30000) / 1000 + uma) * scale * 10.0) / 10.0;
-			result[seat] = new double[] { rank + 1, uma, pt };
+			int u = uma[rank];
+			double pt = Math.round(((points[seat] - base) / 1000 + u) * scale * 10.0) / 10.0;
+			result[seat] = new double[] { rank + 1, u, pt };
 			if (uuids[seat] == null || uuids[seat].isEmpty())
 				continue;
 			JsonObject o = root.has(uuids[seat]) ? root.getAsJsonObject(uuids[seat]) : new JsonObject();

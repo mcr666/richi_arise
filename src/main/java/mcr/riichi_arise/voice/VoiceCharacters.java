@@ -43,8 +43,8 @@ public final class VoiceCharacters {
 		put("yiji", "一姬", true);
 		put("fuji", "福姬", true);
 		put("bamuwei", "八木唯", true);
-		put("akagi", "赤木茂", true);
-		put("washizu", "鹫巢岩", true);
+		put("akagi", "赤木しげる", true);
+		put("washizu", "鷲巣巌", true);
 
 		// —— 在线角色（手动点击加载；id → 中文名，抄录自 tenhou-se 站点角色表） ——
 		put("qiancangtou", "浅仓透", false);

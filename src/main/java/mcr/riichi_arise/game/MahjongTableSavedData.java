@@ -30,8 +30,8 @@ public final class MahjongTableSavedData extends SavedData {
 	private static final String VOICES_KEY = "player_voices";
 
 	/** 一张风盘的可持久化设置（RichiTableState 中对应字段的快照） */
-	public record Entry(int gameType, int thinkIdx, int aiSpeedIdx, boolean openHand,
-			boolean[] reservedAI, String[] avatarModes) {
+	public record Entry(int gameType, int playerCount, int thinkIdx, int aiSpeedIdx, boolean openHand,
+			int roomType, boolean[] reservedAI, String[] avatarModes) {
 	}
 
 	public MahjongTableSavedData() {
@@ -55,7 +55,8 @@ public final class MahjongTableSavedData extends SavedData {
 			String m = st.aiAvatarModes[i];
 			modes[i] = m == null ? "" : m;
 		}
-		tables.put(key(origin), new Entry(st.gameType, st.thinkIdx, st.aiSpeedIdx, st.openHand, reserved, modes));
+		tables.put(key(origin), new Entry(st.gameType, st.playerCount, st.thinkIdx, st.aiSpeedIdx, st.openHand,
+				st.roomType, reserved, modes));
 		setDirty();
 	}
 
@@ -65,9 +66,11 @@ public final class MahjongTableSavedData extends SavedData {
 		if (e == null)
 			return;
 		st.gameType = e.gameType();
+		st.playerCount = e.playerCount() == 3 ? 3 : 4;
 		st.thinkIdx = e.thinkIdx();
 		st.aiSpeedIdx = e.aiSpeedIdx();
 		st.openHand = e.openHand();
+		st.roomType = e.roomType() == RichiTableState.ROOM_GLASS ? RichiTableState.ROOM_GLASS : RichiTableState.ROOM_TIE;
 		for (int i = 0; i < 4; i++) {
 			st.reservedAI[i] = e.reservedAI()[i];
 			st.aiAvatarModes[i] = e.avatarModes()[i];
@@ -109,8 +112,8 @@ public final class MahjongTableSavedData extends SavedData {
 			String[] modes = new String[4];
 			for (int i = 0; i < 4 && i < list.size(); i++)
 				modes[i] = list.getString(i);
-			data.tables.put(k, new Entry(t.getInt("g"), t.getInt("t"), t.getInt("s"), t.getBoolean("o"),
-					reserved, modes));
+			data.tables.put(k, new Entry(t.getInt("g"), t.contains("p") ? t.getInt("p") : 4, t.getInt("t"), t.getInt("s"), t.getBoolean("o"),
+					t.contains("rt") ? t.getInt("rt") : 0, reserved, modes));
 		}
 		return data;
 	}
@@ -121,9 +124,11 @@ public final class MahjongTableSavedData extends SavedData {
 			CompoundTag t = new CompoundTag();
 			Entry en = e.getValue();
 			t.putInt("g", en.gameType());
+			t.putInt("p", en.playerCount());
 			t.putInt("t", en.thinkIdx());
 			t.putInt("s", en.aiSpeedIdx());
 			t.putBoolean("o", en.openHand());
+			t.putInt("rt", en.roomType());
 			int mask = 0;
 			ListTag list = new ListTag();
 			for (int i = 0; i < 4; i++) {

@@ -93,6 +93,14 @@ public class VoicePayloads {
 			net.neoforged.neoforge.network.PacketDistributor.sendToPlayer(p, pkt);
 	}
 
+	/** 服务端助手：只把某座位的语音事件发给指定玩家（如流局听牌/未听只让本人听到） */
+	public static void sendVoiceTo(ServerPlayer player, BlockPos origin, int seat, int event) {
+		if (player == null || origin == null)
+			return;
+		net.neoforged.neoforge.network.PacketDistributor.sendToPlayer(player,
+				new VoiceEventPayload(origin.asLong(), seat, event));
+	}
+
 	/**
 	 * S→C：某座位和牌后的报番役种列表（英文役名，按结算展示顺序）。
 	 * 客户端在该座位的 act 语音之后按序追加播报（仅内置角色有报番音频）。

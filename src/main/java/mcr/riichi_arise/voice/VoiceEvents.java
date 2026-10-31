@@ -15,7 +15,17 @@ public enum VoiceEvents {
 	KAN(2, "act_kan", 27, 28),
 	RICH(3, "act_rich", 31, 32),
 	RON(4, "act_ron", 33, 34),
-	TUMO(5, "act_tumo", 35, 36);
+	TUMO(5, "act_tumo", 35, 36),
+	/** 三麻拔北（内部 id babei）：仅内置角色随 mod 打包音频，不参与在线角色下载与齐全校验 */
+	BEI(6, "act_babei"),
+	/** 流局听牌 / 未听牌：内置角色可选提供音频（缺失时静默跳过，不写日志） */
+	TENPAI(7, "act_tenpai"),
+	NOTEN(8, "act_noten");
+
+	/** 在线角色需下载的 6 条基础语音（act_babei 不在其中：tenhou-se 无此文件，齐全校验与下载只看这 6 条） */
+	public static VoiceEvents[] core() {
+		return new VoiceEvents[] { CHI, PON, KAN, RICH, RON, TUMO };
+	}
 
 	private final int code;
 	private final String act;

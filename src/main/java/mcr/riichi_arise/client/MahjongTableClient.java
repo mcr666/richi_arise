@@ -75,6 +75,8 @@ public final class MahjongTableClient {
 		MahjongTablePayload.ViewMessage last;
 		int centerId = -1;    // 桌心信息悬浮文本实体 id（-1 = 无）
 		String centerSig = ""; // 桌心信息上次文本（内容变化就地 load 更新，不重建）
+		/** 手切归位延迟截止（tickCounter）：该座位刚手切，其刚摸的牌在分离位停留到此刻再滑回手牌序列；-1 = 无 */
+		final int[] handCutHoldUntil = { -1, -1, -1, -1 };
 	}
 
 	private static final Map<Long, TableRender> TABLES = new HashMap<>();
@@ -128,8 +130,24 @@ public final class MahjongTableClient {
 				due.forEach(Runnable::run);
 		}
 		SCHEDULED.entrySet().removeIf(e -> e.getValue().isEmpty());
+		// 手切归位延迟到期：清标记并重放该桌（刚摸的牌从分离位滑回手牌序列）
+		for (java.util.Map.Entry<Long, TableRender> en : TABLES.entrySet()) {
+			TableRender t = en.getValue();
+			if (t.last == null)
+				continue;
+			boolean expired = false;
+			for (int s = 0; s < 4; s++)
+				if (t.handCutHoldUntil[s] > 0 && tickCounter >= t.handCutHoldUntil[s]) {
+					t.handCutHoldUntil[s] = -1;
+					expired = true;
+				}
+			if (expired)
+				applyInternal(t.last, true);
+		}
 		// 局终推倒过渡动画：手牌立牌旋转倒下到平躺
 		FALLS.entrySet().removeIf(en -> advanceFall(level, en.getValue()));
+		// 拔北飞行动画：手中北风浮起 → 飘到拔北位 → 降落
+		FLIGHTS.entrySet().removeIf(en -> advanceFlight(level, en.getValue()));
 		// AI 假玩家挥手动画：坐姿实体 tick 为空，须在此逐 tick 驱动 swingTime 推进、播完复位；
 		// 站姿已由原版 tick 自行推进。
 		driveAvatarWaves();
@@ -189,6 +207,91 @@ public final class MahjongTableClient {
 	/** 推倒动画：实体 id + 起止变换（站立纯缩放→平躺矩阵）+ 起止位置 + 起始 tick/时长 */
 	private record Fall(int entityId, Transformation from, Transformation to,
 			Vec3 start, Vec3 end, int startTick, int duration) {
+	}
+
+	// ==================================================================
+	// 牌位飞行动画：牌位从起手处浮起，飘到目标位后降落（立牌 → 平躺）；
+	// 打牌 / 副露声明牌 / 加杠新增牌 / 拔北共用
+	// ==================================================================
+	/** 飞行时长（tick） */
+	private static final int KITA_FLIGHT_TICKS = 10;
+	/** 飞行弧线高度（格）：起终点之间先抬高再落下 */
+	private static final double KITA_FLIGHT_ARC = 0.175;
+	/** 进行中的拔北飞行，key = 实体 id（自清洁：实体消失即移除） */
+	private static final Map<Integer, Flight> FLIGHTS = new HashMap<>();
+
+	private record Flight(int entityId, Vec3 from, Vec3 to, float fromYaw, float toYaw,
+			int startTick, int duration) {
+	}
+
+	/** 启动牌位飞行：实体先从起点（起点姿态为立牌）开始，之后逐 tick 飘向目标位 */
+	private static void startTileFlight(Entity e, TableLayout.Placement p, Vec3 from) {
+		float fromYaw = (float) Math.toDegrees(Math.atan2(-(p.pos().x - from.x), p.pos().z - from.z));
+		e.setPos(from.x, from.y, from.z);
+		e.setYRot(fromYaw);
+		e.setOldPosAndRot();
+		applyTransform(e, standingTransform(TableLayout.TILE_SCALE));
+		FLIGHTS.put(e.getId(), new Flight(e.getId(), from, p.pos(), fromYaw, p.yRot(),
+				tickCounter, KITA_FLIGHT_TICKS));
+	}
+
+	/**
+	 * 新生成牌位的飞行起点（null = 不播动画）：
+	 * <ul><li>打出的牌（牌河）→ 该家上一包手牌里被移出那张的位置；</li>
+	 * <li>副露声明牌（index=-3）→ 被取走那张在打牌者牌河中的位置；</li>
+	 * <li>加杠新增牌（index=-2）→ 该家手牌位置；</li>
+	 * <li>拔北牌 → 该家手牌位置。</li></ul>
+	 */
+	private static Vec3 flightSource(TableLayout.Placement p, Vec3[] handSrc, Vec3 claimSrc) {
+		int seat = p.seat();
+		if (seat < 0 || seat >= 4)
+			return null;
+		if (TableLayout.KIND_RIVER.equals(p.kind()) || TableLayout.KIND_KITA.equals(p.kind()))
+			return handSrc[seat];
+		if (TableLayout.KIND_MELD.equals(p.kind())) {
+			if (p.index() == -3)
+				return claimSrc;
+			if (p.index() == -2)
+				return handSrc[seat];
+		}
+		return null;
+	}
+
+	/** 上一包到手牌少一张时，返回被移出那张在上一包中的下标；否则 -1 */
+	private static int firstRemovedIndex(List<Integer> prevHand, List<Integer> newHand) {
+		if (newHand.isEmpty() || prevHand.size() != newHand.size() + 1)
+			return -1;
+		for (int i = 0; i < newHand.size(); i++)
+			if (!prevHand.get(i).equals(newHand.get(i)))
+				return i;
+		return prevHand.size() - 1;
+	}
+
+	/** 推进单个拔北飞行；返回 true 表示动画结束（移出 FLIGHTS） */
+	private static boolean advanceFlight(ClientLevel level, Flight f) {
+		Entity e = level.getEntity(f.entityId());
+		if (e == null || e.isRemoved())
+			return true;
+		float t = Math.max(0f, Math.min(1f, (tickCounter - f.startTick()) / (float) f.duration()));
+		float k = easeInOut(t);
+		double x = f.from().x + (f.to().x - f.from().x) * k;
+		double z = f.from().z + (f.to().z - f.from().z) * k;
+		// 弧线：飞行途中抬高，落点回到目标高度（先浮起再降落）
+		double y = f.from().y + (f.to().y - f.from().y) * k + Math.sin(Math.PI * t) * KITA_FLIGHT_ARC;
+		float yaw = f.fromYaw() + Mth.wrapDegrees(f.toYaw() - f.fromYaw()) * k;
+		e.setPos(x, y, z);
+		e.setYRot(yaw);
+		e.setOldPosAndRot();
+		applyTransform(e, standingTransform(TableLayout.TILE_SCALE)
+				.slerp(flatTransform(TableLayout.TILE_SCALE, true), k));
+		if (t >= 1f) {
+			e.setPos(f.to().x, f.to().y, f.to().z);
+			e.setYRot(f.toYaw());
+			e.setOldPosAndRot();
+			applyTransform(e, flatTransform(TableLayout.TILE_SCALE, true));
+			return true;
+		}
+		return false;
 	}
 
 	/** Display 变换四件套 SynchedEntityData 访问器（Display 内为 private static final，反射取一次） */
@@ -307,6 +410,69 @@ public final class MahjongTableClient {
 
 	private static Long replayOrigin;
 
+	/** 当前参战桌的最近快照（viewerSeat>=0 = 该玩家为桌上参战者）；未参战任何桌/无快照返回 null */
+	public static MahjongTablePayload.ViewMessage participatingView() {
+		for (TableRender t : TABLES.values())
+			if (t.last != null && t.last.viewerSeat() >= 0)
+				return t.last;
+		return null;
+	}
+
+	/**
+	 * 手切停留用的槽位映射：按切牌前的排列（理牌 13 张 + 末位刚摸的牌）为新的 13 张牌分配旧槽位，
+	 * 切掉的那张处留空 → 牌不会整体右移/回弹，10 tick 后再按新序列归位。
+	 * 摸切（切掉刚摸的那张）或数据对不上时返回 null（无需停留）。
+	 */
+	private static int[] cutHoldSlots(List<Integer> prevHand, List<Integer> newHand, int tedashi) {
+		if (tedashi != 1 || newHand.isEmpty() || prevHand.size() != newHand.size() + 1)
+			return null;
+		// 切掉的牌面 = prev 与 new 多重集之差（计数多出的那张）
+		java.util.Map<Integer, Integer> cnt = new HashMap<>();
+		for (int c : prevHand)
+			cnt.merge(c, 1, Integer::sum);
+		for (int c : newHand)
+			cnt.merge(c, -1, Integer::sum);
+		Integer removedCode = null;
+		for (var e : cnt.entrySet())
+			if (e.getValue() == 1) {
+				removedCode = e.getKey();
+				break;
+			}
+		if (removedCode == null)
+			return null;
+		// 手切：在理牌区（末位为刚摸的牌）里从右往左找该牌，作为切牌位置
+		int r = -1;
+		for (int i = prevHand.size() - 2; i >= 0; i--)
+			if (prevHand.get(i).intValue() == removedCode) {
+				r = i;
+				break;
+			}
+		if (r < 0)
+			return null;
+		// 其余 13 张的旧槽位（0..size-1，去掉切牌位）
+		int[] oldSlots = new int[prevHand.size() - 1];
+		for (int i = 0, m = 0; i < prevHand.size(); i++)
+			if (i != r)
+				oldSlots[m++] = i;
+		// 新牌按顺序贪心匹配同牌面的旧槽位（重复牌取首个未占用槽位）
+		boolean[] used = new boolean[oldSlots.length];
+		int[] slots = new int[newHand.size()];
+		for (int k = 0; k < newHand.size(); k++) {
+			int code = newHand.get(k);
+			int slot = -1;
+			for (int j = 0; j < oldSlots.length; j++)
+				if (!used[j] && prevHand.get(oldSlots[j]).intValue() == code) {
+					used[j] = true;
+					slot = oldSlots[j];
+					break;
+				}
+			if (slot < 0)
+				return null;
+			slots[k] = slot;
+		}
+		return slots;
+	}
+
 	private static void applyInternal(MahjongTablePayload.ViewMessage msg, boolean synthetic) {
 		ClientLevel level = Minecraft.getInstance().level;
 		if (level == null)
@@ -361,6 +527,7 @@ public final class MahjongTableClient {
 			st.hands[i] = orEmpty(msg.hands()[i]);
 			st.rivers[i] = orEmpty(msg.rivers()[i]);
 			st.melds[i] = orEmpty(msg.melds()[i]);
+			st.kita[i] = msg.kita()[i]; // 拔北数（三麻）：不算副露，独立字段
 			st.points[i] = msg.points()[i];
 			st.riichiRiverIdx[i] = msg.riichiRiverIdx()[i];
 			st.riichiSticks[i] = msg.riichiSticks()[i];
@@ -371,19 +538,51 @@ public final class MahjongTableClient {
 		st.round = msg.round();
 		st.roundWind = msg.roundWind();
 		st.honba = msg.honba();
+		st.carriedSticks = msg.carriedSticks();
 		st.turnSeat = msg.turnSeat();
 		st.selectedSeat = msg.selectedSeat();
 		st.selectedIndex = msg.selectedIndex();
 		st.drawnSeat = msg.drawnSeat();
 		st.phase = msg.phase();
+		st.playerCount = msg.playerCount(); // 三麻（3）时 plan() 跳过座位 3；拔北数走单独的 kita 字段（不算副露）
+		// 手切归位延迟：上一包该家刚摸牌、本包已打出且为手切 → 记下分离位停留截止（10 tick）
+		if (prev != null && !synthetic)
+			for (int s = 0; s < 4; s++)
+				if (prev.drawnSeat() == s && msg.drawnSeat() != s && msg.tedashi()[s] == 1)
+					table.handCutHoldUntil[s] = tickCounter + 10;
+		// 手切停留窗口内：保留切牌前的槽位排列（切掉的那张处留空、刚摸的牌仍停最右分离位），
+		// 10 tick 后再按新理牌序列归位。隐藏/盖牌手牌无法还原空位，直接归位。
+		int[][] handSlots = null;
+		for (int s = 0; s < 4; s++) {
+			if (table.handCutHoldUntil[s] <= tickCounter)
+				continue;
+			if (prev == null || msg.hidden()[s] > 0 || msg.handsExposed()[s] != RichiTableState.HAND_STAND) {
+				table.handCutHoldUntil[s] = -1;
+				continue;
+			}
+			int[] slots = cutHoldSlots(MahjongTileNotation.parse(orEmpty(prev.hands()[s])),
+					MahjongTileNotation.parse(orEmpty(msg.hands()[s])), msg.tedashi()[s]);
+			if (slots == null) {
+				table.handCutHoldUntil[s] = -1;
+				continue;
+			}
+			if (handSlots == null)
+				handSlots = new int[4][];
+			handSlots[s] = slots;
+		}
 		// 观战摊手（客户端配置）：观战者视角把立牌手牌全部改为面朝上平摊显示
 		boolean forcedOpen = mcr.riichi_arise.RichiConfig.SPECTATOR_OPEN_HANDS.get() && msg.viewerSeat() < 0;
 		if (forcedOpen)
 			for (int s = 0; s < 4; s++)
 				if (st.handsExposed[s] == RichiTableState.HAND_STAND)
 					st.handsExposed[s] = RichiTableState.HAND_FACE_UP;
+		// 流局未听/九种九牌盖牌：自己的手牌对自己始终可见（改为面朝上平摊，不再显示为未知牌背）
+		int viewerSeat = msg.viewerSeat();
+		if (viewerSeat >= 0 && viewerSeat < 4 && msg.hidden()[viewerSeat] == 0
+				&& st.handsExposed[viewerSeat] == RichiTableState.HAND_FACE_DOWN)
+			st.handsExposed[viewerSeat] = RichiTableState.HAND_FACE_UP;
 		// 手牌码：可见家解析记法；隐藏家按 hidden 数量渲染未知牌背（-1 = 无牌面组件）；
-		// 盖牌（HAND_FACE_DOWN，流局未听/九种九牌途中流局）一律渲染牌背——自己的手牌也不显示牌面
+		// 盖牌（HAND_FACE_DOWN，流局未听/九种九牌途中流局）渲染牌背（自己那家已按上面改为面朝上）
 		List<List<Integer>> handCodes = new ArrayList<>(4);
 		for (int s = 0; s < 4; s++) {
 			int count;
@@ -396,16 +595,36 @@ public final class MahjongTableClient {
 					count = 0;
 				}
 			}
-			if (msg.handsExposed()[s] == RichiTableState.HAND_FACE_DOWN) {
+			if (st.handsExposed[s] == RichiTableState.HAND_FACE_DOWN) {
 				List<Integer> backs = new ArrayList<>();
 				for (int k = 0; k < count; k++)
 					backs.add(-1);
 				handCodes.add(backs);
 			} else if (msg.hidden()[s] > 0) {
-				List<Integer> backs = new ArrayList<>();
-				for (int k = 0; k < msg.hidden()[s]; k++)
-					backs.add(-1);
-				handCodes.add(backs);
+				// 隐藏手牌：服务端下发"透明牌真实牌面 + 其余未知占位"的记法：透明牌保持原位（玻璃牌面可透视），
+				// 普通牌统一排到末尾显示为牌背——既向对手隐藏牌面，也隐藏"哪几个位置是透明牌"之外的排列信息
+				List<Integer> masked = null;
+				try {
+					masked = MahjongTileNotation.parse(orEmpty(msg.hands()[s]));
+				} catch (RuntimeException ignored) {
+				}
+				if (masked == null || masked.size() != msg.hidden()[s]) {
+					List<Integer> backs = new ArrayList<>();
+					for (int k = 0; k < msg.hidden()[s]; k++)
+						backs.add(-1);
+					handCodes.add(backs);
+				} else {
+					List<Integer> ordered = new ArrayList<>(masked.size());
+					int backCount = 0;
+					for (int c : masked)
+						if (c < 0)
+							backCount++;
+						else
+							ordered.add(c);
+					for (int k = 0; k < backCount; k++)
+						ordered.add(-1);
+					handCodes.add(ordered);
+				}
 			} else {
 				try {
 					handCodes.add(MahjongTileNotation.parse(orEmpty(msg.hands()[s])));
@@ -414,7 +633,36 @@ public final class MahjongTableClient {
 				}
 			}
 		}
-		List<Slot> slots = slotPlan(TableLayout.plan(geom, st, handCodes, msg.dealAnim() > 0), msg);
+		List<Slot> slots = slotPlan(TableLayout.plan(geom, st, handCodes, msg.dealAnim() > 0, handSlots), msg);
+		// 牌位飞行动画的起点（打牌/加杠/拔北 = 上一包手牌里被移出那张的位置；副露声明牌 = 牌河被取走那张的位置）
+		Vec3[] handSrc = new Vec3[4];
+		Vec3 claimSrc = null;
+		if (prev != null && !synthetic && msg.dealAnim() == 0) {
+			for (int s = 0; s < 4; s++) {
+				List<Integer> prevHand = MahjongTileNotation.parse(orEmpty(prev.hands()[s]));
+				List<Integer> newHand = MahjongTileNotation.parse(orEmpty(msg.hands()[s]));
+				// 牌河多一张 = 该家打牌：起点取服务端记录的被切牌位置（隐藏手牌也能对准槽位；
+				// 不能用首次差异推位置——理牌后差异点常在最左侧，会让右侧切出的牌从最左边飞起）
+				List<Integer> prevRiver = MahjongTileNotation.parse(orEmpty(prev.rivers()[s]));
+				List<Integer> newRiver = MahjongTileNotation.parse(orEmpty(msg.rivers()[s]));
+				if (newRiver.size() > prevRiver.size()) {
+					int idx = s < msg.discardPos().length && msg.discardPos()[s] >= 0
+							? msg.discardPos()[s]
+							: firstRemovedIndex(prevHand, newHand);
+					handSrc[s] = idx >= 0 && idx < TableLayout.HAND_SIZE
+							? TableLayout.standingEntityPos(TableLayout.handTarget(geom, s, idx))
+							: TableLayout.standingEntityPos(geom.rows()[s]);
+				} else {
+					// 手牌少一张（副露/杠）：起点为被移出那张的位置
+					int idx = firstRemovedIndex(prevHand, newHand);
+					if (idx >= 0)
+						handSrc[s] = TableLayout.standingEntityPos(TableLayout.handTarget(geom, s, idx));
+				}
+				// 牌河少一张 = 被副露：起点为被取走那张在牌河中的位置
+				if (newRiver.size() < prevRiver.size())
+					claimSrc = TableLayout.riverTarget(geom, s, prevRiver.size() - 1);
+			}
+		}
 		if (msg.dealAnim() > 0) {
 			// 发牌动画：整桌清场后按 delay 逐张生成
 			discardAll(level, table);
@@ -422,10 +670,11 @@ public final class MahjongTableClient {
 				spawnSlot(level, table, key, geom, slot, true, true);
 		} else {
 			// 强制摊手时服务端的"推倒/盖牌"（立→平）在客户端早已摊平、外观签名不变 → 推倒动画被吞掉；
-			// 先把这些家手牌复位成立牌（不播动画），再交给 diffApply 走推倒过渡动画（先复位再播放）
-			if (forcedOpen && prev != null && !synthetic)
-				resetHandsForReveal(level, table, geom, slots, msg, prev);
-			diffApply(level, table, geom, st, msg, slots);
+			// 隐藏手牌亮牌时 key 由"牌背"变成"牌面"（旧实体不在新 key 下）→ 同样没有立牌可倒。
+			// 两种情形都先按新 key 生成一张立牌，再交给 diffApply 走推倒过渡动画（先复位再播放）
+			if (prev != null && !synthetic)
+				resetHandsForReveal(level, table, geom, slots, msg, prev, forcedOpen);
+			diffApply(level, table, geom, st, msg, slots, handSrc, claimSrc);
 		}
 		// 对局状态：桌心悬浮文本显示局目/本场/牌山剩余；结算横幅由 boss 栏渲染
 		updateCenterInfo(level, table, geom.center(), st, msg);
@@ -456,7 +705,8 @@ public final class MahjongTableClient {
 		// 等待阶段（未开局/局间）恒为站姿：站立并受原版重力落地；对局中才按客户端"AI 形象姿态"配置
 		boolean wantStanding = waiting || mcr.riichi_arise.RichiConfig.MAHJONG_AVATAR_STANDING.get();
 		for (int seat = 0; seat < 4; seat++) {
-			String form = orEmpty(msg.avatarForms()[seat]);
+			// 三麻（playerCount=3）不存在的第 4 席按空座处理：四麻切三麻后该席已有假玩家会被移除
+			String form = seat >= msg.playerCount() ? "" : orEmpty(msg.avatarForms()[seat]);
 			Avatar cur = avatars.get(seat);
 			if (form.isEmpty() || form.equals("npc")) {
 				// 空座；或 NPC 参战座位（真实实体在服务端钉位渲染，客户端不建假玩家）
@@ -809,8 +1059,8 @@ public final class MahjongTableClient {
 	/**
 	 * 为整桌摆位项建立稳定 key 与外观签名（纯客户端索引，服务端数据/协议不变）：
 	 * 手牌 hand:座位:牌面:同面内序（摸打/重排只换位置不换 key → 移动走插值）；
-	 * 牌河 river:座位:下标；副露 meld:座位:序（组追加式，声明牌随组追加）；点棒 stick:座位:序；
-	 * 宝牌 dora:叠:0底/1顶；座位标签 seat:座位。签名 = kind:牌面:正反面:立平（item）/ 文本（text）。
+	 * 牌河 river:座位:下标；副露 meld:座位:序（组追加式，声明牌随组追加）；拔北 kita:座位:序；
+	 * 点棒 stick:座位:序；宝牌 dora:叠:0底/1顶；座位标签 seat:座位。签名 = kind:牌面:正反面:立平（item）/ 文本（text）。
 	 */
 	private static List<Slot> slotPlan(List<TableLayout.Placement> plan, MahjongTablePayload.ViewMessage msg) {
 		List<Slot> out = new ArrayList<>(plan.size());
@@ -854,6 +1104,9 @@ public final class MahjongTableClient {
 					out.add(new Slot(p, "river:" + p.seat() + ":" + p.index(), itemSig(p), null));
 				case TableLayout.KIND_MELD ->
 					out.add(new Slot(p, "meld:" + p.seat() + ":" + meldSeq[p.seat()]++, itemSig(p), null));
+				case TableLayout.KIND_KITA ->
+					// 拔北牌位（三麻）：独立 key 序列，不随副露组增减换号（新增副露时拔北牌只平移不重建）
+					out.add(new Slot(p, "kita:" + p.seat() + ":" + p.index(), itemSig(p), null));
 				case TableLayout.KIND_STICK ->
 					out.add(new Slot(p, "stick:" + p.seat() + ":" + p.index(), itemSig(p), null));
 				default -> {
@@ -882,7 +1135,8 @@ public final class MahjongTableClient {
 	 * 座位标签为文本牌位，内容变化就地 load 更新。
 	 */
 	private static void diffApply(ClientLevel level, TableRender table, TableLayout.Geom geom,
-			RichiTableState st, MahjongTablePayload.ViewMessage msg, List<Slot> slots) {
+			RichiTableState st, MahjongTablePayload.ViewMessage msg, List<Slot> slots,
+			Vec3[] handSrc, Vec3 claimSrc) {
 		Map<String, Entry> fresh = new HashMap<>();
 		table.handIds.clear();
 		for (Slot slot : slots) {
@@ -914,8 +1168,13 @@ public final class MahjongTableClient {
 			}
 			if (e == null) {
 				e = spawnSlot(level, table, 0, geom, slot, false, false);
-			} else if (moved(e, p)) {
+				// 新生成的牌：播放"浮起→飞到目标位→降落"的短动画
+				Vec3 src = flightSource(p, handSrc, claimSrc);
+				if (e != null && src != null)
+					startTileFlight(e, p, src);
+			} else if (!FLIGHTS.containsKey(e.getId()) && moved(e, p)) {
 				// 仅位置/朝向变化：实体自带插值（teleport_duration）平滑过渡，不重建
+				// （拔北飞行中的实体由飞行动画逐 tick 驱动，跳过插值以免抖动）
 				e.lerpTo(p.pos().x, p.pos().y, p.pos().z, p.yRot(), 0, 0);
 			}
 			if (e != null) {
@@ -937,13 +1196,13 @@ public final class MahjongTableClient {
 	}
 
 	/**
-	 * 强制摊手（观战摊手选项）下的局终推倒：服务端把某家手牌从立牌改为推倒/盖牌时，
-	 * 客户端此前已被强制摊平（外观签名不变），推倒过渡动画会被吞掉。
-	 * 这里先把该家每张手牌就地复位为立牌（登记立牌签名），随后 diffApply 检测到"立牌 → 平躺"
-	 * 的签名变化即按原有逻辑播放推倒动画（先复位再播放）。
+	 * 局终推倒的"先复位再播放"：服务端把某家手牌从立牌改为推倒/盖牌时，客户端可能找不到可倒的立牌实体——
+	 * 强制摊手视角下早已摊平（外观签名不变），参与者视角下该家手牌此前是隐藏牌背（key 由牌背变为牌面）。
+	 * 这里按新 key 就地生成一张立牌（登记立牌签名），随后 diffApply 检测到"立牌 → 平躺"即播放推倒动画。
 	 */
 	private static void resetHandsForReveal(ClientLevel level, TableRender table, TableLayout.Geom geom,
-			List<Slot> slots, MahjongTablePayload.ViewMessage msg, MahjongTablePayload.ViewMessage prev) {
+			List<Slot> slots, MahjongTablePayload.ViewMessage msg, MahjongTablePayload.ViewMessage prev,
+			boolean forcedOpen) {
 		for (Slot slot : slots) {
 			TableLayout.Placement p = slot.p();
 			if (!TableLayout.KIND_HAND.equals(p.kind()) || p.axis() == null)
@@ -953,11 +1212,8 @@ public final class MahjongTableClient {
 			if (prev.handsExposed()[seat] != RichiTableState.HAND_STAND
 					|| msg.handsExposed()[seat] == RichiTableState.HAND_STAND)
 				continue;
-			Entry old = table.keyed.get(slot.slotKey());
-			if (old == null)
-				continue;
-			Entity e = level.getEntity(old.entityId());
-			if (e == null || e.isRemoved())
+			// 普通视角下 key 未变（可见手牌）时，diffApply 本来就有立牌可倒，无需复位
+			if (!forcedOpen && table.keyed.get(slot.slotKey()) != null)
 				continue;
 			float standYaw = (float) Math.toDegrees(Math.atan2(-geom.outs()[seat].x, geom.outs()[seat].z));
 			TableLayout.Placement stand = new TableLayout.Placement(TableLayout.KIND_HAND,
@@ -1049,7 +1305,8 @@ public final class MahjongTableClient {
 					// 立牌（隐藏座位为未知牌面 ItemStack，不带座位标记）
 					if (animate)
 						schedule(tableKey, p.delay(), () -> {
-							if (deal)
+							// 四张四张发：每批只在第一张播一次落牌音效（避免同帧叠 4 声）
+							if (deal && p.index() % 4 == 0)
 								playDealSound(level, p.pos());
 							recordHand(table, p,
 									spawnKeyed(level, table, slot.slotKey(), slot.sig(), handNbt(p, true, tag, level),
@@ -1072,7 +1329,7 @@ public final class MahjongTableClient {
 							handNbt(p, false, null, level), p.pos(), p.yRot()));
 				}
 			}
-			case TableLayout.KIND_RIVER, TableLayout.KIND_MELD, TableLayout.KIND_DORA -> {
+			case TableLayout.KIND_RIVER, TableLayout.KIND_MELD, TableLayout.KIND_KITA, TableLayout.KIND_DORA -> {
 				if (animate)
 					schedule(tableKey, p.delay(), () -> {
 						if (deal)
@@ -1295,6 +1552,7 @@ public final class MahjongTableClient {
 				&& Arrays.equals(a.hidden(), b.hidden())
 				&& Arrays.equals(a.rivers(), b.rivers())
 				&& Arrays.equals(a.melds(), b.melds())
+				&& Arrays.equals(a.kita(), b.kita())
 				&& Arrays.equals(a.riichiRiverIdx(), b.riichiRiverIdx())
 				&& Arrays.equals(a.riichiSticks(), b.riichiSticks())
 				&& Arrays.equals(a.handsExposed(), b.handsExposed())
@@ -1310,8 +1568,10 @@ public final class MahjongTableClient {
 				&& a.round() == b.round()
 				&& a.roundWind() == b.roundWind()
 				&& a.honba() == b.honba()
+				&& a.carriedSticks() == b.carriedSticks()
 				&& a.drawnSeat() == b.drawnSeat()
 				&& a.phase() == b.phase()
+				&& a.playerCount() == b.playerCount()
 				&& orEmpty(a.bannerText()).equals(orEmpty(b.bannerText()));
 	}
 

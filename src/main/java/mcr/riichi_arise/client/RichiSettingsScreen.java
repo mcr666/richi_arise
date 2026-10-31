@@ -33,7 +33,7 @@ public class RichiSettingsScreen extends Screen {
 
 	/** 行类型 */
 	private static final int HEADER = 0, CLIENT_TOGGLE = 1, PERSONAL_VOICE = 2, WORLD_TOGGLE = 3, NET_TOGGLE = 4,
-			CLIENT_CORNER = 5;
+			VOICE_VOLUME = 5;
 
 	private record Row(int kind, int cat, String labelKey, String value, boolean enabled, int extra) {
 	}
@@ -105,17 +105,6 @@ public class RichiSettingsScreen extends Screen {
 		return mcr.riichi_arise.voice.VoiceCharacters.displayName(s.ownVoice());
 	}
 
-	/** 宝牌指示叠加层位置（四角预设）当前值的显示名 */
-	private String cornerName() {
-		String key = switch (RichiConfig.HUD_DORA_CORNER.get()) {
-			case TOP_RIGHT -> "top_right";
-			case BOTTOM_LEFT -> "bottom_left";
-			case BOTTOM_RIGHT -> "bottom_right";
-			default -> "top_left";
-		};
-		return Component.translatable("gui.riichi_arise.settings.corner_" + key).getString();
-	}
-
 	private List<Row> rows() {
 		List<Row> r = new ArrayList<>();
 		// 客户端（本地配置）
@@ -124,12 +113,13 @@ public class RichiSettingsScreen extends Screen {
 			r.add(clientRow("gui.riichi_arise.settings.client_spectator_open", RichiConfig.SPECTATOR_OPEN_HANDS));
 			r.add(clientRow("gui.riichi_arise.settings.client_avatar_stand", RichiConfig.MAHJONG_AVATAR_STANDING));
 			r.add(clientRow("gui.riichi_arise.settings.client_spectator_show", RichiConfig.SPECTATOR_SHOW_TABLE));
-			r.add(new Row(CLIENT_CORNER, 0, "gui.riichi_arise.settings.client_hud_corner", cornerName(), true, 0));
 		}
 		// 个人设定
 		r.add(new Row(HEADER, 1, "gui.riichi_arise.settings.cat_personal", expanded[1] ? "▾" : "▸", true, 0));
-		if (expanded[1])
+		if (expanded[1]) {
 			r.add(new Row(PERSONAL_VOICE, 1, "gui.riichi_arise.settings.personal_voice", ownVoice(), true, 0));
+			r.add(new Row(VOICE_VOLUME, 1, "gui.riichi_arise.voice.volume", voiceVolumeText(), true, 0));
+		}
 		// 世界规则（gamerule + 端口，需管理员；数据来自服务端 Sync）
 		r.add(new Row(HEADER, 2, "gui.riichi_arise.settings.cat_world", expanded[2] ? "▾" : "▸", true, 0));
 		if (expanded[2]) {
@@ -150,6 +140,11 @@ public class RichiSettingsScreen extends Screen {
 
 	private Row clientRow(String key, net.neoforged.neoforge.common.ModConfigSpec.BooleanValue v) {
 		return new Row(CLIENT_TOGGLE, 0, key, onOff(v.get()), true, 0);
+	}
+
+	/** 角色语音音量显示（百分比） */
+	private String voiceVolumeText() {
+		return Math.round(RichiConfig.VOICE_VOLUME.get() * 100) + "%";
 	}
 
 	private int maxScroll() {
@@ -276,10 +271,13 @@ public class RichiSettingsScreen extends Screen {
 				MahjongTableClient.refreshAll();
 			}
 			case PERSONAL_VOICE -> VoiceSettingsScreen.open(this.origin);
-			case CLIENT_CORNER -> {
-				// 四角循环切换（HUD 逐帧读配置，切换即生效）
-				RichiConfig.HudCorner[] all = RichiConfig.HudCorner.values();
-				RichiConfig.HUD_DORA_CORNER.set(all[(RichiConfig.HUD_DORA_CORNER.get().ordinal() + 1) % all.length]);
+			case VOICE_VOLUME -> {
+				// 角色语音音量：每次点击 +10%，100% 后回到 0%（VoicePlayer 逐次读取，立即生效）
+				double v = RichiConfig.VOICE_VOLUME.get();
+				double next = Math.round((v + 0.1) * 10) / 10.0;
+				if (next > 1.0 + 1.0E-6)
+					next = 0.0;
+				RichiConfig.VOICE_VOLUME.set(next);
 				RichiConfig.SPEC.save();
 			}
 			case WORLD_TOGGLE -> {

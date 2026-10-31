@@ -19,12 +19,13 @@ import mcr.riichi_arise.RichiiAriseMod;
 	 */
 	public class MahjongTablePayload {
 	public record ViewMessage(long originPacked, int viewerSeat, boolean openHand, int dealAnim,
-			String[] hands, int[] hidden, int[] tedashi, String[] rivers, String[] melds,
+			String[] hands, int[] hidden, int[] tedashi, String[] rivers, String[] melds, int[] kita,
 			int[] riichiRiverIdx, int[] riichiSticks, int[] handsExposed, int[] points,
 			String[] names, String[] avatarForms, String[] avatarNames, String[] avatarSkins,
 			String doraWall, int revealedIndicators, int wallCount,
-			int turnSeat, int round, int roundWind, int honba,
-			int selectedSeat, int selectedIndex, int drawnSeat, int phase, String bannerText) implements CustomPacketPayload {
+			int turnSeat, int round, int roundWind, int honba, int carriedSticks,
+			int selectedSeat, int selectedIndex, int drawnSeat, int phase, int playerCount,
+			String bannerText, int[] discardPos) implements CustomPacketPayload {
 
 		public static final Type<ViewMessage> TYPE = new Type<>(
 				ResourceLocation.fromNamespaceAndPath(RichiiAriseMod.MODID, "richi_table"));
@@ -39,36 +40,10 @@ import mcr.riichi_arise.RichiiAriseMod;
 
 		public static void handleData(final ViewMessage message, final IPayloadContext context) {
 			if (context.flow() == PacketFlow.CLIENTBOUND) {
-				context.enqueueWork(() -> {
-					mcr.riichi_arise.client.MahjongTableClient.apply(message);
-					// 左上角宝牌/场供叠加层数据：参战玩家、开启"观战显示牌局内容"的观战者，
-					// 或为当前叠加层所在桌（同 origin）的观战/离桌包也同步 phase（用于隐藏）。
-					// 服务端只向桌心 16 格内的玩家发包，因此观战者收到的包必然就在附近。
-					boolean spectatorView = message.viewerSeat() < 0
-							&& mcr.riichi_arise.RichiConfig.SPECTATOR_SHOW_TABLE.get();
-					if (message.viewerSeat() >= 0 || spectatorView
-							|| MahjongTablePayload.gameOriginPacked == message.originPacked()) {
-						MahjongTablePayload.gameOriginPacked = message.originPacked();
-						MahjongTablePayload.gamePhase = message.phase();
-						MahjongTablePayload.gameViewerSeat = message.viewerSeat();
-						MahjongTablePayload.gameHonba = message.honba();
-						MahjongTablePayload.gameRevealed = message.revealedIndicators();
-						MahjongTablePayload.gameDoraWall = orEmpty(message.doraWall());
-						System.arraycopy(message.riichiSticks(), 0, gameRiichiSticks, 0, 4);
-					}
-				});
+				context.enqueueWork(() -> mcr.riichi_arise.client.MahjongTableClient.apply(message));
 			}
 		}
 	}
-
-	/** HUD 左上角宝牌/场供叠加层客户端缓存（纯原始类型，服务端加载亦安全；见 handleData 更新时机） */
-	public static volatile long gameOriginPacked = Long.MIN_VALUE;
-	public static volatile int gamePhase = -1;
-	public static volatile int gameViewerSeat = -1;
-	public static volatile int gameHonba = 0;
-	public static volatile int gameRevealed = 0;
-	public static volatile String gameDoraWall = "";
-	public static final int[] gameRiichiSticks = new int[4];
 
 	private static String orEmpty(String s) {
 		return s == null ? "" : s;
@@ -85,6 +60,7 @@ import mcr.riichi_arise.RichiiAriseMod;
 			buf.writeVarInt(msg.tedashi()[i]);
 			buf.writeUtf(orEmpty(msg.rivers()[i]), 256);
 			buf.writeUtf(orEmpty(msg.melds()[i]), 256);
+			buf.writeVarInt(msg.kita()[i]); // 拔北数（三麻）：不算副露，独立字段
 			buf.writeVarInt(msg.riichiRiverIdx()[i]);
 			buf.writeVarInt(msg.riichiSticks()[i]);
 			buf.writeVarInt(msg.handsExposed()[i]);
@@ -101,11 +77,15 @@ import mcr.riichi_arise.RichiiAriseMod;
 		buf.writeVarInt(msg.round());
 		buf.writeVarInt(msg.roundWind());
 		buf.writeVarInt(msg.honba());
+		buf.writeVarInt(msg.carriedSticks());
 		buf.writeVarInt(msg.selectedSeat());
 		buf.writeVarInt(msg.selectedIndex());
 		buf.writeVarInt(msg.drawnSeat());
 		buf.writeVarInt(msg.phase());
+		buf.writeVarInt(msg.playerCount()); // 对局人数（4=四麻 / 3=三麻）：客户端据此跳过空座位渲染
 		buf.writeUtf(orEmpty(msg.bannerText()), 1024);
+		for (int i = 0; i < 4; i++)
+			buf.writeVarInt(msg.discardPos()[i]); // 各家最近打出的牌在原手牌中的位置（飞行起点）
 	}
 
 	private static ViewMessage read(RegistryFriendlyByteBuf buf) {
@@ -118,6 +98,7 @@ import mcr.riichi_arise.RichiiAriseMod;
 		int[] tedashi = new int[4];
 		String[] rivers = new String[4];
 		String[] melds = new String[4];
+		int[] kita = new int[4];
 		int[] riichiRiverIdx = new int[4];
 		int[] riichiSticks = new int[4];
 		int[] handsExposed = new int[4];
@@ -132,6 +113,7 @@ import mcr.riichi_arise.RichiiAriseMod;
 			tedashi[i] = buf.readVarInt();
 			rivers[i] = buf.readUtf(256);
 			melds[i] = buf.readUtf(256);
+			kita[i] = buf.readVarInt();
 			riichiRiverIdx[i] = buf.readVarInt();
 			riichiSticks[i] = buf.readVarInt();
 			handsExposed[i] = buf.readVarInt();
@@ -148,16 +130,21 @@ import mcr.riichi_arise.RichiiAriseMod;
 		int round = buf.readVarInt();
 		int roundWind = buf.readVarInt();
 		int honba = buf.readVarInt();
+		int carriedSticks = buf.readVarInt();
 		int selectedSeat = buf.readVarInt();
 		int selectedIndex = buf.readVarInt();
 		int drawnSeat = buf.readVarInt();
 		int phase = buf.readVarInt();
+		int playerCount = buf.readVarInt();
 		String bannerText = buf.readUtf(1024);
-		return new ViewMessage(origin, viewerSeat, openHand, dealAnim, hands, hidden, tedashi, rivers, melds,
+		int[] discardPos = new int[4];
+		for (int i = 0; i < 4; i++)
+			discardPos[i] = buf.readVarInt();
+		return new ViewMessage(origin, viewerSeat, openHand, dealAnim, hands, hidden, tedashi, rivers, melds, kita,
 				riichiRiverIdx, riichiSticks, handsExposed, points, names,
 				avatarForms, avatarNames, avatarSkins, doraWall,
-				revealedIndicators, wallCount, turnSeat, round, roundWind, honba,
-				selectedSeat, selectedIndex, drawnSeat, phase, bannerText);
+				revealedIndicators, wallCount, turnSeat, round, roundWind, honba, carriedSticks,
+				selectedSeat, selectedIndex, drawnSeat, phase, playerCount, bannerText, discardPos);
 	}
 
 	public static void register() {

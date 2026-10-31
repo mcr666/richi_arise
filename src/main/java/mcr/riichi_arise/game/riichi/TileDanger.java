@@ -177,10 +177,11 @@ public final class TileDanger {
 	 * @param doraTiles34   当前宝牌 34 索引列表（可重复 = 多重宝牌）
 	 * @param roundWindTile 场风 34 索引（27-30）
 	 * @param playerWindTile 该对手自风 34 索引
+	 * @param riskWeight    危险度权重倍率（1.0 = 标准；三麻拔北 ≥2 的对手打点更高，传 1.2）
 	 * @return 34 数组，铳率百分数
 	 */
 	public static double[] calculateRisk(int turns, boolean[] safeTiles34, int[] leftTiles34,
-			List<Integer> doraTiles34, int roundWindTile, int playerWindTile) {
+			List<Integer> doraTiles34, int roundWindTile, int playerWindTile, double riskWeight) {
 		double[] risk = new double[34];
 		int t = Math.max(1, Math.min(turns, RISK_RATE.length - 1));
 		double[] rate = RISK_RATE[t];
@@ -257,6 +258,11 @@ public final class TileDanger {
 		for (int i = 0; i < 34; i++)
 			if (safeTiles34[i])
 				risk[i] = 0;
+
+		// 对手危险度权重（三麻：拔北多的对手打点更高 → 铳率表整体上调）
+		if (riskWeight != 1.0)
+			for (int i = 0; i < 34; i++)
+				risk[i] *= riskWeight;
 
 		return risk;
 	}

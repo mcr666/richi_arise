@@ -36,7 +36,7 @@ public final class AiCharacters {
 	private static final int[] FLOWS = { 0, 2, 0, 4, FLOW_ONIGAMI, FLOW_ONIGAMI, 1 };
 
 	/** 服务端座位显示名（与语言文件 gui.riichi_arise.lobby.ch_* 的 UI 名保持一致；默认无角色名，用随机名） */
-	private static final String[] NAMES = { "", "八木唯", "琳琅", "福姬", "瓦西子", "赤木", "一姬" };
+	private static final String[] NAMES = { "", "八木唯", "琳琅", "福姬", "鷲巣巌", "赤木しげる", "一姬" };
 
 	/** 菜单/列表显示名数组下标；未知 id 返回 -1 */
 	public static int index(String id) {

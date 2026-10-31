@@ -36,6 +36,10 @@ public final class RichiNetProtocol {
 	public static final String S_ERROR = "error";
 	public static final String S_PONG = "pong";
 
+	// ---- 动作常量（C_ACTION 的 action 字段；data 透传给 RiichiGame.applyAction）----
+	/** 拔北（三麻）：无参动作，data 置空；回合选项推送（your_turn）里出现 "kita" 即可回发该动作 */
+	public static final String A_KITA = "kita";
+
 	// ---- 安全取值工具 ----
 	public static String str(JsonObject o, String key) {
 		JsonElement e = o.get(key);

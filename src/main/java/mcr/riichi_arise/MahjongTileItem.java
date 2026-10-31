@@ -34,11 +34,15 @@ public class MahjongTileItem extends BlockItem {
 		super(block, properties);
 	}
 
-	/** 创建指定牌面的物品堆（无牌面代码 = 未知牌） */
+	/** 创建指定牌面的物品堆（无牌面代码 = 未知牌）。
+	 *  牌面代码带 {@link mcr.riichi_arise.game.TileFlag#GLASS} 时渲染为玻璃牌体。 */
 	public static ItemStack create(int code) {
 		ItemStack stack = new ItemStack(MahjongItems.MAHJONG_TILE.get());
-		if (code >= 0)
-			stack.set(MahjongComponents.TILE_CODE.get(), code);
+		if (code >= 0) {
+			stack.set(MahjongComponents.TILE_CODE.get(), mcr.riichi_arise.game.TileFlag.base(code));
+			if (mcr.riichi_arise.game.TileFlag.isGlass(code))
+				stack.set(MahjongComponents.TILE_GLASS.get(), true);
+		}
 		return stack;
 	}
 

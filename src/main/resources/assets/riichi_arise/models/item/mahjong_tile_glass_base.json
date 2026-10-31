@@ -1,0 +1,39 @@
+{
+	"credit": "玻璃牌体模型（玻璃之间）：牌面（北面）保持真实牌面，其余面为玻璃材质（cutout）。第二块为朝南的内侧牌面，供从玻璃背面透视时看到真实牌面",
+	"parent": "minecraft:block/block",
+	"render_type": "minecraft:cutout",
+	"textures": {
+		"front": "riichi_arise:item/mahjong/back",
+		"cover": "riichi_arise:item/mahjong/cover_glass",
+		"particle": "riichi_arise:item/mahjong/cover_glass"
+	},
+	"elements": [
+		{
+			"from": [2, 0, 5],
+			"to": [14, 16, 11],
+			"faces": {
+				"north": { "uv": [0, 0, 16, 16], "texture": "#front" },
+				"east": { "uv": [0, 4, 1.5, 8], "texture": "#cover" },
+				"south": { "uv": [3, 0, 6, 4], "texture": "#cover" },
+				"west": { "uv": [2.5, 4, 4, 8], "texture": "#cover" },
+				"up": { "uv": [9, 1.5, 6, 0], "texture": "#cover" },
+				"down": { "uv": [7, 4, 4, 5.5], "texture": "#cover" }
+			}
+		},
+		{
+			"from": [2, 0, 5.2],
+			"to": [14, 16, 5.4],
+			"faces": {
+				"south": { "uv": [0, 0, 16, 16], "texture": "#front" }
+			}
+		}
+	],
+	"display": {
+		"gui": { "rotation": [30, 225, 0], "translation": [0, 0, 0], "scale": [0.625, 0.625, 0.625] },
+		"ground": { "translation": [0, 3, 0], "scale": [0.25, 0.25, 0.25] },
+		"thirdperson_righthand": { "rotation": [75, 45, 0], "translation": [0, 2.5, 0], "scale": [0.375, 0.375, 0.375] },
+		"thirdperson_lefthand": { "rotation": [75, 45, 0], "translation": [0, 2.5, 0], "scale": [0.375, 0.375, 0.375] },
+		"firstperson_righthand": { "rotation": [0, 45, 0], "translation": [0, 0, 0], "scale": [0.4, 0.4, 0.4] },
+		"firstperson_lefthand": { "rotation": [0, 225, 0], "translation": [0, 0, 0], "scale": [0.4, 0.4, 0.4] }
+	}
+}

@@ -33,18 +33,20 @@ public class MahjongLobbyPayloads {
 	public record LobbySync(int phase, String[] seatNames, boolean[] seatAI,
 			List<String> queueNames, boolean canManage, int gameType, int voteCount,
 			boolean openHand, String[] seatAvatarModes, int thinkIdx,
-			int aiSpeedIdx, String ownVoice, String[] seatVoices) {
+			int aiSpeedIdx, String ownVoice, String[] seatVoices, int playerCount, int roomType) {
 	}
 
 	/** C→S 动作类型 */
 	public static final int ACT_JOIN_QUEUE = 0, ACT_LEAVE_QUEUE = 1, ACT_START = 2,
 			ACT_ADD_AI = 3, ACT_REMOVE_AI = 4, ACT_KICK = 5, ACT_SET_TYPE = 6, ACT_CLEAR = 7,
-			ACT_VOTE_END = 8, ACT_SET_OPEN = 10, ACT_SET_AVATAR_SEAT = 12, ACT_SET_THINK = 13, ACT_SET_SPEED = 14;
+			ACT_VOTE_END = 8, ACT_SET_OPEN = 10, ACT_SET_AVATAR_SEAT = 12, ACT_SET_THINK = 13, ACT_SET_SPEED = 14,
+			ACT_SET_PLAYERS = 15, ACT_SET_ROOM = 16;
 
 	public record SyncMessage(long originPacked, int phase, List<String> seatNames, int aiMask,
 			List<String> queueNames, boolean canManage, int gameType, int voteCount,
 			boolean openHand, List<String> seatAvatarModes,
-			int thinkIdx, int aiSpeedIdx, String ownVoice, List<String> seatVoices) implements CustomPacketPayload {
+			int thinkIdx, int aiSpeedIdx, String ownVoice, List<String> seatVoices, int playerCount,
+			int roomType) implements CustomPacketPayload {
 		public static final Type<SyncMessage> TYPE = new Type<>(
 				ResourceLocation.fromNamespaceAndPath(RichiiAriseMod.MODID, "richi_lobby_sync"));
 
@@ -75,7 +77,8 @@ public class MahjongLobbyPayloads {
 							new LobbySync(message.phase(), names, ai, message.queueNames(),
 									message.canManage(), message.gameType(), message.voteCount(),
 									message.openHand(), seatModes,
-									message.thinkIdx(), message.aiSpeedIdx(), message.ownVoice(), seatVoices));
+									message.thinkIdx(), message.aiSpeedIdx(), message.ownVoice(), seatVoices,
+									message.playerCount(), message.roomType()));
 					// 对局开始：确保入座玩家语音已下载到本地缓存（幂等，仅缺时下载）
 					if (message.phase() == mcr.riichi_arise.game.RichiTableState.PHASE_PLAYING)
 						mcr.riichi_arise.voice.VoiceClient.onGameStart(message.originPacked());
@@ -138,6 +141,34 @@ public class MahjongLobbyPayloads {
 		}
 	}
 
+	/**
+	 * S→C：对局开始时的房间类型标题（大厅样式的屏幕中央大字）。
+	 * langKey = 标题语言键（铁之间 / 玻璃之间）；color = ARGB 颜色。
+	 */
+	public record RoomTitlePayload(String langKey, int color) implements CustomPacketPayload {
+		public static final Type<RoomTitlePayload> TYPE = new Type<>(
+				ResourceLocation.fromNamespaceAndPath(RichiiAriseMod.MODID, "richi_room_title"));
+
+		public static final StreamCodec<RegistryFriendlyByteBuf, RoomTitlePayload> STREAM_CODEC = StreamCodec.of(
+				(RegistryFriendlyByteBuf buf, RoomTitlePayload msg) -> {
+					buf.writeUtf(msg.langKey() == null ? "" : msg.langKey(), 64);
+					buf.writeInt(msg.color());
+				},
+				(RegistryFriendlyByteBuf buf) -> new RoomTitlePayload(buf.readUtf(64), buf.readInt()));
+
+		@Override
+		public Type<RoomTitlePayload> type() {
+			return TYPE;
+		}
+
+		public static void handleData(final RoomTitlePayload message, final IPayloadContext context) {
+			if (context.flow() == PacketFlow.CLIENTBOUND) {
+				context.enqueueWork(() -> mcr.riichi_arise.client.RoomTitleOverlay.show(
+						net.minecraft.network.chat.Component.translatable(message.langKey()), message.color()));
+			}
+		}
+	}
+
 	private static void writeSync(RegistryFriendlyByteBuf buf, SyncMessage msg) {
 		buf.writeLong(msg.originPacked());
 		buf.writeVarInt(msg.phase());
@@ -165,6 +196,8 @@ public class MahjongLobbyPayloads {
 			String v = msg.seatVoices().get(i);
 			buf.writeUtf(v == null ? "" : v, 64);
 		}
+		buf.writeVarInt(msg.playerCount());
+		buf.writeVarInt(msg.roomType());
 	}
 
 	private static SyncMessage readSync(RegistryFriendlyByteBuf buf) {
@@ -191,14 +224,18 @@ public class MahjongLobbyPayloads {
 		List<String> seatVoices = new ArrayList<>(4);
 		for (int i = 0; i < 4; i++)
 			seatVoices.add(buf.readUtf(64));
+		int playerCount = buf.readVarInt();
+		int roomType = buf.readVarInt();
 		return new SyncMessage(origin, phase, seats, aiMask, queue, canManage, gameType, voteCount,
-				openHand, seatModes, thinkIdx, aiSpeedIdx, ownVoice, seatVoices);
+				openHand, seatModes, thinkIdx, aiSpeedIdx, ownVoice, seatVoices, playerCount, roomType);
 	}
 
 	public static void register() {
 		RichiiAriseMod.addNetworkMessage(SyncMessage.TYPE, SyncMessage.STREAM_CODEC, SyncMessage::handleData);
 		RichiiAriseMod.addNetworkMessage(ActionMessage.TYPE, ActionMessage.STREAM_CODEC, ActionMessage::handleData);
 		RichiiAriseMod.addNetworkMessage(OpenMessage.TYPE, OpenMessage.STREAM_CODEC, OpenMessage::handleData);
+		RichiiAriseMod.addNetworkMessage(RoomTitlePayload.TYPE, RoomTitlePayload.STREAM_CODEC,
+				RoomTitlePayload::handleData);
 		mcr.riichi_arise.network.VoicePayloads.register();
 	}
 }

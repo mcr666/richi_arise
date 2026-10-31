@@ -19,6 +19,7 @@ import net.minecraft.world.level.storage.LevelResource;
  * T|席|d|牌记法|旗                                       （切牌；旗 r=立直宣言，可空）
  * T|席|c/p/k|三张记法|来源席                              （吃/碰/明杠）
  * T|席|a/g|牌记法                                        （暗杠四张/加杠一张）
+ * T|席|b|牌记法                                          （拔北，三麻）
  * T|席|q|                                                （九种九牌宣言）
  * H|局号|r|和牌席|放铳席|翻|符|点数|役种|手牌|副露            （荣和）
  * H|局号|t|和牌席|翻|符|役种|手牌|副露                       （自摸）
@@ -43,7 +44,7 @@ public final class MahjongGameLog {
 		}
 	}
 
-	/** G 行：开局（AI 座位名即角色名，无前缀） */
+	/** G 行：开局（AI 座位名即角色名，无前缀；三麻第 4 席名占位 "-"、点 0） */
 	public static void gameStart(ServerLevel level, BlockPos origin, int totalHands, String[] names,
 			int[] points) {
 		StringBuilder sb = new StringBuilder("G|").append(System.currentTimeMillis() / 1000)
@@ -88,13 +89,13 @@ public final class MahjongGameLog {
 				+ '|' + wall + '|' + doraStack + '|' + rinshan);
 	}
 
-	/** T 行：过程事件（action: d=切牌 c=吃 p=碰 k=明杠 a=暗杠 g=加杠 q=九种九牌） */
+	/** T 行：过程事件（action: d=切牌 c=吃 p=碰 k=明杠 a=暗杠 g=加杠 b=拔北（三麻） q=九种九牌） */
 	public static void turnEvent(ServerLevel level, BlockPos origin, int seat, String action,
 			String detail) {
 		write(level, origin, "T|" + seat + '|' + action + (detail.isEmpty() ? "" : "|" + detail));
 	}
 
-	/** E 行：终局四人点数（排名由此推导） */
+	/** E 行：终局四人点数（排名由此推导；三麻第 4 席恒 0） */
 	public static void gameEnd(ServerLevel level, BlockPos origin, int[] points) {
 		write(level, origin, "E|" + points[0] + ',' + points[1] + ',' + points[2] + ',' + points[3]);
 	}

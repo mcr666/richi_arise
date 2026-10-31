@@ -18,6 +18,7 @@ public final class TileIcons {
 
 	/** 牌面代码 → 贴图路径（不含 assets/ 前缀） */
 	public static ResourceLocation icon(int code) {
+		code = mcr.riichi_arise.game.TileFlag.base(code); // 透明牌标志不参与贴图选择
 		String name;
 		if (code < 10)
 			name = code + "m";

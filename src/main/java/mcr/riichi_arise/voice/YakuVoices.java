@@ -5,13 +5,13 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 报番语音（仅内置）：和牌结算时在 act 语音（荣/自摸）之后按役种顺序追加播报。
+ * 报番语音（资源包驱动）：和牌结算时在 act 语音（荣/自摸）之后按役种顺序追加播报。
  * <p>
- * 音频取自雀魂角色的役种语音（mjsdb），随 mod 打包于
- * {@code assets/riichi_arise/sounds/voice/<id>/fan/<key>.mp3}；
- * 其余角色无报番音频，播报时静默跳过。
+ * 音频不随 mod 打包，由资源包提供：{@code assets/<命名空间>/sounds/voice/<id>/fan/<key>.mp3}
+ * （随仓库附带的报番语音资源包在 {@code resourcepacks/riichi_arise_fan_voice}）。
+ * 资源包未安装、或该角色没有报番音频时静默跳过，结算界面回退为固定节奏逐条显示。
  * 映射键与 {@code Mahjong4jBridge.WinResult.yakuNames()} 的英文役名一致（同 YakuNames 表），
- * 另含宝牌计数键（DORA/URA/RED + 数量，表/里/红通用按数量报）。
+ * 另含宝牌计数键（DORA/URA/RED/KITA + 数量，表/里/红/拔北通用按数量报）。
  * </p>
  */
 public final class YakuVoices {
@@ -86,8 +86,9 @@ public final class YakuVoices {
 	 * 把某角色某次和牌的报番键列表追加进报番队列（客户端调用）。
 	 * <ul>
 	 * <li>役种英文名（自风/场风带方位后缀）：有对应音频的按序播报，并进入界面显现映射；</li>
-	 * <li>宝牌计数键 {@code DORA/URA/RED + 数量}（表/里/红通用按数量报）：作为附加播报排在役种之后，
-	 * 结算列表末尾的宝牌条目随对应语音逐条显现（{@link FanAnnouncer#startedExtras()}）。</li>
+	 * <li>宝牌计数键 {@code DORA/URA/RED/KITA + 数量}（表/里/红/拔北通用按数量报）：作为附加播报排在役种之后，
+	 * 结算列表末尾的宝牌条目随对应语音逐条显现（{@link FanAnnouncer#startedExtras()}）；
+	 * 服务端顺序为表 → 红 → 拔北（三麻）→ 里</li>
 	 * </ul>
 	 * 一条役种音频都没有时通知界面回退固定节奏。
 	 */
@@ -104,7 +105,8 @@ public final class YakuVoices {
 		for (String key : keys) {
 			if (key == null || key.isEmpty())
 				continue;
-			if (key.startsWith("DORA") || key.startsWith("URA") || key.startsWith("RED")) {
+			if (key.startsWith("DORA") || key.startsWith("URA") || key.startsWith("RED")
+					|| key.startsWith("KITA")) {
 				String k = doraKey(key);
 				if (k != null)
 					extraKeys.add(k);
@@ -134,15 +136,21 @@ public final class YakuVoices {
 		FanAnnouncer.begin(zh, files, extraKeys.size(), voiceId);
 	}
 
-	/** 去掉自风/场风的方位后缀（JIKAZE_TON → JIKAZE） */
+	/**
+	 * 只去掉自风/场风的方位后缀（JIKAZE_TON → JIKAZE、BAKAZE_PEI → BAKAZE），
+	 * 其余带下划线的役名（SUANKO_TANKI / KOKUSHIMUSO_13 / CHURENPOHTO_PURE / DOUBLE_REACH）原样保留——
+	 * 截断会让界面显现映射找不到对应条目，那条役种的文字只能等到报番结束才出现。
+	 */
 	private static String basicName(String key) {
-		int i = key.indexOf('_');
-		return i < 0 ? key : key.substring(0, i);
+		if (key.startsWith("JIKAZE_") || key.startsWith("BAKAZE_"))
+			return key.substring(0, key.indexOf('_'));
+		return key;
 	}
 
-	/** 宝牌计数键 → 音频文件名：无数量或 1 → dora；13+ → dora13（一大堆）；其余 → doraN */
+	/** 宝牌计数键 → 音频文件名：表/里/红/拔北通用 dora 系列（拔北与宝牌一样按张数分开报，
+	 *  无专属音频，与其他宝牌共用 dora/doraN/dora13）；缺音频时走现有缺失回退（随相邻语音一并显现） */
 	private static String doraKey(String token) {
-		String num = token.replaceFirst("^(DORA|URA|RED)", "");
+		String num = token.replaceFirst("^(DORA|URA|RED|KITA)", "");
 		int count;
 		try {
 			count = num.isEmpty() ? 1 : Integer.parseInt(num);

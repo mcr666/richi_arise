@@ -45,9 +45,23 @@ public class MahjongClient {
 					MahjongItems.MAHJONG_TILE.get(),
 					ResourceLocation.withDefaultNamespace("code"),
 					(stack, level, entity, seed) -> MahjongTileItem.getCode(stack));
+			// 玻璃之间：透明牌标记（模型 overrides 据此选择半透明牌体）
+			ItemProperties.register(
+					MahjongItems.MAHJONG_TILE.get(),
+					ResourceLocation.withDefaultNamespace("glass"),
+					(stack, level, entity, seed) -> Boolean.TRUE.equals(
+							stack.get(mcr.riichi_arise.MahjongComponents.TILE_GLASS.get())) ? 1f : 0f);
 			// 内置 mp3 播放器预热：后台初始化音频子系统并加载 jlayer，消除首次角色语音的播放延迟
 			mcr.riichi_arise.voice.VoicePlayer.warmup();
 		});
+	}
+
+	@SubscribeEvent
+	public static void onRegisterGuiLayers(net.neoforged.neoforge.client.event.RegisterGuiLayersEvent event) {
+		// Tab 玩家列表打开时，屏幕左侧的对局信息叠加层（四家点数排名 / 局目与牌山量 / 场供）
+		event.registerAboveAll(net.minecraft.resources.ResourceLocation.fromNamespaceAndPath(
+				mcr.riichi_arise.RichiiAriseMod.MODID, "table_overlay"),
+				(guiGraphics, partialTick) -> MahjongTableOverlay.render(guiGraphics));
 	}
 
 	/** 平放麻将牌方块实体渲染器（按牌面代码渲染躺平的麻将牌） */
@@ -63,6 +77,7 @@ public class MahjongClient {
 		tickCounter++;
 		MahjongTableClient.tick(); // 牌桌发牌/倒牌动画调度（逐 tick 驱动）
 		MahjongSettlementScreen.tickDeferredOpen(); // 和牌语音播完后再弹结算界面
+		MahjongPointDeltaScreen.tickWaiting(); // 点数变化界面"等待其他玩家"省略号动画与确认重发
 		Minecraft minecraft = Minecraft.getInstance();
 		LocalPlayer player = minecraft.player;
 		ClientLevel level = minecraft.level;

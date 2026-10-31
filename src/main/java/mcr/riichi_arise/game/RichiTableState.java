@@ -28,6 +28,18 @@ public class RichiTableState {
 	public int roundWind = 0;
 	/** 对局长度（开局前在大厅选择）：0=一局 1=东风战(4局) 2=半庄战(8局) */
 	public int gameType = 0;
+	/** 对局人数（大厅切换）：4=四人麻雀 3=三人麻雀；三麻只使用座位 0/1/2（座位 3 留空不参与） */
+	public int playerCount = 4;
+	/** 房间类型（大厅切换）：0=铁之间（标准）1=玻璃之间（无红宝牌/无拔北，每种牌随机 3 张透明牌） */
+	public static final int ROOM_TIE = 0, ROOM_GLASS = 1;
+	public int roomType = ROOM_TIE;
+	/**
+	 * 各家拔北数（三麻，雀魂规则）：拔出的北风牌张数，每张和牌时 +1 翻。resetHand 清零。
+	 * <p>拔北<b>不算副露</b>：不计入 {@link #melds}、不破坏门清；渲染经整桌快照的独立 kita 字段同步
+	 * （{@link mcr.riichi_arise.network.MahjongTablePayload.ViewMessage#kita()}），
+	 * 客户端在 {@link mcr.riichi_arise.render.TableLayout#plan} 中单独摆位。</p>
+	 */
+	public final int[] kita = new int[4];
 	/** 思考时间档位：{每巡时限秒, 读秒(长思考库)秒}；thinkIdx 由管理界面切换，开局时套用 */
 	public static final int[][] THINK_PRESETS = { { 5, 20 }, { 10, 30 }, { 60, 0 }, { 3, 5 } };
 	public int thinkIdx = 0;
@@ -38,8 +50,8 @@ public class RichiTableState {
 	public static final int SETTLE_ANNOUNCE_DELAY = 20;
 	/** 无报番语音时每条役种的显现间隔（0.5s） */
 	public static final int SETTLE_ANNOUNCE_STEP = 10;
-	/** 报番结束 → 番符/点数/段位依次显现的三段延迟合计（2s） */
-	public static final int SETTLE_TIER_OFFSET = 40;
+	/** 报番结束 → 番符/点数/段位依次显现的三段延迟合计（15 tick = 三段各 5 tick） */
+	public static final int SETTLE_TIER_OFFSET = 15; // 番数符数/点数/段位三段各间隔 5 tick
 	/** 段位显现后的确认倒计时（5s）：归零时客户端自动回 settle_confirm */
 	public static final int SETTLE_CONFIRM_TICKS = 5 * 20;
 	/** 有真实客户端时的服务端兜底时限（防挂机/掉线；正常由客户端自动确认推进） */
@@ -99,6 +111,8 @@ public class RichiTableState {
 	public final boolean[] aiSeat = new boolean[4];
 	/** 各家立直点棒数（宣言成功后 +1） */
 	public final int[] riichiSticks = new int[4];
+	/** 供托：此前局目流局留存、尚未结算的立直棒数（有人和牌时全部取走；渲染在王牌指示叠旁） */
+	public int carriedSticks = 0;
 	/** 各家立直宣言牌在牌河中的下标（横摆渲染；-1 = 无 / 已被鸣牌取走） */
 	public final int[] riichiRiverIdx = { -1, -1, -1, -1 };
 	/** 立直宣言牌被鸣后待补标记：该家下一张切牌改为横摆 */
@@ -109,6 +123,8 @@ public class RichiTableState {
 	public final boolean[] endVotes = new boolean[4];
 	/** 各家最近一次打牌是否手切（1 = 手切，0 = 摸切/无）：隐藏手牌的牌背动画 key 错位用 */
 	public final int[] lastTedashi = new int[4];
+	/** 各家最近一次打出的牌在手牌中的位置，编码 seat&lt;&lt;8|index（-1 = 无）：客户端播放切牌飞出的起点 */
+	public final int[] lastDiscardPos = { -1, -1, -1, -1 };
 	/** 手牌展示常量 */
 	public static final int HAND_STAND = 0, HAND_FACE_UP = 1, HAND_FACE_DOWN = 2;
 	/** 已揭开的宝牌指示牌叠数（开局 1，杠后 +1；渲染翻开对应上张） */
@@ -127,6 +143,16 @@ public class RichiTableState {
 		java.util.Arrays.fill(points, 25000);
 	}
 
+	/** 配对起始点数：三麻 35000 / 四麻 25000（雀魂规则，开局 startGame 按人数填充） */
+	public static int startPoints(int playerCount) {
+		return playerCount == 3 ? 35000 : 25000;
+	}
+
+	/** 配对返点：三麻 40000 / 四麻 30000（段位 pt 结算用，见 MahjongRankStore） */
+	public static int returnPoints(int playerCount) {
+		return playerCount == 3 ? 40000 : 30000;
+	}
+
 	/** 清除选牌状态（打出/重置时调用） */
 	public void clearSelection() {
 		selectedSeat = -1;
@@ -142,7 +168,8 @@ public class RichiTableState {
 		return safeParse(rivers[seat]);
 	}
 
-	/** 各家副露分组解析：melds 字符串以 ";" 分隔多组，每组 "声明家:牌码"（声明家 = 被吃/碰/杠的来源座位） */
+	/** 各家副露分组解析：melds 字符串以 ";" 分隔多组，每组 "声明家:牌码"（声明家 = 被吃/碰/杠的来源座位）；
+	 *  加杠组在牌码后追加 "!"（渲染时第 4 张叠在横放的碰牌上，而非排成明杠） */
 	public java.util.List<java.util.List<Integer>> meldGroups(int seat) {
 		java.util.List<java.util.List<Integer>> groups = new java.util.ArrayList<>();
 		for (MeldGroup g : meldGroupInfos(seat))
@@ -150,8 +177,8 @@ public class RichiTableState {
 		return groups;
 	}
 
-	/** 副露组（含声明来源座位） */
-	public record MeldGroup(int fromSeat, java.util.List<Integer> codes) {
+	/** 副露组（含声明来源座位与加杠标记） */
+	public record MeldGroup(int fromSeat, java.util.List<Integer> codes, boolean kakan) {
 	}
 
 	public java.util.List<MeldGroup> meldGroupInfos(int seat) {
@@ -161,6 +188,9 @@ public class RichiTableState {
 		for (String part : melds[seat].split(";")) {
 			if (part.isEmpty())
 				continue;
+			boolean kakan = part.endsWith("!"); // 加杠标记（见 RiichiPlayer.meldNotation）
+			if (kakan)
+				part = part.substring(0, part.length() - 1);
 			int from = -1;
 			String codes = part;
 			int colon = part.indexOf(':');
@@ -173,7 +203,7 @@ public class RichiTableState {
 					codes = part;
 				}
 			}
-			groups.add(new MeldGroup(from, safeParse(codes)));
+			groups.add(new MeldGroup(from, safeParse(codes), kakan));
 		}
 		return groups;
 	}

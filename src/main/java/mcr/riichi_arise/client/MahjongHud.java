@@ -8,11 +8,8 @@ import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.LayeredDraw;
-import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.phys.Vec3;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
@@ -20,12 +17,8 @@ import net.neoforged.neoforge.client.event.InputEvent;
 import net.neoforged.neoforge.client.event.RegisterGuiLayersEvent;
 
 import mcr.riichi_arise.RichiiAriseMod;
-import mcr.riichi_arise.block.FengPanBlock;
-import mcr.riichi_arise.game.MahjongTileNotation;
-import mcr.riichi_arise.game.RichiTableState;
 import mcr.riichi_arise.network.MahjongCountdownPayload;
 import mcr.riichi_arise.network.MahjongGamePayloads;
-import mcr.riichi_arise.network.MahjongTablePayload;
 
 /**
  * 麻雀 HUD：
@@ -91,97 +84,6 @@ public class MahjongHud {
 			}
 		}
 		renderButtons(guiGraphics);
-		renderDoraOverlay(guiGraphics);
-	}
-
-	// ==================================================================
-	// 左上角对局叠加层：当前宝牌指示牌 + 场供（本场）/ 供托（立直棒）
-	// ==================================================================
-
-	/**
-	 * 对局中在屏幕左上角绘制：已揭开的宝牌指示牌（TileIcons 直绘牌面）下方并列
-	 * 场供（本场数）与供托（桌上全部立直棒数）。参战玩家（viewerSeat &ge; 0）且 phase=PLAYING、
-	 * 无 Screen 时显示；观战者若客户端开启"观战显示牌局内容"（SPECTATOR_SHOW_TABLE）同样显示。
-	 * 结算/终局自动隐藏。
-	 */
-	private static void renderDoraOverlay(GuiGraphics g) {
-		Minecraft mc = Minecraft.getInstance();
-		if (mc.screen != null) // 结算等 Screen 打开时不显示
-			return;
-		if (MahjongTablePayload.gameViewerSeat < 0
-				&& !mcr.riichi_arise.RichiConfig.SPECTATOR_SHOW_TABLE.get()) // 观战者：按客户端选项决定
-			return;
-		if (MahjongTablePayload.gamePhase != RichiTableState.PHASE_PLAYING)
-			return;
-		// 远离牌桌 16 格（与服务端同步范围一致）即隐藏；桌已拆除也隐藏
-		long packed = MahjongTablePayload.gameOriginPacked;
-		if (packed == Long.MIN_VALUE || mc.level == null || mc.player == null)
-			return;
-		BlockPos tablePos = BlockPos.of(packed);
-		BlockState tableState = mc.level.getBlockState(tablePos);
-		if (!(tableState.getBlock() instanceof FengPanBlock))
-			return;
-		Vec3 center = FengPanBlock.getTableCenter(tableState, tablePos);
-		if (mc.player.distanceToSqr(center) > 16.0 * 16.0)
-			return;
-		var font = mc.font;
-		// 解析已揭开宝牌指示牌码（doraWall 中已揭开奇数位为真实码，其余为 -1 占位）
-		List<Integer> dora = MahjongTileNotation.parse(MahjongTablePayload.gameDoraWall);
-		int revealed = Math.min(MahjongTablePayload.gameRevealed, dora.size() / 2);
-		int honba = MahjongTablePayload.gameHonba;
-		int sticks = 0;
-		for (int s = 0; s < 4; s++)
-			sticks += MahjongTablePayload.gameRiichiSticks[s];
-		String honbaStr = Component.translatable("gui.riichi_arise.hud.honba", honba).getString();
-		String sticksStr = Component.translatable("gui.riichi_arise.hud.sticks", sticks).getString();
-		int padX = 6, padY = 4;
-		int tileW = 16, tileGap = 1;
-		int tileH = revealed > 0 ? tileW * 64 / 48 : 0;
-		int tileRowW = revealed > 0 ? revealed * (tileW + tileGap) : 0;
-		int w = Math.max(Math.max(tileRowW, font.width(honbaStr)), font.width(sticksStr)) + padX * 2;
-		int h = padY * 2 + (tileH > 0 ? tileH + 3 : 0) + font.lineHeight * 2;
-		// 位置：客户端设置的四角预设（HUD_DORA_CORNER），默认左上
-		int margin = 3;
-		int gw = g.guiWidth(), gh = g.guiHeight();
-		int x, y;
-		switch (mcr.riichi_arise.RichiConfig.HUD_DORA_CORNER.get()) {
-			case TOP_RIGHT -> {
-				x = gw - w - margin;
-				y = margin;
-			}
-			case BOTTOM_LEFT -> {
-				x = margin;
-				y = gh - h - margin;
-			}
-			case BOTTOM_RIGHT -> {
-				x = gw - w - margin;
-				y = gh - h - margin;
-			}
-			default -> {
-				x = margin;
-				y = margin;
-			}
-		}
-		x = Math.max(0, x);
-		y = Math.max(0, y);
-		g.fill(x, y, x + w, y + h, 0x99000000);
-		int bc = 0xFFB8860B;
-		g.fill(x, y, x + w, y + 1, bc);
-		g.fill(x, y + h - 1, x + w, y + h, bc);
-		g.fill(x, y, x + 1, y + h, bc);
-		g.fill(x + w - 1, y, x + w, y + h, bc);
-		int tx = x + padX;
-		for (int k = 0; k < revealed; k++) {
-			int idx = 2 * k + 1;
-			int code = idx < dora.size() ? dora.get(idx) : -1;
-			if (code >= 0) {
-				TileIcons.draw(g, code, tx, y + padY, tileW);
-				tx += tileW + tileGap;
-			}
-		}
-		int ty = y + padY + tileH + (tileH > 0 ? 3 : 0);
-		g.drawString(font, honbaStr, x + padX, ty, 0xFFFFFF, true);
-		g.drawString(font, sticksStr, x + padX, ty + font.lineHeight, 0xFFFFFF, true);
 	}
 
 	// ==================================================================
@@ -200,6 +102,7 @@ public class MahjongHud {
 					data.isEmpty() ? "" : (Integer.parseInt(data) + 1)).getString();
 			case "ankan" -> Component.translatable("gui.riichi_arise.act.ankan").getString();
 			case "kakan" -> Component.translatable("gui.riichi_arise.act.kakan").getString();
+			case "kita" -> Component.translatable("gui.riichi_arise.act.kita").getString(); // 拔北（三麻，无参选项）
 			default -> action;
 		};
 	}

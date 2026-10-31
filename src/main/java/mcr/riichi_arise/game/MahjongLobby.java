@@ -75,6 +75,40 @@ public final class MahjongLobby {
 					broadcastSync(sp.serverLevel(), origin, st);
 				}
 			}
+		case MahjongLobbyPayloads.ACT_SET_PLAYERS -> {
+				// 对局人数切换（等待/终局未清理）：extra = 3 / 4；队列人数超出目标人数时拒绝切换
+				if (canManage(sp) && st.phase != RichiTableState.PHASE_PLAYING
+						&& (extra == 3 || extra == 4) && extra != st.playerCount) {
+					if (st.queue.size() > extra) {
+						sp.displayClientMessage(Component.translatable(
+								"message.riichi_arise.lobby_players_busy", st.queue.size(), extra), true);
+					} else {
+						st.playerCount = extra;
+						if (extra == 3) {
+							// 三人模式：第 4 席（座位 4 / 北家）不再存在——清掉该席 AI 预约与形象，
+							// 广播时 syncAiMarkers 会按 playerCount 移除该席 AI 代理实体（"踢出 AI"）
+							st.reservedAI[3] = false;
+							st.aiAvatarModes[3] = "";
+							st.aiSeatModes[3] = "";
+						}
+						saveSettings(sp, origin, st);
+					}
+					broadcastSync(sp.serverLevel(), origin, st);
+				}
+			}
+		case MahjongLobbyPayloads.ACT_SET_ROOM -> {
+				// 房间类型切换（等待/终局未清理）：extra = 0 铁之间 / 1 玻璃之间（开局时生效）
+				// 对局进行中切换：只提示不改配置，并照常下发原值（房间按钮回到当前实际类型）
+				if (canManage(sp) && (extra == RichiTableState.ROOM_TIE || extra == RichiTableState.ROOM_GLASS)) {
+					if (st.phase != RichiTableState.PHASE_PLAYING) {
+						st.roomType = extra;
+						saveSettings(sp, origin, st);
+					} else {
+						sp.displayClientMessage(Component.translatable("message.riichi_arise.room_locked"), true);
+					}
+					broadcastSync(sp.serverLevel(), origin, st);
+				}
+			}
 		case MahjongLobbyPayloads.ACT_CLEAR -> {
 				// 终局后可用：彻底清掉牌面实体与 AI 形象（假玩家/盔甲架），桌面回到空白等待状态
 				if (canManage(sp) && st.phase == RichiTableState.PHASE_FINISHED) {
@@ -173,7 +207,7 @@ public final class MahjongLobby {
 			sp.displayClientMessage(Component.translatable("message.riichi_arise.queue_left"), true);
 		} else {
 			// 座位满且有待约 AI：踢出一个 AI 预约，给该玩家腾位；仍满则请出队内 NPC（可被移出）
-			if (st.queue.size() + aiCount(st.reservedAI) >= 4) {
+			if (st.queue.size() + aiCount(st.reservedAI) >= st.playerCount) {
 				int freed = -1;
 				for (int seat = 0; seat < 4 && freed < 0; seat++)
 					if (st.reservedAI[seat])
@@ -196,7 +230,7 @@ public final class MahjongLobby {
 			}
 			st.queue.add(uuid);
 			sp.displayClientMessage(
-					Component.translatable("message.riichi_arise.queue_joined", st.queue.size(), 4), true);
+					Component.translatable("message.riichi_arise.queue_joined", st.queue.size(), st.playerCount), true);
 		}
 		updateQueueDisplay(level, origin, st);
 		broadcastSync(level, origin, st);
@@ -262,7 +296,9 @@ public final class MahjongLobby {
 			// 剧本牌局（临时）：不洗座位——预约 AI 0/1/2 坐東南西、玩家坐北（三家先立直、玩家最后摸牌）
 			int[] seatOrder = { 0, 1, 2, 3 };
 			if (st.film == null) {
-				for (int i = seatOrder.length - 1; i > 0; i--) {
+				// 洗牌域只取前 playerCount 个座位（三麻不使用座位 3，防止入场者被洗到空置席）
+				int sc = Math.min(st.playerCount, seatOrder.length);
+				for (int i = sc - 1; i > 0; i--) {
 					int j = level.random.nextInt(i + 1);
 					int t = seatOrder[i];
 					seatOrder[i] = seatOrder[j];
@@ -272,7 +308,7 @@ public final class MahjongLobby {
 			java.util.Arrays.fill(st.players, null);
 			java.util.Arrays.fill(st.aiSeat, false);
 			java.util.Arrays.fill(st.aiSeatModes, ""); // 本局座位角色：按洗牌结果重新写入（不改预约设置 aiAvatarModes）
-			int n = Math.min(entries.size(), 4);
+			int n = Math.min(entries.size(), st.playerCount);
 			for (int i = 0; i < n; i++) {
 				int seat = seatOrder[i];
 				Entry en = entries.get(i);
@@ -288,8 +324,8 @@ public final class MahjongLobby {
 					st.aiSeatModes[seat] = en.avatarMode();
 			}
 			st.gamesStarted++;
-		// 空位补 AI
-		for (int seat = 0; seat < 4; seat++) {
+		// 空位补 AI（三麻只补到座位 2：座位 3 为空置席，players[3] 保持 null）
+		for (int seat = 0; seat < st.playerCount; seat++) {
 			if (st.players[seat] == null) {
 				st.players[seat] = RiichiBot.aiUuid(seat);
 				st.aiSeat[seat] = true;
@@ -303,8 +339,10 @@ public final class MahjongLobby {
 		FengPanBlock.resolveAvatars(level, st);
 		st.avatarsDirty = false; // 开局已解析完毕：终局时不要重算（重算会换随机名/皮肤 UUID，客户端据此重建假玩家 → 形象突然位移）
 		st.honba = 0;
-		// 东风战单局：每局点数重置
-		java.util.Arrays.fill(st.points, 25000);
+		// 开局点数重置：空座 0，参战座位按人数取起始点（三麻 35000 / 四麻 25000；返点 40000/30000 供段位结算）
+		java.util.Arrays.fill(st.points, 0);
+		for (int seat = 0; seat < st.playerCount; seat++)
+			st.points[seat] = RichiTableState.startPoints(st.playerCount);
 		java.util.Arrays.fill(st.riichiSticks, 0);
 		java.util.Arrays.fill(st.riichiRiverIdx, -1);
 		java.util.Arrays.fill(st.handsExposed, RichiTableState.HAND_STAND);
@@ -356,7 +394,7 @@ public final class MahjongLobby {
 				|| st.npcUuids.size() >= RichiTableState.MAX_NPC_SEATS)
 			return false;
 		String uuid = npc.getStringUUID();
-		if (st.queue.size() + aiCount(st.reservedAI) >= 4) {
+		if (st.queue.size() + aiCount(st.reservedAI) >= st.playerCount) {
 			int freed = -1;
 			for (int seat = 0; seat < 4 && freed < 0; seat++)
 				if (st.reservedAI[seat])
@@ -374,7 +412,7 @@ public final class MahjongLobby {
 							otherP.unpin();
 						break;
 					}
-				if (!st.npcUuids.contains(uuid) && st.queue.size() + aiCount(st.reservedAI) >= 4)
+				if (!st.npcUuids.contains(uuid) && st.queue.size() + aiCount(st.reservedAI) >= st.playerCount)
 					return false;
 			}
 		}
@@ -431,7 +469,7 @@ public final class MahjongLobby {
 				|| st.phase == RichiTableState.PHASE_PLAYING || st.queue.contains(uuid)
 				|| st.externalUuids.contains(uuid))
 			return false;
-		if (st.queue.size() + aiCount(st.reservedAI) >= 4) {
+		if (st.queue.size() + aiCount(st.reservedAI) >= st.playerCount) {
 			int freed = -1;
 			for (int seat = 0; seat < 4 && freed < 0; seat++)
 				if (st.reservedAI[seat])
@@ -448,7 +486,7 @@ public final class MahjongLobby {
 							p.unpin();
 						break;
 					}
-				if (st.queue.size() + aiCount(st.reservedAI) >= 4)
+				if (st.queue.size() + aiCount(st.reservedAI) >= st.playerCount)
 					return false;
 			}
 		}
@@ -547,6 +585,8 @@ public final class MahjongLobby {
 	/** 某座位是否需要 AI Marker：对局中/终局按本局 aiSeat（参牌者除外）；等待阶段按下一局预约。
 	 *  终局不能按预约判定——预约席是洗牌前的座位号，会在人类座位上多出名字标记。 */
 	private static boolean needsAiMarker(RichiTableState st, int seat) {
+		if (seat >= st.playerCount)
+			return false; // 三麻没有座位 3：该席 AI 代理实体一并移除（切换人数时"踢出 AI"）
 		if (st.phase == RichiTableState.PHASE_PLAYING) {
 			// 参牌者（女仆/NPC）座位：真实实体钉在座位，无需 AI Marker 代理
 			if (st.players[seat] != null && st.npcUuids.contains(st.players[seat]))
@@ -725,7 +765,7 @@ public final class MahjongLobby {
 			return;
 		}
 		StringBuilder text = new StringBuilder(
-				Component.translatable("message.riichi_arise.queue_status", st.queue.size(), 4).getString());
+				Component.translatable("message.riichi_arise.queue_status", st.queue.size(), st.playerCount).getString());
 		int reserved = 0;
 		for (boolean b : st.reservedAI)
 			if (b)
@@ -854,7 +894,8 @@ public final class MahjongLobby {
 					new MahjongLobbyPayloads.SyncMessage(origin.asLong(), st.phase,
 						java.util.Arrays.asList(seatNames), aiMask, queueNames, canManage(p), st.gameType,
 						voteCount, st.openHand, seatModes, st.thinkIdx, st.aiSpeedIdx,
-						ownVoice == null ? "" : ownVoice, java.util.Arrays.asList(seatVoices)));
+						ownVoice == null ? "" : ownVoice, java.util.Arrays.asList(seatVoices), st.playerCount,
+						st.roomType));
 		}
 		// 悬浮提示随状态同步：等待期显示（空队列给加入提示），其它阶段清除
 		if (st.phase == RichiTableState.PHASE_WAITING)

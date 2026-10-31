@@ -27,12 +27,12 @@ public class MahjongSettlementPayload {
 
 	public record Settlement(int mode, long originPacked, String winnerName, String winType, String yakuInfo,
 			String handCsv, String meldsGroups, int winTile, String uraCsv, String doraCsv, String yakuList,
-			int han, int fu, int gain, boolean parent, String[] names, int[] points) {
+			int han, int fu, int gain, boolean parent, String[] names, int[] points, int playerCount) {
 	}
 
 	public record SettlementMessage(int mode, long originPacked, String winnerName, String winType, String yakuInfo,
 			String handCsv, String meldsGroups, int winTile, String uraCsv, String doraCsv, String yakuList,
-			int han, int fu, int gain, boolean parent,
+			int han, int fu, int gain, boolean parent, int playerCount,
 			java.util.List<String> names, java.util.List<Integer> points) implements CustomPacketPayload {
 		public static final Type<SettlementMessage> TYPE = new Type<>(
 				ResourceLocation.fromNamespaceAndPath(RichiiAriseMod.MODID, "richi_settlement"));
@@ -62,7 +62,8 @@ public class MahjongSettlementPayload {
 							orEmpty(message.winnerName()), orEmpty(message.winType()), orEmpty(message.yakuInfo()),
 							orEmpty(message.handCsv()), orEmpty(message.meldsGroups()),
 							message.winTile(), orEmpty(message.uraCsv()), orEmpty(message.doraCsv()),
-							orEmpty(message.yakuList()), message.han(), message.fu(), message.gain(), message.parent(), ns, pts);
+							orEmpty(message.yakuList()), message.han(), message.fu(), message.gain(), message.parent(), ns,
+							pts, message.playerCount());
 					mcr.riichi_arise.client.MahjongSettlementScreen.openWhenVoiceDone();
 				});
 			}
@@ -89,6 +90,7 @@ public class MahjongSettlementPayload {
 		buf.writeVarInt(msg.fu());
 		buf.writeVarInt(msg.gain());
 		buf.writeBoolean(msg.parent());
+		buf.writeVarInt(msg.playerCount());
 		for (int i = 0; i < 4; i++)
 			buf.writeUtf(orEmpty(msg.names().get(i)), 64);
 		for (int i = 0; i < 4; i++)
@@ -111,6 +113,7 @@ public class MahjongSettlementPayload {
 		int fu = buf.readVarInt();
 		int gain = buf.readVarInt();
 		boolean parent = buf.readBoolean();
+		int playerCount = buf.readVarInt();
 		java.util.List<String> names = new java.util.ArrayList<>(4);
 		for (int i = 0; i < 4; i++)
 			names.add(buf.readUtf(64));
@@ -118,7 +121,7 @@ public class MahjongSettlementPayload {
 		for (int i = 0; i < 4; i++)
 			points.add(buf.readVarInt());
 		return new SettlementMessage(mode, origin, winner, winType, yaku, hand, melds, winTile, ura, dora, yakuList,
-				han, fu, gain, parent, names, points);
+				han, fu, gain, parent, playerCount, names, points);
 	}
 
 	/** 服务端便捷方法：向某玩家推结算界面 */
@@ -126,7 +129,7 @@ public class MahjongSettlementPayload {
 		net.neoforged.neoforge.network.PacketDistributor.sendToPlayer(player,
 				new SettlementMessage(s.mode(), s.originPacked(), s.winnerName(), s.winType(), s.yakuInfo(),
 						s.handCsv(), s.meldsGroups(), s.winTile(), s.uraCsv(), s.doraCsv(), s.yakuList(),
-						s.han(), s.fu(), s.gain(), s.parent(),
+						s.han(), s.fu(), s.gain(), s.parent(), s.playerCount(),
 						java.util.Arrays.asList(s.names()),
 						java.util.List.of(s.points[0], s.points[1], s.points[2], s.points[3])));
 	}
@@ -134,7 +137,7 @@ public class MahjongSettlementPayload {
 	/** 服务端便捷方法：关闭某玩家已打开的结算界面（推进下一局时） */
 	public static void sendClose(net.minecraft.server.level.ServerPlayer player) {
 		net.neoforged.neoforge.network.PacketDistributor.sendToPlayer(player,
-				new SettlementMessage(MODE_CLOSE, 0, "", "", "", "", "", -1, "", "", "", 0, 0, 0, false,
+				new SettlementMessage(MODE_CLOSE, 0, "", "", "", "", "", -1, "", "", "", 0, 0, 0, false, 4,
 						java.util.List.of("", "", "", ""), java.util.List.of(0, 0, 0, 0)));
 	}
 

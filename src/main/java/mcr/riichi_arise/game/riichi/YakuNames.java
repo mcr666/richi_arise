@@ -22,6 +22,7 @@ public final class YakuNames {
 			Map.entry("JIKAZE", "自风牌"),
 			Map.entry("BAKAZE", "场风牌"),
 			Map.entry("IPPATSU", "一发"),
+			Map.entry("KITA", "拔北"), // 三麻拔北（每张北风 +1 翻，不走 mahjong4j，桥接层追加）
 			Map.entry("HOUTEI", "河底捞鱼"),
 			Map.entry("HAITEI", "海底捞月"),
 			Map.entry("REACH", "立直"),

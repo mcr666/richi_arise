@@ -5,12 +5,12 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * 牌山（纯数据）：136 张洗牌；摸牌从牌尾取（draw）。
+ * 牌山（纯数据）：四麻 136 张 / 三麻 108 张洗牌；摸牌从牌尾取（draw）。
  * 王牌区 14 张从牌头预留、不参与普通摸牌：10 张宝牌指示区（5 叠×2）+ 4 张岭上牌（杠后补牌）。
  * 杠后新宝：指示牌揭开下一叠（revealedIndicators +1）。
  */
 public class RiichiWall {
-	/** 牌山（摸牌取尾部，136 - 王牌 14 = 122 张） */
+	/** 牌山（摸牌取尾部，136/108 - 王牌 14 张） */
 	private final List<Integer> wall = new ArrayList<>(136);
 	/** 宝牌指示区 10 张（5 叠 × 2 张，叠序存放：2i=底张 2i+1=上张/指示牌） */
 	private final List<Integer> doraStacks = new ArrayList<>(10);
@@ -18,20 +18,56 @@ public class RiichiWall {
 	private final List<Integer> rinshanTiles = new ArrayList<>(4);
 	/** 已揭开的指示牌叠数（开局 1，每次杠 +1） */
 	private int revealedIndicators = 1;
+	/** 三麻将牌集：无 2m~8m（万子仅 1/9）与红五万，共 108 张（雀魂三麻） */
+	private final boolean sanma;
+	/** 玻璃之间：无红宝牌；每种牌 4 张中随机 3 张标记为透明牌（对局中固定） */
+	private final boolean glassMode;
 	/** 剧本牌山：编排段在 wall 中的起始下标（此段之前是随机填充，不参与剧本换牌） */
 	private int tailFrom;
 
 	public RiichiWall() {
-		for (int base : new int[] { 0, 10, 20 }) {
+		this(4, false);
+	}
+
+	public RiichiWall(int playerCount) {
+		this(playerCount, false);
+	}
+
+	/**
+	 * 按对局人数构建牌山。playerCount=3（三麻）时：
+	 * 万子只留 1m、9m 各 4 张（移除 2m~8m），无红五万；筒/索/字照旧 → 总数 108 张。
+	 * 王牌区仍 14 张（指示区 10 + 岭上 4）；岭上耗尽时杠/拔北由对局层禁止（见 RiichiGame）。
+	 * glassMode（玻璃之间）：不放入任何红五（每花色 5 共 4 张普通五），
+	 * 每种牌随机留 1 张不透明、其余 3 张打上 {@link mcr.riichi_arise.game.TileFlag#GLASS} 标志。
+	 */
+	public RiichiWall(int playerCount, boolean glassMode) {
+		this.sanma = playerCount == 3;
+		this.glassMode = glassMode;
+		boolean redFive = !glassMode;
+		if (sanma) {
+			for (int d : new int[] { 1, 9 })
+				for (int i = 0; i < 4; i++)
+					wall.add(d); // 万子仅 1m/9m，无红五万
+		} else {
 			for (int d = 1; d <= 9; d++)
 				// 每种 4 张；5 只放 3 张——第 4 张五由红五（0m/0p/0s）取代，保证总数 136 且每花色五共 4 张
-				for (int i = 0; i < (d == 5 ? 3 : 4); i++)
+				for (int i = 0; i < (d == 5 && redFive ? 3 : 4); i++)
+					wall.add(d);
+			if (redFive)
+				wall.add(0); // 红五万
+		}
+		for (int base : new int[] { 10, 20 }) {
+			for (int d = 1; d <= 9; d++)
+				for (int i = 0; i < (d == 5 && redFive ? 3 : 4); i++)
 					wall.add(base + d);
-			wall.add(base); // 红五
+			if (redFive)
+				wall.add(base); // 红五筒/索（三麻保留）
 		}
 		for (int d = 1; d <= 7; d++)
 			for (int i = 0; i < 4; i++)
 				wall.add(29 + d);
+		if (glassMode)
+			markGlassCopies();
 		Collections.shuffle(wall);
 		// 王牌区从牌头预留 14 张：10 张指示区 + 4 张岭上（均不参与普通摸牌）
 		for (int i = 0; i < 10; i++)
@@ -40,12 +76,33 @@ public class RiichiWall {
 			rinshanTiles.add(wall.remove(0));
 	}
 
+	/** 玻璃之间：每种牌（同牌面代码）的 4 张里随机挑 1 张保持不透明，其余 3 张打透明标志 */
+	private void markGlassCopies() {
+		java.util.Map<Integer, java.util.List<Integer>> groups = new java.util.LinkedHashMap<>();
+		for (int i = 0; i < wall.size(); i++)
+			groups.computeIfAbsent(wall.get(i), k -> new ArrayList<>()).add(i);
+		for (java.util.List<Integer> idx : groups.values()) {
+			Collections.shuffle(idx);
+			for (int k = 1; k < idx.size(); k++) {
+				int i = idx.get(k);
+				wall.set(i, mcr.riichi_arise.game.TileFlag.glass(wall.get(i)));
+			}
+		}
+	}
+
+	/** 是否玻璃之间（无红五、每张牌 3 透明 1 不透明） */
+	public boolean isGlassMode() {
+		return glassMode;
+	}
+
 	/**
 	 * 剧本牌山（拍视频用，临时）：drawOrder 为从牌尾开始依次会被摸到的牌（下标 0 最先摸到）。
 	 * 其余牌随机垫在牌头；王牌区仍按原规则从牌头预留，但第 1 叠（底张 / 指示牌）固定为
 	 * forcedDoraStack[0] / [1]（避免剧本里露出会重复的牌）。某张牌不足时静默跳过，不中断牌局。
 	 */
 	public RiichiWall(List<Integer> drawOrder, int[] forcedDoraStack) {
+		this.sanma = false; // 剧本牌山固定按四麻将牌集编排（136 张）
+		this.glassMode = false; // 剧本牌山不使用透明牌
 		for (int base : new int[] { 0, 10, 20 }) {
 			for (int d = 1; d <= 9; d++)
 				for (int i = 0; i < (d == 5 ? 3 : 4); i++)
@@ -106,9 +163,28 @@ public class RiichiWall {
 		return wall.remove(wall.size() - 1);
 	}
 
-	/** 岭上摸牌（杠后补牌，从王牌区岭上段取，与普通牌山无关），耗尽返回 -1 */
+	/**
+	 * 岭上摸牌（杠/拔北后补牌）：从王牌区岭上段取一张，同时从牌山底（远离摸牌端的一端）
+	 * 补一张进王牌，保证王牌区恒为 14 张（牌山总数因此减少 1 张，与日麻规则一致）。
+	 * 王牌耗尽（牌山已空、无法补充）返回 -1。
+	 */
 	public int rinshanDraw() {
-		return rinshanTiles.isEmpty() ? -1 : rinshanTiles.remove(rinshanTiles.size() - 1);
+		if (rinshanTiles.isEmpty())
+			return -1;
+		int code = rinshanTiles.remove(rinshanTiles.size() - 1);
+		if (!wall.isEmpty())
+			rinshanTiles.add(0, wall.remove(0)); // 牌山底补进王牌（补在岭上段最深处，不改变后续摸牌顺序）
+		return code;
+	}
+
+	/** 岭上剩余张数（三麻拔北/杠前须检查，耗尽则对局层禁止该操作） */
+	public int rinshanRemaining() {
+		return rinshanTiles.size();
+	}
+
+	/** 是否三麻将牌集（108 张，无 2m~8m 与红五万） */
+	public boolean isSanma() {
+		return sanma;
 	}
 
 	public boolean isEmpty() {
@@ -127,7 +203,7 @@ public class RiichiWall {
 		return doras;
 	}
 
-	/** 当前有效宝牌列表（指示牌 → 指示牌下一张，供计分与显示） */
+	/** 当前有效宝牌列表（指示牌 → 指示牌下一张，供计分与显示；按本牌山规则映射） */
 	public List<Integer> actualDoras() {
 		List<Integer> doras = new ArrayList<>();
 		for (int ind : revealedDoras())
@@ -151,8 +227,20 @@ public class RiichiWall {
 		return ura;
 	}
 
-	/** 指示牌 → 宝牌（下一张）：万饼索 9 绕回 1；风牌东南西北循环；三元牌白→发→中→白循环 */
-	public static int doraTileOf(int indicator) {
+	/** 指示牌 → 宝牌（本牌山规则）：三麻万子 1↔9 环状互推，其余同静态四麻映射。
+	 *  对局层（RiichiGame）也须用本方法而非静态版，保证三麻宝牌映射一致 */
+	public int doraTileOf(int indicator) {
+		indicator = mcr.riichi_arise.game.TileFlag.base(indicator);
+		if (sanma && indicator < 30 && indicator / 10 == 0) {
+			int digit = indicator % 10 == 0 ? 5 : indicator % 10;
+			return digit == 1 ? 9 : 1; // 三麻万子仅 1/9：一万↔九万互推（红五万不存在，digit=5 防御归 1）
+		}
+		return doraTileOfStatic(indicator);
+	}
+
+	/** 指示牌 → 宝牌（下一张，四麻标准映射）：万饼索 9 绕回 1；风牌东南西北循环；三元牌白→发→中→白循环 */
+	public static int doraTileOfStatic(int indicator) {
+		indicator = mcr.riichi_arise.game.TileFlag.base(indicator);
 		if (indicator >= 30) {
 			int d = indicator - 30;
 			if (d < 4)

@@ -327,6 +327,12 @@ public final class RichiNetManager {
 			sendError(session, "缺少 action 字段");
 			return;
 		}
+		// 拔北（三麻）：无参动作，data 置空走 externalAction → applyAction 的 case "kita"
+		// （回合选项 your_turn 推送的 options 含 "kita" 时，外部程序回发本动作即可）
+		if (RichiNetProtocol.A_KITA.equals(action)) {
+			exec(session, action, "");
+			return;
+		}
 		// data 透传：chi 用组合索引，ankan/kakan 用手牌下标
 		String data = RichiNetProtocol.str(msg, "data");
 		exec(session, action, data == null ? "" : data);
@@ -436,6 +442,7 @@ public final class RichiNetManager {
 		o.addProperty("turn_seat", st.turnSeat);
 		o.addProperty("open_hand", st.openHand);
 		o.addProperty("game_type", st.gameType);
+		o.addProperty("player_count", st.playerCount); // 4=四麻 / 3=三麻（三麻座位 3 恒空）
 		o.addProperty("revealed_indicators", st.revealedIndicators);
 		// 每家视角：本人座位 / openHand / 订阅者不隐藏 → 完整手牌，否则隐藏他家
 		boolean viewerIsPlayer = viewerUuid != null && st.externalUuids.contains(viewerUuid);
@@ -458,6 +465,10 @@ public final class RichiNetManager {
 		for (int s = 0; s < 4; s++)
 			melds.add(st.melds[s] == null ? "" : st.melds[s]);
 		o.add("melds", melds);
+		JsonArray kita = new JsonArray(); // 拔北数（三麻）：不算副露，独立字段
+		for (int s = 0; s < 4; s++)
+			kita.add(st.kita[s]);
+		o.add("kita", kita);
 		o.addProperty("dora_wall", st.doraWall == null ? "" : st.doraWall);
 		JsonArray points = new JsonArray();
 		for (int p : st.points)

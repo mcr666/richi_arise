@@ -10,6 +10,7 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 
+import mcr.riichi_arise.RichiConfig;
 import mcr.riichi_arise.network.MahjongLobbyPayloads;
 import mcr.riichi_arise.network.VoicePayloads;
 import mcr.riichi_arise.voice.VoiceCache;
@@ -31,6 +32,9 @@ public class VoiceSettingsScreen extends Screen {
 	private static final int VISIBLE = 14;
 	private static final int ROW_H = 18;
 	private static final int ROW_GAP = 20;
+	/** 角色音量滑块行高与轨道宽 */
+	private static final int SLIDER_H = 18;
+	private static final int SLIDER_TRACK_W = 100;
 
 	private final BlockPos origin;
 	private final List<VoiceCharacters.Character> chars;
@@ -38,6 +42,8 @@ public class VoiceSettingsScreen extends Screen {
 	private final Set<String> downloading = new HashSet<>();
 	private String currentVoice;
 	private int scroll;
+	/** 角色音量滑块是否正在拖动 */
+	private boolean draggingVolume;
 
 	public VoiceSettingsScreen(BlockPos origin) {
 		super(Component.translatable("gui.riichi_arise.voice.title"));
@@ -77,7 +83,46 @@ public class VoiceSettingsScreen extends Screen {
 
 	/** 视口内第 row 行（0 起）的角色行 y 坐标 */
 	private int rowY(int row) {
-		return top() + 38 + 16 + row * ROW_GAP;
+		return top() + 58 + 16 + row * ROW_GAP;
+	}
+
+	/** 角色音量滑块行 y */
+	private int sliderY() {
+		return top() + 38;
+	}
+
+	/** 音量轨道起点 x（右侧留百分比文字 + 边距） */
+	private int sliderTrackX() {
+		return left() + PANEL_W - 8 - 36 - SLIDER_TRACK_W;
+	}
+
+	/** 按横坐标设置音量（clamp 0~1）并保存配置，实时作用于播放线程 */
+	private void setVolume(double mx) {
+		double v = (mx - sliderTrackX()) / SLIDER_TRACK_W;
+		v = Math.max(0.0, Math.min(1.0, v));
+		RichiConfig.VOICE_VOLUME.set(v);
+		RichiConfig.SPEC.save();
+	}
+
+	/** 角色音量滑块：标签 + 轨道（填充）+ 百分比 + 圆点 */
+	private void drawVolumeSlider(GuiGraphics graphics) {
+		int left = left();
+		int y = sliderY();
+		int trackX = sliderTrackX();
+		int trackY = y + (SLIDER_H - 6) / 2;
+		graphics.fill(left, y, left + PANEL_W, y + SLIDER_H, 0x30A0A0A0);
+		graphics.drawString(this.font,
+				Component.translatable("gui.riichi_arise.voice.volume").getString(), left + 8, y + 5, 0xFFFFFF, false);
+		// 轨道底色 + 已填充部分
+		graphics.fill(trackX, trackY, trackX + SLIDER_TRACK_W, trackY + 6, 0x808080);
+		double vol = RichiConfig.VOICE_VOLUME.get().doubleValue();
+		int fill = (int) Math.round(SLIDER_TRACK_W * vol);
+		graphics.fill(trackX, trackY, trackX + fill, trackY + 6, 0xFFCC66);
+		// 百分比文字
+		graphics.drawString(this.font, Math.round(vol * 100) + "%", trackX + SLIDER_TRACK_W + 6, y + 5, 0xFFCC66, false);
+		// 滑块圆点
+		int knobX = trackX + fill;
+		graphics.fill(knobX - 3, y + 2, knobX + 3, y + SLIDER_H - 2, 0xFFFFFF);
 	}
 
 	@Override
@@ -98,8 +143,10 @@ public class VoiceSettingsScreen extends Screen {
 				Component.translatable("gui.riichi_arise.voice.btn_off").getString(), mouseX, mouseY, true);
 		drawBtn(graphics, left + PANEL_W / 2 + 2, top + 16, PANEL_W / 2 - 2, 18,
 				Component.translatable("gui.riichi_arise.voice.btn_back").getString(), mouseX, mouseY, true);
+		// 角色音量滑块
+		drawVolumeSlider(graphics);
 		// 上翻
-		drawBtn(graphics, left, top + 38, PANEL_W, 14, "▲", mouseX, mouseY, scroll > 0);
+		drawBtn(graphics, left, top + 58, PANEL_W, 14, "▲", mouseX, mouseY, scroll > 0);
 		// 角色列表行（灰色半透明，悬停高亮；选中高亮文字；下载中禁用暗灰）
 		if (scroll > maxScroll())
 			scroll = maxScroll();
@@ -163,8 +210,16 @@ public class VoiceSettingsScreen extends Screen {
 			onClose();
 			return true;
 		}
+		// 角色音量滑块：点击轨道定位并进入拖动
+		int sx = sliderTrackX();
+		if (mouseY >= sliderY() && mouseY < sliderY() + SLIDER_H
+				&& mouseX >= sx - 6 && mouseX < sx + SLIDER_TRACK_W + 40) {
+			setVolume(mouseX);
+			draggingVolume = true;
+			return true;
+		}
 		// 上翻
-		if (inBtn(mouseX, mouseY, left, top + 38, PANEL_W, 14)) {
+		if (inBtn(mouseX, mouseY, left, top + 58, PANEL_W, 14)) {
 			scroll = Math.max(0, scroll - VISIBLE);
 			return true;
 		}
@@ -203,6 +258,21 @@ public class VoiceSettingsScreen extends Screen {
 		else
 			scroll = Math.max(0, scroll - 1);
 		return true;
+	}
+
+	@Override
+	public boolean mouseDragged(double mx, double my, int button, double dx, double dy) {
+		if (button == 0 && draggingVolume) {
+			setVolume(mx);
+			return true;
+		}
+		return super.mouseDragged(mx, my, button, dx, dy);
+	}
+
+	@Override
+	public boolean mouseReleased(double mx, double my, int button) {
+		draggingVolume = false;
+		return super.mouseReleased(mx, my, button);
 	}
 
 	private boolean inBtn(double mx, double my, int x, int y, int w, int h) {

@@ -26,8 +26,12 @@ public final class Mahjong4jBridge {
 	private Mahjong4jBridge() {
 	}
 
+	/** 北风牌面码（4z）：三麻拔北专用（与 RiichiGame.TILE_PEI / TableLayout.TILE_PEI 一致） */
+	private static final int TILE_PEI = 33;
+
 	/** 内部代码 → Mahjong4j Tile */
 	public static Tile toTile(int code) {
+		code = mcr.riichi_arise.game.TileFlag.base(code); // 透明牌标志位不参与判定
 		if (code < 30) {
 			int suit = code / 10;
 			int digit = code % 10;
@@ -160,6 +164,19 @@ public final class Mahjong4jBridge {
 	public static WinResult score(List<Integer> handWithWinTile, List<Fuuro> melds, int winnerSeat,
 			int dealerSeat, int roundWind, boolean tsumo, boolean riichi, boolean ippatsu,
 			Flags flags, List<Integer> doraIndicators) {
+		return score(handWithWinTile, melds, winnerSeat, dealerSeat, roundWind, tsumo, riichi, ippatsu,
+				flags, doraIndicators, 0);
+	}
+
+	/**
+	 * 役种 + 翻符 + 点数结算（三麻拔北版）。
+	 *
+	 * @param kitaHan 和牌者拔北数（三麻）：每张 +1 翻，在宝牌之后追加（役名 KITA/拔北），
+	 *                计入 13 翻累计役满的翻数；不影响"有役才能和"的判定（无役时拔北不单独成和）
+	 */
+	public static WinResult score(List<Integer> handWithWinTile, List<Fuuro> melds, int winnerSeat,
+			int dealerSeat, int roundWind, boolean tsumo, boolean riichi, boolean ippatsu,
+			Flags flags, List<Integer> doraIndicators, int kitaHan) {
 		try {
 			int last = handWithWinTile.get(handWithWinTile.size() - 1);
 			int[] comp = toComp(handWithWinTile); // 含和牌张（Mahjong4j 要求全量）
@@ -333,7 +350,8 @@ public final class Mahjong4jBridge {
 				for (int t : f.tiles)
 					allCodes.add(t);
 			List<Integer> doraHits = new ArrayList<>(), uraHits = new ArrayList<>(), redHits = new ArrayList<>();
-			for (int c : allCodes) {
+			for (int raw : allCodes) {
+				int c = mcr.riichi_arise.game.TileFlag.base(raw); // 透明牌标志不影响宝牌判定
 				if (c == 0 || c == 10 || c == 20)
 					redHits.add(c);
 				else if (doraIndicators.contains(c))
@@ -352,6 +370,17 @@ public final class Mahjong4jBridge {
 					ura += fullComp[ind.ordinal()];
 				if (ura > 0)
 					han += ura;
+			}
+			// 拔北（三麻）：每张拔出的北风 +1 翻（不走 mahjong4j 役列表，与宝牌同类附加翻；
+			// 计入下方 13 翻累计役满）。不进役名列表——报番时由 RiichiGame 作为宝牌计数条目
+			// （表/红之后、里之前）播报，语音走宝牌计数通道
+			if (kitaHan > 0)
+				han += kitaHan;
+			// 拔出的北风若本身是宝牌（三麻指示牌为西 → 宝牌为北）：每张再按宝牌 +1 翻，并计入宝牌命中明细
+			if (kitaHan > 0 && doraIndicators.contains(TILE_PEI)) {
+				han += kitaHan;
+				for (int i = 0; i < kitaHan; i++)
+					doraHits.add(TILE_PEI);
 			}
 			// 海底捞月（最后一自摸）/ 河底捞鱼（最后一张荣和）
 			if (flags.haitei() && tsumo) {

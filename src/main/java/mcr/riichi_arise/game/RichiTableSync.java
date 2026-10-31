@@ -46,9 +46,9 @@ public final class RichiTableSync {
 			if (p.distanceToSqr(center.x, center.y, center.z) > RANGE * RANGE)
 				continue;
 			net.neoforged.neoforge.network.PacketDistributor.sendToPlayer(p, new MahjongTablePayload.ViewMessage(
-					origin.asLong(), -1, false, 0, empty4, zeros, zeros, empty4, empty4,
+					origin.asLong(), -1, false, 0, empty4, zeros, zeros, empty4, empty4, zeros,
 					zeros, zeros, zeros, zeros, empty4, empty4, empty4, empty4,
-					"", 0, 0, -1, 0, 0, 0, -1, -1, -1, 0, ""));
+					"", 0, 0, -1, 0, 0, 0, 0, -1, -1, -1, 0, 4, "", new int[4]));
 		}
 	}
 
@@ -89,15 +89,18 @@ public final class RichiTableSync {
 				hands[s] = st.hands[s] == null ? "" : st.hands[s];
 				hidden[s] = 0;
 			} else {
-				hands[s] = "";
+				// 隐藏手牌仍下发"透明牌真实牌面"（玻璃牌可透视），其余牌为未知占位 '?'；
+				// 客户端据 hidden 数量渲染牌背，透明牌处替换为玻璃牌面
+				hands[s] = MahjongTileNotation.maskHidden(st.hands[s] == null ? "" : st.hands[s]);
 				hidden[s] = st.handCodes(s).size();
 			}
 			tedashi[s] = st.lastTedashi[s];
 			names[s] = seatName(level, st, s);
 			// AI 形象只要座位是 AI 就下发：对局中与终局都按本局 aiSeat（终局保持形象不消失）；
-			// 等待阶段再补充"下一局预约"（预约座位与洗牌后的实际座位无关，终局若按预约出形象会在人类座位上多出一个假玩家）
-			boolean aiSeat = st.aiSeat[s]
-					|| (st.phase == RichiTableState.PHASE_WAITING && st.reservedAI[s]);
+			// 等待阶段再补充"下一局预约"（预约座位与洗牌后的实际座位无关，终局若按预约出形象会在人类座位上多出一个假玩家）。
+			// 三麻（playerCount=3）不存在的第 4 席恒不下发（四麻切三麻后该席形象必须消失）
+			boolean aiSeat = s < st.playerCount
+					&& (st.aiSeat[s] || (st.phase == RichiTableState.PHASE_WAITING && st.reservedAI[s]));
 			if (aiSeat) {
 				avatarForms[s] = st.aiAvatarForms[s] == null ? "" : st.aiAvatarForms[s];
 				avatarNames[s] = st.aiAvatarNames[s] == null ? "" : st.aiAvatarNames[s];
@@ -112,11 +115,13 @@ public final class RichiTableSync {
 		net.neoforged.neoforge.network.PacketDistributor.sendToPlayer(p, new MahjongTablePayload.ViewMessage(
 				origin.asLong(), viewerSeat, st.openHand, animate,
 				hands, hidden, tedashi, Arrays.copyOf(st.rivers, 4), Arrays.copyOf(st.melds, 4),
+				Arrays.copyOf(st.kita, 4),
 				Arrays.copyOf(st.riichiRiverIdx, 4), Arrays.copyOf(st.riichiSticks, 4),
 				Arrays.copyOf(st.handsExposed, 4), Arrays.copyOf(st.points, 4),
 				names, avatarForms, avatarNames, avatarSkins, MahjongTileNotation.format(doraFiltered), st.revealedIndicators,
-				st.wallCodes().size(), st.turnSeat, st.round, st.roundWind, st.honba,
-				st.selectedSeat, st.selectedIndex, st.drawnSeat, st.phase, st.banner == null ? "" : st.banner));
+				st.wallCodes().size(), st.turnSeat, st.round, st.roundWind, st.honba, st.carriedSticks,
+				st.selectedSeat, st.selectedIndex, st.drawnSeat, st.phase, st.playerCount,
+				st.banner == null ? "" : st.banner, Arrays.copyOf(st.lastDiscardPos, 4)));
 	}
 
 	/** 座位显示名：人类 = 游戏档案名，AI = 流派 AI 名，空位 = 空串 */

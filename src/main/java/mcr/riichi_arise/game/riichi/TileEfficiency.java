@@ -27,6 +27,7 @@ public final class TileEfficiency {
 	// ==================================================================
 
 	public static int codeToIndex(int code) {
+		code = mcr.riichi_arise.game.TileFlag.base(code); // 透明牌标志位不参与索引换算
 		if (code == 0)
 			return 4; // 红5万
 		if (code < 10)
@@ -719,12 +720,12 @@ public final class TileEfficiency {
 		int[] prefDiscard = new int[34];
 		java.util.Arrays.fill(prefDiscard, -1);
 		for (int hi = 0; hi < n; hi++) {
-			int cc = handCodes.get(hi);
+			int cc = mcr.riichi_arise.game.TileFlag.base(handCodes.get(hi));
 			int dd = codeToIndex(cc);
 			if (prefDiscard[dd] < 0)
 				prefDiscard[dd] = hi;
-			else if (!(cc < 30 && cc % 10 == 0) && handCodes.get(prefDiscard[dd]) < 30
-					&& handCodes.get(prefDiscard[dd]) % 10 == 0)
+			else if (!(cc < 30 && cc % 10 == 0) && mcr.riichi_arise.game.TileFlag.base(handCodes.get(prefDiscard[dd])) < 30
+					&& mcr.riichi_arise.game.TileFlag.base(handCodes.get(prefDiscard[dd])) % 10 == 0)
 				prefDiscard[dd] = hi; // 已存红五，用普通牌替换（保留红五宝牌）
 		}
 
