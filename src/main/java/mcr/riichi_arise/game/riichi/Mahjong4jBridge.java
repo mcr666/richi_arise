@@ -273,16 +273,22 @@ public final class Mahjong4jBridge {
 				int peiko = 0;
 				for (org.mahjong4j.hands.MentsuComp mc : hands.getMentsuCompSet())
 					peiko = Math.max(peiko, detectPeiko(mc.getShuntsuList()));
+				// 以本手牌的全部分解重算为准：mahjong4j 给出的二杯口可能来自与顺子无关的重复计数，
+				// 分解里只有一对相同顺子时一律按一杯口计（撤销二杯口时去掉原本已加的两杯口翻）
+				if (hasRyanpeiko) {
+					names.remove(NormalYaku.RYANPEIKO.name());
+					han -= NormalYaku.RYANPEIKO.getHan();
+					hasRyanpeiko = false;
+				}
 				if (peiko >= 2) {
 					if (hasIpeiko) { // 升级为二杯口：撤掉已计的一杯口
 						names.remove(NormalYaku.IPEIKO.name());
 						han -= NormalYaku.IPEIKO.getHan();
+						hasIpeiko = false;
 					}
-					if (!hasRyanpeiko) {
-						names.add(NormalYaku.RYANPEIKO.name());
-						han += NormalYaku.RYANPEIKO.getHan();
-					}
-				} else if (peiko == 1 && !hasIpeiko && !hasRyanpeiko) {
+					names.add(NormalYaku.RYANPEIKO.name());
+					han += NormalYaku.RYANPEIKO.getHan();
+				} else if (peiko == 1 && !hasIpeiko) {
 					names.add(NormalYaku.IPEIKO.name());
 					han += NormalYaku.IPEIKO.getHan();
 				}

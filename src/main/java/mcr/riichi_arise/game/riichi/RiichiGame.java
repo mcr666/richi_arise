@@ -295,6 +295,7 @@ public class RiichiGame {
 		discardFromPon = false;
 		java.util.Arrays.fill(ippatsu, false);
 		java.util.Arrays.fill(st.kita, 0);
+		java.util.Arrays.fill(st.kitaGlass, 0);
 		java.util.Arrays.fill(st.riichiRiverIdx, -1);
 		java.util.Arrays.fill(st.riichiPending, false);
 		java.util.Arrays.fill(st.handsExposed, RichiTableState.HAND_STAND);
@@ -303,6 +304,12 @@ public class RiichiGame {
 		// 玻璃之间：新一局重新洗牌"每个观者看到的透明牌位置"
 		mcr.riichi_arise.game.RichiTableSync.resetGlassShuffle();
 		st.drawnSeat = -1;
+		// 整桌投影（外部接管）不本地发牌：四家手牌由外部快照下发，这里只清空牌桌
+		if (st.mirrorAll) {
+			for (RiichiPlayer p : ps)
+				p.hand.clear();
+			return;
+		}
 		// 读秒库按思考时限档位重置（此前硬编码 20s，覆盖开局套用的档位）
 		for (int i = 0; i < 4; i++)
 			st.longBank[i] = RichiTableState.THINK_PRESETS[st.thinkIdx][1] * 20;
@@ -370,6 +377,8 @@ public class RiichiGame {
 
 	/** 摸牌回合开始：牌尾摸一张，短考重置，检查九种九牌/自摸/立直/杠选项 */
 	private void beginTurn(int seat) {
+		if (st.mirrorAll)
+			return; // 整桌投影：牌局完全由外部快照驱动，牌桌不自己摸牌推进
 		// 剧本（临时）：前 10 巡摸牌结束后（第 11 巡首次摸牌前），三家手牌瞬间换为目标牌
 		if (film != null && !film.isInjected() && filmDraws >= FilmScenario.QUIET_DRAWS)
 			film.inject(ps);
@@ -452,13 +461,13 @@ public class RiichiGame {
 		sendSelfOptions(seat);
 		// 立直后摸切（日麻规则：立直者打牌锁定）：无自摸/暗杠/拔北机会则自动打出刚摸的牌（AI 与人类一致）；
 		// 暗杠需岭上有余，岭上耗尽时同样视为无机会；立直家摸到北时可选拔北（canKita），选跳过则摸切
-		if (ps[seat].riichi && !(justDrew && canWinNow(seat, true))
+		if (ps[seat].riichi && !st.mirrorAll && !(justDrew && canWinNow(seat, true))
 				&& (findAnkan(seat) < 0 || wall.rinshanRemaining() <= 0) && !canKita(seat)) {
 			int last = ps[seat].hand.size() - 1;
 			schedule((8 + level.random.nextInt(6)) * aiMul(), () -> playerDiscard(seat, last));
 			return;
 		}
-		if (ps[seat].ai) {
+		if (ps[seat].ai && !st.mirrorAll) {
 			int delay = (8 + level.random.nextInt(8)) * aiMul();
 			// 副露（吃/碰）后先停 1s 再切牌（原先"切牌后再停 1s"的节奏移到出牌之前）
 			if (!drew)
@@ -494,7 +503,14 @@ public class RiichiGame {
 			opts.add("kita");
 		// 外部程序（net 接入）座位：无 ServerPlayer，回合选项改由 net 层推送（含手牌）
 		if (st.externalUuids.contains(ps[seat].uuid)) {
-			mcr.riichi_arise.net.RichiNetManager.pushYourTurn(this, seat, opts);
+			if (st.mirrorUuids.contains(ps[seat].uuid)) {
+				// 镜面座位：手牌由外部牌谱全权投影，这里只通知"该你出牌了"
+				// （可选动作 opts 照旧附带，供桥决定是否在牌桌侧自动执行自摸/立直/杠）
+				mcr.riichi_arise.net.RichiNetManager.pushMirrorTurn(this, seat, opts,
+						justDrew && !ps[seat].hand.isEmpty() ? ps[seat].hand.get(ps[seat].hand.size() - 1) : -1);
+			} else {
+				mcr.riichi_arise.net.RichiNetManager.pushYourTurn(this, seat, opts);
+			}
 			return;
 		}
 		if (ps[seat].ai)
@@ -661,6 +677,8 @@ public class RiichiGame {
 
 	/** 打出后开响应窗口：荣和 > 碰/明杠 > 吃（下家），先响应先生效；多家可同时荣和 */
 	private void openClaimWindow(int discarder, int tile, boolean pauseAdvance) {
+		if (st.mirrorAll)
+			return; // 整桌投影：吃碰杠/荣和判定由外部牌谱决定，牌桌不开响应窗口、不推进下家
 		claimDiscarder = discarder;
 		claimTile = tile;
 		discarderSeat = discarder; // 延迟副露决策任务引用
@@ -715,7 +733,10 @@ public class RiichiGame {
 					anyHumanOption = true;
 					// 外部程序（net 接入）：无 ServerPlayer，响应选项由 net 层推送
 					if (st.externalUuids.contains(ps[seat].uuid)) {
-						mcr.riichi_arise.net.RichiNetManager.pushClaimOptions(this, seat, withClaimTile(opts));
+						if (st.mirrorUuids.contains(ps[seat].uuid))
+							mcr.riichi_arise.net.RichiNetManager.pushMirrorClaim(this, seat, withClaimTile(opts));
+						else
+							mcr.riichi_arise.net.RichiNetManager.pushClaimOptions(this, seat, withClaimTile(opts));
 					} else {
 						ServerPlayer p = st.playerOf(level, seat);
 						if (p != null) {
@@ -1246,9 +1267,14 @@ public class RiichiGame {
 			}
 		if (peiIdx < 0)
 			return;
+		// 玻璃之间：拔出的北有可能是该种的"普通牌"，逐张记录其透明位（渲染按位选玻璃/普通牌体）
+		boolean peiGlass = mcr.riichi_arise.game.TileFlag.isGlass(p.hand.get(peiIdx));
 		p.hand.remove(peiIdx);
 		p.kitaCount++;
+		int kitaBit = st.kita[seat];
 		st.kita[seat]++;
+		if (peiGlass)
+			st.kitaGlass[seat] |= 1 << Math.min(30, kitaBit);
 		tenhouVoid = true; // 本局已拔北：天地和不再成立（雀魂规则）
 		anyCall = true; // 拔北同鸣牌：此后不能再成立双立直
 		kyuushuAvailable = false; // 拔北后九种九牌途中流局作废
@@ -1261,6 +1287,9 @@ public class RiichiGame {
 		int rinshan = wall.rinshanDraw();
 		if (rinshan >= 0)
 			p.hand.add(rinshan);
+		// 拔北后立刻理牌：移出北风 + 追加岭上牌会让手牌乱序；连续拔北时若不理牌会一直保持错位。
+		// 但必须保留末位 = 刚摸的岭上牌（立直摸切/摸切判定/摸牌位渲染都按末位认刚摸的牌，整手排序会切错牌）
+		p.sortHandKeepingDrawn();
 		rinshanFlag = true;
 		lastTileHand = wall.isEmpty();
 		writeBack(); // 拔北数经快照 kita 字段同步（不算副露）
@@ -1877,13 +1906,8 @@ public class RiichiGame {
 						? mcr.riichi_arise.voice.VoiceEvents.TUMO
 						: mcr.riichi_arise.voice.VoiceEvents.RON);
 		mcr.riichi_arise.game.MahjongLobby.broadcastSync(level, origin, st);
-		// 预置点数变化数据：玩家关闭和牌结算界面后客户端本地立即展示点数变化（不必等其他人确认）
-		for (int seat = 0; seat < pc(); seat++) {
-			ServerPlayer p = st.playerOf(level, seat);
-			if (p != null)
-				mcr.riichi_arise.network.MahjongPointDeltaPayload.sendPrepare(p, origin.asLong(), pc(), seatNames(),
-						pointsBeforeRound, st.points);
-		}
+		// 点数变化数据不在此时下发：多人荣和要等所有和牌家的结算界面都展示完，
+		// 由 showPointDelta 统一推送（否则先确认的和牌家早早弹出点数结算，与还没看的结算界面叠在一起）
 		// 结算确认门控：全员（人类）确定或 10s 倒计时结束 → 清桌续局 / 终局
 		// 连庄规则：庄家和牌或流局 → 本场+1、庄家连庄；庄家输牌 → 局数+1、本场清零
 		// 荒牌流局修正：庄家听牌才连庄，庄家未听牌 → 轮庄（推进局目）
@@ -1926,7 +1950,8 @@ public class RiichiGame {
 
 	/**
 	 * 推送队列里的下一个结算界面（含该家的 act 语音与报番），并重置确认状态与兜底计时。
-	 * 多家荣和逐个展示：前一家确认/超时后才推下一家，语音与界面同步、不会互相打断；队列空 → 进点数变化界面。
+	 * 多家荣和逐家展示（前一家确认/超时后才推下一家，语音与界面同步、不会互相打断），
+	 * 但整局只结算一次：队列全部展示完后才统一进入点数变化界面。
 	 */
 	private void showNextSettlement() {
 		if (!settleWaiting || settlePhase != 1)
@@ -1934,6 +1959,8 @@ public class RiichiGame {
 		cancelSettleTask();
 		SettlementShow next = settlementQueue.poll();
 		if (next == null) {
+			// 所有和牌家的结算界面都展示完毕：先关掉这些界面，再统一推送点数结算
+			closeAllSettlements();
 			showPointDelta();
 			return;
 		}
@@ -1975,6 +2002,16 @@ public class RiichiGame {
 		sendToSpectators(p -> MahjongSettlementPayload.sendTo(p, s));
 	}
 
+	/** 关闭各家（含观战者）的和牌结算界面 */
+	private void closeAllSettlements() {
+		for (int seat = 0; seat < pc(); seat++) {
+			ServerPlayer p = st.playerOf(level, seat);
+			if (p != null)
+				MahjongSettlementPayload.sendClose(p);
+		}
+		sendToSpectators(MahjongSettlementPayload::sendClose);
+	}
+
 	/** 结算阶段 1 结束 → 推送点数变化界面（阶段 2；客户端动画+3s 倒计时后自动确认） */
 	private void showPointDelta() {
 		if (!settleWaiting || settlePhase != 1)
@@ -2007,17 +2044,13 @@ public class RiichiGame {
 		pendingFan.clear();
 		settleTask = null;
 		// 关闭各家的结算界面与点数变化界面
+		closeAllSettlements();
 		for (int seat = 0; seat < 4; seat++) {
 			ServerPlayer p = st.playerOf(level, seat);
-			if (p != null) {
-				MahjongSettlementPayload.sendClose(p);
+			if (p != null)
 				mcr.riichi_arise.network.MahjongPointDeltaPayload.sendClose(p);
-			}
 		}
-		sendToSpectators(p -> {
-			MahjongSettlementPayload.sendClose(p);
-			mcr.riichi_arise.network.MahjongPointDeltaPayload.sendClose(p);
-		});
+		sendToSpectators(mcr.riichi_arise.network.MahjongPointDeltaPayload::sendClose);
 		// 聊天播报在结算界面全部消失后发出
 		if (!pendingChat.isEmpty()) {
 			broadcast(pendingChat);
@@ -2241,6 +2274,97 @@ public class RiichiGame {
 		return true;
 	}
 
+	/** 外部程序（net 端口 mirror 源）驱动本家整手出牌：直接切到指定座位并打出手牌。
+	 *  绕过真人交互的 HUD/倒计时清理（该座位没有 ServerPlayer），其余与 playerDiscard 完全一致。
+	 *  返回 false = 未轮到此座位或下标非法。 */
+	public boolean mirrorDiscard(int seat, int index) {
+		if (!waitingDiscard || turn != seat)
+			return false;
+		RiichiPlayer p = ps[seat];
+		if (index < 0 || index >= p.hand.size())
+			return false;
+		// 立直宣言配牌：镜面操作不做"打后仍听牌"校验（外部牌谱已成立立直），按宣言牌直接打出
+		if (pendingRiichi)
+			pendingRiichi = false;
+		if (p.riichi && ippatsu[seat])
+			ippatsu[seat] = false;
+		p.discardCount++;
+		discardsThisHand++;
+		kyuushuAvailable = false;
+		houteiFlag = lastTileHand;
+		lastTileHand = false;
+		rinshanFlag = false;
+		if (st.turnInLong)
+			st.longBank[seat] = (int) Math.max(0, st.turnDeadline - level.getGameTime());
+		waitingDiscard = false;
+		justDrew = false;
+		boolean tsumogiri = st.drawnSeat == seat && index == p.hand.size() - 1;
+		st.lastTedashi[seat] = tsumogiri ? 0 : 1;
+		boolean wasDrawn = st.drawnSeat == seat;
+		st.lastDiscardPos[seat] = index;
+		st.drawnSeat = -1;
+		st.clearSelection();
+		p.tempFuriten = false;
+		int code = p.hand.remove(index);
+		boolean riichiDeclared = pendingRiichi;
+		p.sortHand();
+		// 镜面接入时 river 已整体投影（可能已含本次这张），避免重复追加
+		if (p.river.isEmpty() || p.river.get(p.river.size() - 1) != code || wasDrawn)
+			p.river.add(code);
+		if (st.riichiPending[seat]) {
+			st.riichiPending[seat] = false;
+			st.riichiRiverIdx[seat] = p.river.size() - 1;
+		}
+		if (riichiDeclared) {
+			p.riichi = true;
+			p.doubleRiichi = p.discardCount < 2 && !anyCall;
+			st.riichiSticks[seat]++;
+			st.riichiRiverIdx[seat] = p.river.size() - 1;
+			st.points[seat] -= 1000;
+			p.points -= 1000;
+			ippatsu[seat] = true;
+			pendingRiichi = false;
+			setBanner(p.name + "立直");
+		}
+		writeBack();
+		MahjongGameLog.turnEvent(level, origin, seat, "d",
+				MahjongTileNotation.format(List.of(code)) + (riichiDeclared ? "|r" : ""));
+		openClaimWindow(seat, code, false);
+		return true;
+	}
+
+	/** 内部回合计时/响应窗口读写（仅 net 镜面接入使用） */
+	public long mirrorClaimWindowEnd() {
+		return claimWindowEnd;
+	}
+
+	/** 响应窗口开启中（谁该出牌暂未定：等各家表态或窗口保底推进） */
+	public boolean mirrorWaitingDiscardAfterClaim() {
+		return claimWindowEnd > 0;
+	}
+
+	public boolean mirrorWaitingDiscard() {
+		return waitingDiscard;
+	}
+
+	public int mirrorTurnSeat() {
+		return turn;
+	}
+
+	/** 牌河最后一张是否可被 seat 鸣牌（镜面放铳判定：外部牌河出现他家鸣牌/和牌时，令本家打出该牌） */
+	public int mirrorLastRiverTile(int seat) {
+		if (seat < 0 || seat >= 4)
+			return -1;
+		java.util.List<Integer> river = ps[seat].river;
+		return river.isEmpty() ? -1 : river.get(river.size() - 1);
+	}
+
+	/** 镜面操作失败时的兜底：本家强制摸切（tick 超时路径，带断连/卡死保护） */
+	public void mirrorAutoDiscard() {
+		if (waitingDiscard && turn >= 0)
+			autoDiscard();
+	}
+
 	/** 按玩家 uuid 定位座位（外部程序用；-1 = 不在本局） */
 	public int findSeat(String uuid) {
 		return seatOf(uuid);
@@ -2412,6 +2536,23 @@ public class RiichiGame {
 		return ps[seat];
 	}
 
+	/** 镜面中途接管：把座位改成外部程序（UUID/名字原地替换，手牌点数等沿用当前对局） */
+	public void renameSeat(int seat, String uuid, String name) {
+		RiichiPlayer old = ps[seat];
+		RiichiPlayer p = new RiichiPlayer(seat, uuid, name, false, old.points);
+		p.hand.addAll(old.hand);
+		p.melds.addAll(old.melds);
+		p.river.addAll(old.river);
+		p.riichi = old.riichi;
+		p.kitaCount = old.kitaCount;
+		p.discardCount = old.discardCount;
+		p.firstDrawDone = old.firstDrawDone;
+		ps[seat] = p;
+		st.players[seat] = uuid;
+		st.aiSeat[seat] = false;
+		writeBack();
+	}
+
 	/** 桌角原点（net 层推送定位用） */
 	public net.minecraft.core.BlockPos origin() {
 		return origin;
@@ -2430,6 +2571,180 @@ public class RiichiGame {
 	/** 牌局状态（net 层读取渲染层数据源） */
 	public RichiTableState tableState() {
 		return st;
+	}
+
+	/** 当前有牌局进行中的座位数（三麻 3 / 四麻 4） */
+	public int playerCount() {
+		return pc();
+	}
+
+	/** 当前打牌阶段的摸牌家座位（-1 = 无）；镜面桥用它决定是否需要在牌桌侧补摸一张 */
+	public int drawnSeat() {
+		return st.drawnSeat;
+	}
+
+	/** 镜面座位注入一张牌（外部牌谱摸到的牌）：直接追加到手牌末尾（渲染为摸牌位），
+	 *  不改变回合状态。返回 false = 座位非法。 */
+	public boolean mirrorInjectDraw(int seat, int code) {
+		if (seat < 0 || seat >= 4)
+			return false;
+		ps[seat].hand.add(code);
+		writeBack();
+		return true;
+	}
+
+	/**
+	 * 整桌投影（外部对局转播）：用外部快照整体覆盖四家状态，牌桌自身不摸打、不响应。
+	 * 每个座位一份 {@code {hand, river, melds, kita, riichi, points}}（记法串；未给的字段沿用当前值），
+	 * {@code drawnSeat} = 刚摸牌的家（该家手牌末张为摸牌，渲染隔牌位），{@code turnSeat} = 当前打牌家。
+	 * 局终快照（{@code handsExposed} / {@code round} / {@code points} 非空）同时覆盖展示与局目。
+	 * {@code names} 为四家座位显示名（外部对局的玩家昵称，缺省/null 项沿用原座位名）。
+	 */
+	public void mirrorTable(java.util.List<com.google.gson.JsonObject> seats, int drawnSeat, int turnSeat,
+			String banner, int round, int roundWind, int honba, int carriedSticks, int[] handsExposed,
+			int[] points, String wallNotation, java.util.List<Integer> doraIndicators,
+			String[] names) {
+		st.mirrorAll = true;
+		if (names != null)
+			for (int s = 0; s < Math.min(4, names.length); s++)
+				if (names[s] != null && !names[s].isEmpty())
+					st.seatNameOverride[s] = names[s];
+		for (int seat = 0; seat < 4; seat++) {
+			RiichiPlayer p = ps[seat];
+			com.google.gson.JsonObject o = seat < seats.size() ? seats.get(seat) : null;
+			if (o == null)
+				continue;
+			String hand = optString(o, "hand");
+			if (hand != null) {
+				p.hand.clear();
+				p.hand.addAll(notationCodes(hand));
+				if (seat == drawnSeat)
+					p.sortHand(); // 摸牌位固定在末尾（整桌投影：全部暗牌都下发给牌桌渲染）
+			}
+			String river = optString(o, "river");
+			if (river != null) {
+				p.river.clear();
+				p.river.addAll(notationCodes(river));
+			}
+			String melds = optString(o, "melds");
+			if (melds != null) {
+				p.melds.clear();
+				for (Fuuro f : parseFuuroNotation(melds))
+					p.melds.add(f);
+			}
+			int kita = o.has("kita") ? toInt(o.get("kita"), -1) : -1;
+			if (kita >= 0)
+				p.kitaCount = kita;
+			if (o.has("riichi"))
+				p.riichi = optBool(o, "riichi");
+			int pts = o.has("points") ? toInt(o.get("points"), Integer.MIN_VALUE) : Integer.MIN_VALUE;
+			if (pts != Integer.MIN_VALUE)
+				p.points = pts;
+			if (o.has("riichi_river_idx"))
+				st.riichiRiverIdx[seat] = optInt(o, "riichi_river_idx", -1);
+		}
+		if (handsExposed != null)
+			System.arraycopy(handsExposed, 0, st.handsExposed, 0, Math.min(4, handsExposed.length));
+		if (points != null)
+			System.arraycopy(points, 0, st.points, 0, Math.min(4, points.length));
+		if (round >= 0)
+			st.round = round;
+		if (roundWind >= 0)
+			st.roundWind = roundWind;
+		if (honba >= 0)
+			st.honba = honba;
+		if (carriedSticks >= 0)
+			st.carriedSticks = carriedSticks;
+		if (banner != null)
+			st.banner = banner;
+		st.drawnSeat = drawnSeat;
+		if (turnSeat >= 0)
+			st.turnSeat = turnSeat;
+		if (wallNotation != null)
+			st.wall = wallNotation;
+		if (doraIndicators != null) {
+			st.doraWall = MahjongTileNotation.format(doraIndicators);
+			st.revealedIndicators = Math.max(1, doraIndicators.size());
+		}
+		// 牌桌侧的回合标记：整桌投影下不再有本地摸打推进，置为"未在等打牌"
+		waitingDiscard = false;
+		turn = turnSeat;
+		claimWindowEnd = 0;
+		writeBack();
+	}
+
+	private static String optString(com.google.gson.JsonObject o, String k) {
+		com.google.gson.JsonElement v = o.get(k);
+		return v == null || !v.isJsonPrimitive() ? null : v.getAsString();
+	}
+
+	private static boolean optBool(com.google.gson.JsonObject o, String k) {
+		com.google.gson.JsonElement v = o.get(k);
+		return v != null && v.isJsonPrimitive() && v.getAsJsonPrimitive().isBoolean() && v.getAsBoolean();
+	}
+
+	private static int optInt(com.google.gson.JsonObject o, String k, int def) {
+		com.google.gson.JsonElement v = o.get(k);
+		return v == null || !v.isJsonPrimitive() || !v.getAsJsonPrimitive().isNumber() ? def : v.getAsInt();
+	}
+
+	private static int toInt(Object v, int def) {
+		if (v instanceof Number n)
+			return n.intValue();
+		try {
+			return Integer.parseInt(String.valueOf(v).trim());
+		} catch (Exception e) {
+			return def;
+		}
+	}
+
+	/** 牌面记法 → 牌码列表（非法/空 = 空列表） */
+	private static List<Integer> notationCodes(String notation) {
+		if (notation == null || notation.isEmpty())
+			return List.of();
+		try {
+			return MahjongTileNotation.parse(notation);
+		} catch (Exception e) {
+			return List.of();
+		}
+	}
+
+	/** 副露记法 → Fuuro 列表（组间 ";"，每组 "[来源席:]牌码[!]"；来源席缺省 = 本家，4 张同种无来源 = 暗杠） */
+	private static List<Fuuro> parseFuuroNotation(String notation) {
+		List<Fuuro> out = new ArrayList<>();
+		if (notation == null || notation.isEmpty())
+			return out;
+		for (String part : notation.split(";")) {
+			if (part.isEmpty())
+				continue;
+			boolean kakan = part.endsWith("!");
+			if (kakan)
+				part = part.substring(0, part.length() - 1);
+			int from = -1;
+			int colon = part.indexOf(':');
+			if (colon > 0) {
+				from = toInt(part.substring(0, colon), -1);
+				part = part.substring(colon + 1);
+			}
+			List<Integer> codes = notationCodes(part);
+			if (codes.isEmpty())
+				continue;
+			int[] tiles = new int[codes.size()];
+			for (int i = 0; i < tiles.length; i++)
+				tiles[i] = codes.get(i);
+			Fuuro.Type type;
+			boolean same = true;
+			for (int t : tiles)
+				if (normCode(t) != normCode(tiles[0]))
+					same = false;
+			if (tiles.length >= 4)
+				type = kakan ? Fuuro.Type.KAKAN
+						: (from < 0) ? Fuuro.Type.ANKAN : Fuuro.Type.MINKAN;
+			else
+				type = same ? Fuuro.Type.PON : Fuuro.Type.CHII;
+			out.add(new Fuuro(type, tiles, tiles[0], Math.max(from, -1)));
+		}
+		return out;
 	}
 
 	// ==================================================================
@@ -2519,6 +2834,19 @@ public class RiichiGame {
 		}
 		if (claimWindowEnd > 0)
 			tickClaimWindow(now);
+		// 镜面座位（内部状态由外部牌谱投影）的响应窗口兜底：外部未在时限内表态则自动跳过，
+		// 否则无人回应的窗口会一直挂到保底时长（400t）才推进，桥接时表现为牌局卡住
+		if (claimWindowEnd > 0 && now >= claimShortEnd) {
+			for (int s = 0; s < pc(); s++) {
+				if (claimOptions[s] == null || s == claimDiscarder || ps[s].ai)
+					continue;
+				if (!st.externalUuids.contains(ps[s].uuid) || !st.mirrorUuids.contains(ps[s].uuid))
+					continue;
+				onSkip(s);
+				if (claimWindowEnd == 0)
+					break;
+			}
+		}
 		// boss 栏横幅显示 60 tick 后自动清空（无新行动覆盖时；新行动会刷新 bannerUntil）
 		if (bannerUntil > 0 && now >= bannerUntil) {
 			st.banner = "";

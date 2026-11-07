@@ -36,7 +36,7 @@ public class MahjongTablePayload {
 
 	public record ViewMessage(long originPacked, int viewerSeat, boolean openHand, int dealAnim,
 			String[] hands, int[] hidden, int[] tedashi, int[] glassMask, String[] rivers, String[] melds,
-			int[] kita,
+			int[] kita, int[] kitaGlass,
 			int[] riichiRiverIdx, int[] riichiSticks, int[] handsExposed, int[] points,
 			String[] names, int[] avatarIds, String[] avatarForms, String[] avatarNames, String[] avatarSkins,
 			String doraWall, int revealedIndicators, int wallCount,
@@ -74,6 +74,7 @@ public class MahjongTablePayload {
 					&& Arrays.equals(a.tedashi(), b.tedashi()) && Arrays.equals(a.glassMask(), b.glassMask())
 					&& Arrays.equals(a.rivers(), b.rivers())
 					&& Arrays.equals(a.melds(), b.melds()) && Arrays.equals(a.kita(), b.kita())
+					&& Arrays.equals(a.kitaGlass(), b.kitaGlass())
 					&& Arrays.equals(a.riichiRiverIdx(), b.riichiRiverIdx())
 					&& Arrays.equals(a.riichiSticks(), b.riichiSticks())
 					&& Arrays.equals(a.handsExposed(), b.handsExposed()) && Arrays.equals(a.points(), b.points())
@@ -136,6 +137,7 @@ public class MahjongTablePayload {
 		}
 		return new ViewMessage(msg.originPacked(), msg.viewerSeat(), msg.openHand(), msg.dealAnim(),
 				msg.hands(), msg.hidden(), msg.tedashi(), msg.glassMask(), msg.rivers(), msg.melds(), msg.kita(),
+				msg.kitaGlass(),
 				msg.riichiRiverIdx(), msg.riichiSticks(), msg.handsExposed(), msg.points(), msg.names(),
 				ids, forms, names, skins, msg.doraWall(), msg.revealedIndicators(), msg.wallCount(),
 				msg.turnSeat(), msg.round(), msg.roundWind(), msg.honba(), msg.carriedSticks(),
@@ -230,6 +232,7 @@ public class MahjongTablePayload {
 			buf.writeUtf(orEmpty(msg.rivers()[i]), 256);
 			buf.writeUtf(orEmpty(msg.melds()[i]), 256);
 			buf.writeVarInt(msg.kita()[i]); // 拔北数（三麻）：不算副露，独立字段
+			buf.writeVarInt(msg.kitaGlass()[i]); // 各张拔北的真实透明位（玻璃之间渲染按位选牌体）
 			buf.writeVarInt(msg.riichiRiverIdx()[i]);
 			buf.writeVarInt(msg.riichiSticks()[i]);
 			buf.writeVarInt(msg.handsExposed()[i]);
@@ -274,6 +277,7 @@ public class MahjongTablePayload {
 		String[] rivers = new String[4];
 		String[] melds = new String[4];
 		int[] kita = new int[4];
+		int[] kitaGlass = new int[4];
 		int[] riichiRiverIdx = new int[4];
 		int[] riichiSticks = new int[4];
 		int[] handsExposed = new int[4];
@@ -291,6 +295,7 @@ public class MahjongTablePayload {
 			rivers[i] = buf.readUtf(256);
 			melds[i] = buf.readUtf(256);
 			kita[i] = buf.readVarInt();
+			kitaGlass[i] = buf.readVarInt();
 			riichiRiverIdx[i] = buf.readVarInt();
 			riichiSticks[i] = buf.readVarInt();
 			handsExposed[i] = buf.readVarInt();
@@ -331,7 +336,7 @@ public class MahjongTablePayload {
 		for (int i = 0; i < 4; i++)
 			winEffects[i] = buf.readVarInt();
 		return new ViewMessage(origin, viewerSeat, openHand, dealAnim, hands, hidden, tedashi, glassMask, rivers,
-				melds, kita,
+				melds, kita, kitaGlass,
 				riichiRiverIdx, riichiSticks, handsExposed, points, names,
 				avatarIds, avatarForms, avatarNames, avatarSkins, doraWall,
 				revealedIndicators, wallCount, turnSeat, round, roundWind, honba, carriedSticks,

@@ -38,9 +38,14 @@ public class MahjongClient {
 	/** 粒子圈半径（格） */
 	private static final double CIRCLE_RADIUS = 0.5;
 	/** 报番语音资源包下载/说明页（进游戏时缺包提示里给出的可点击链接） */
-	private static final String FAN_VOICE_PACK_URL = "https://github.com/your-name/richi_arise/releases";
+	private static final String FAN_VOICE_PACK_URL = "https://github.com/mcr666/richi_arise/";
 	/** 本次进服是否已检查（只在进游戏时提示一次，断开重进重新检查） */
 	private static boolean fanPackChecked;
+	/** 本次进服第几次尝试检查（资源包可能在客户端登录后仍异步加载） */
+	private static int fanPackTries;
+	/** 提示前的等待 tick 数与最多尝试次数 */
+	private static final int FAN_PACK_CHECK_DELAY = 40;
+	private static final int FAN_PACK_CHECK_MAX_TRIES = 10;
 
 	@SubscribeEvent
 	public static void onClientSetup(FMLClientSetupEvent event) {
@@ -49,7 +54,7 @@ public class MahjongClient {
 					MahjongItems.MAHJONG_TILE.get(),
 					ResourceLocation.withDefaultNamespace("code"),
 					(stack, level, entity, seed) -> MahjongTileItem.getCode(stack));
-			// 玻璃之间：透明牌标记（模型 overrides 据此选择半透明牌体）
+			// 玻璃之间：透明牌标记（模型包装据此只替换侧面/背面贴图，牌面仍用共用模型）
 			ItemProperties.register(
 					MahjongItems.MAHJONG_TILE.get(),
 					ResourceLocation.withDefaultNamespace("glass"),
@@ -64,12 +69,6 @@ public class MahjongClient {
 			// 内置 mp3 播放器预热：后台初始化音频子系统并加载 jlayer，消除首次角色语音的播放延迟
 			mcr.riichi_arise.voice.VoicePlayer.warmup();
 		});
-	}
-
-	/** 玻璃之间的玻璃牌背：按物品堆的牌面切换独立模型（见 MahjongTableClient.GlassBackBakedModel） */
-	@SubscribeEvent
-	public static void onModifyBakedModel(net.neoforged.neoforge.client.event.ModelEvent.ModifyBakingResult event) {
-		MahjongTableClient.wrapTileModel(event);
 	}
 
 	@SubscribeEvent
@@ -121,12 +120,19 @@ public class MahjongClient {
 		ClientLevel level = minecraft.level;
 		if (player == null || level == null) {
 			fanPackChecked = false; // 离开世界/未进游戏：下次进入时重新检查
+			fanPackTries = 0;
 			return;
 		}
 		if (!fanPackChecked) {
-			fanPackChecked = true;
-			// 资源包异步加载：进入世界后下一 tick 再判断，避免刚进服时资源管理器还没就绪
-			minecraft.execute(() -> noticeMissingFanVoicePack(player));
+			fanPackTries++;
+			// 资源包在客户端登录后才异步加载完成：先等一段时间，再连续复查若干 tick，
+			// 只有始终找不到报番语音才提示，避免"装了却提示没装"
+			if (fanPackTries >= FAN_PACK_CHECK_DELAY && mcr.riichi_arise.voice.VoiceCache.hasFanVoicePack()) {
+				fanPackChecked = true; // 已装：静默
+			} else if (fanPackTries >= FAN_PACK_CHECK_DELAY + FAN_PACK_CHECK_MAX_TRIES) {
+				fanPackChecked = true; // 复查期满仍未找到：提示一次
+				minecraft.execute(() -> noticeMissingFanVoicePack(player));
+			}
 		}
 		WinEffectClient.tick(); // 推进和牌特效时间线
 		// 每 4 tick 刷新一轮粒子圈（粒子本身有寿命，持续补充保持可见）

@@ -97,17 +97,11 @@ public class MahjongSettlementScreen extends Screen {
 	public void onClose() {
 		// 关闭界面（含 ESC / 确定按钮）= 确认，否则服务端要等满兜底时限才推进；
 		// 同时停掉没播完的报番语音，避免残留在下一局番名之前先响
-		boolean win = this.data != null && this.data.mode() == MahjongSettlementPayload.MODE_HAND_WIN;
-		long originPacked = this.data == null ? 0L : this.data.originPacked();
 		sendConfirmIfNeeded();
 		mcr.riichi_arise.voice.FanAnnouncer.cancel();
 		super.onClose();
-		// 和牌结算关闭后立即进入点数变化界面（数据由服务端预置），不必等其他玩家确认
-		if (win) {
-			var prepared = mcr.riichi_arise.network.MahjongPointDeltaPayload.preparedFor(originPacked);
-			if (prepared != null)
-				MahjongPointDeltaScreen.openPrepared(prepared);
-		}
+		// 不在这里自行打开点数变化界面：多人荣和要先看完各家结算，
+		// 服务端在队列全部展示完后统一推送点数结算（MahjongPointDeltaPayload.MODE_SHOW）
 	}
 
 	/** 回传 settle_confirm（同一局只发一次） */

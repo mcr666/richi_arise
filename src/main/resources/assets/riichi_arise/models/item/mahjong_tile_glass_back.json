@@ -1,1 +1,7 @@
-{"parent":"riichi_arise:item/mahjong_tile_glass_back_base","textures":{"front":"riichi_arise:item/mahjong/back"}}
+{
+	"credit": "未知牌的玻璃牌背（隐藏手牌/牌山）：只换背面与侧面贴图，牌面为未知牌纹理",
+	"parent": "riichi_arise:item/mahjong_tile_glass_back_base",
+	"textures": {
+		"front": "riichi_arise:item/mahjong/back"
+	}
+}

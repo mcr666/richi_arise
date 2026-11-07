@@ -67,6 +67,19 @@ public class RiichiPlayer {
 		}));
 	}
 
+	/**
+	 * 理牌但把末位刚摸的牌留在末尾（拔北后：移出北风 + 追加岭上牌会让手牌乱序，需要理牌；
+	 * 但"末位 = 刚摸的牌"是渲染摸牌位、立直摸切、摸切判定的前提，整手排序会把刚摸的牌并进牌列，
+	 * 导致自动摸切切掉别的牌。这里只排序前 n-1 张，末位原样保留）。
+	 */
+	public void sortHandKeepingDrawn() {
+		if (hand.size() <= 1)
+			return;
+		int drawn = hand.remove(hand.size() - 1);
+		sortHand();
+		hand.add(drawn);
+	}
+
 	/** 手牌记法（渲染用）：理牌序 + 摸牌在末尾 */
 	public String handNotation() {
 		return MahjongTileNotation.format(hand);

@@ -40,6 +40,9 @@ public final class RichiNetManager {
 	/** 外部玩家 uuid → 会话（主线程维护） */
 	private static final Map<String, RichiNetSession> EXT_SESSIONS = new ConcurrentHashMap<>();
 
+	/** 桌 key → 发起/订阅该桌雀魂连接的会话 UUID（控制面板"有连接"判定） */
+	private static final Map<String, String> TABLE_LINKS = new ConcurrentHashMap<>();
+
 	private static final String NAME_DEFAULT = "外部玩家";
 
 	// ==================================================================
@@ -65,6 +68,7 @@ public final class RichiNetManager {
 		for (RichiNetSession s : new ArrayList<>(EXT_SESSIONS.values()))
 			leaveSession(s);
 		EXT_SESSIONS.clear();
+		TABLE_LINKS.clear();
 	}
 
 	public static boolean isRunning() {
@@ -81,6 +85,87 @@ public final class RichiNetManager {
 
 	public static int connectionCount() {
 		return netServer == null ? 0 : netServer.connectionCount();
+	}
+
+	// ==================================================================
+	// 外部接管（雀魂连接控制面板）
+	// ==================================================================
+
+	/** 该桌当前是否有外部连接：任一在线会话加入/订阅了该桌 */
+	public static boolean linked(BlockPos origin) {
+		if (netServer == null || !netServer.isRunning())
+			return false;
+		String key = key(origin);
+		String owner = TABLE_LINKS.get(key);
+		if (owner != null && isLive(owner))
+			return true;
+		for (RichiNetSession s : netServer.sessions.values())
+			if (s.isActive() && (key.equals(s.joinedTable) || s.subscribed.contains(key)))
+				return true;
+		return false;
+	}
+
+	/**
+	 * 建立雀魂连接并接管该桌：确保内网端口运行 → 置接管标记 → 若对局中则接管一个可投影座位
+	 * （空位 / 未预约 AI 位），供桥接器直接 join。
+	 *
+	 * @return 描述结果（成功/失败原因），同时置位接管标记时返回 null 并在调用侧广播
+	 */
+	public static String takeover(MinecraftServer mcServer, BlockPos origin, String source) {
+		RichiTableState st = RichiTableManager.get(origin);
+		if (st == null)
+			return "该位置没有牌桌";
+		if (!isRunning() && !start(mcServer, RichiNetConfig.PORT, RichiNetConfig.BIND))
+			return "内网端口启动失败（可能被占用）";
+		st.externalTakeover = true;
+		st.takeoverSource = source == null ? "" : source;
+		RichiTableManager.markDirty(origin);
+		return null;
+	}
+
+	/** 关闭外部接管（恢复该桌常规交互）：把已加入该桌的外部会话请出，座位归还本地 */
+	public static void release(BlockPos origin) {
+		RichiTableState st = RichiTableManager.get(origin);
+		if (st == null)
+			return;
+		st.externalTakeover = false;
+		st.takeoverSource = "";
+		String key = key(origin);
+		TABLE_LINKS.remove(key);
+		if (netServer != null) {
+			for (RichiNetSession s : new ArrayList<>(netServer.sessions.values())) {
+				if (!key.equals(s.joinedTable))
+					continue;
+				leaveSession(s);
+				JsonObject notice = new JsonObject();
+				notice.addProperty("type", "released");
+				notice.addProperty("table", key);
+				s.send(notice);
+			}
+		}
+		RichiTableManager.markDirty(origin);
+	}
+
+	/** 桌状态摘要（控制面板展示） */
+	public static RichiTableState.NetStatus status(BlockPos origin) {
+		RichiTableState st = RichiTableManager.get(origin);
+		return new RichiTableState.NetStatus(String.valueOf(port()), isRunning(), connectionCount(),
+				linked(origin), st != null && st.externalTakeover,
+				st == null || st.takeoverSource == null ? "" : st.takeoverSource,
+				st == null ? "unknown" : phaseName(st.phase));
+	}
+
+	private static String phaseName(int phase) {
+		return switch (phase) {
+			case RichiTableState.PHASE_PLAYING -> "playing";
+			case RichiTableState.PHASE_FINISHED -> "finished";
+			default -> "waiting";
+		};
+	}
+
+	private static boolean isLive(String uuid) {
+		RichiNetSession s = uuid == null ? null : EXT_SESSIONS.get(uuid);
+		return s != null && s.isActive();
 	}
 
 	/** 服务端停止时清理（ServerStoppingEvent） */
@@ -121,6 +206,8 @@ public final class RichiNetManager {
 				}
 				case RichiNetProtocol.C_DISCARD -> onDiscard(session, msg);
 				case RichiNetProtocol.C_ACTION -> onAction(session, msg);
+				case RichiNetProtocol.C_MIRROR -> onMirror(session, msg);
+				case RichiNetProtocol.C_MIRROR_TABLE -> onMirrorAll(session, msg);
 				case RichiNetProtocol.C_QUIT -> {
 					leaveSession(session);
 					sendError(session, "bye");
@@ -236,16 +323,56 @@ public final class RichiNetManager {
 			sendError(session, "未找到牌桌: " + key);
 			return;
 		}
-		if (ref.st().phase == RichiTableState.PHASE_PLAYING) {
-			sendError(session, "该牌桌对局进行中，等待阶段才能加入");
-			return;
-		}
 		// 已在其它桌：先离开
 		if (session.joinedTable != null)
 			leaveSession(session);
-		String name = RichiNetProtocol.str(msg, "name");
-		if (name == null || name.isEmpty())
-			name = session.name == null ? NAME_DEFAULT : session.name;
+		// 桥接器声明的事件来源：接管该桌（控制面板可据此显示"由雀魂连接接管"）
+		String source = RichiNetProtocol.str(msg, "source");
+		if (source != null && !source.isEmpty()) {
+			ref.st().externalTakeover = true;
+			ref.st().takeoverSource = source;
+			RichiTableManager.markDirty(ref.origin());
+		}
+		TABLE_LINKS.put(ref.key(), session.uuid);
+		boolean mirror = RichiNetProtocol.optBool(msg, "mirror", false);
+		// 整桌投影：四家全部由外部快照驱动（雀魂等外部对局转播），不占用某一席做本地 AI 推进
+		boolean mirrorAll = RichiNetProtocol.optBool(msg, "all", false);
+		if (mirrorAll) {
+			if (!MahjongLobby.externalJoinAll(ref.level(), ref.origin(), session.uuid, nameOf(msg, session))) {
+				sendError(session, "整桌接管失败（该桌不在对局中）");
+				return;
+			}
+			session.joinedTable = ref.key();
+			session.subscribed.add(ref.key());
+			ack(session, true, "已整桌接管进行中的对局 " + key, 0);
+			return;
+		}
+		if (ref.st().phase == RichiTableState.PHASE_PLAYING) {
+			// 镜面接入允许中途加入进行中的对局（接管空位/现有座位做投影）
+			if (!mirror) {
+				sendError(session, "该牌桌对局进行中，等待阶段才能加入");
+				return;
+			}
+			RichiTableState st = ref.st();
+			if (st.externalUuids.contains(session.uuid) || st.queue.contains(session.uuid)) {
+				session.joinedTable = ref.key();
+				session.subscribed.add(ref.key());
+				ack(session, true, "已接入进行中的对局 " + key, seatOf(st, session.uuid));
+				session.send(buildSnapshot(ref, session.uuid, false));
+				return;
+			}
+			if (!MahjongLobby.externalJoinPlaying(ref.level(), ref.origin(), session.uuid,
+					nameOf(msg, session))) {
+				sendError(session, "中途接入失败（对局没有可接管的空位）");
+				return;
+			}
+			session.joinedTable = ref.key();
+			session.subscribed.add(ref.key());
+			ack(session, true, "已接管进行中的对局 " + key, seatOf(st, session.uuid));
+			session.send(buildSnapshot(ref, session.uuid, false));
+			return;
+		}
+		String name = nameOf(msg, session);
 		if (!MahjongLobby.externalJoinTable(ref.level(), ref.origin(), session.uuid, name)) {
 			sendError(session, "加入队列失败（队列已满或不可加入）");
 			return;
@@ -256,12 +383,30 @@ public final class RichiNetManager {
 		session.send(buildSnapshot(ref, session.uuid, false));
 	}
 
+	/** 会话在该桌的座位（-1 = 尚未入座） */
+	private static int seatOf(RichiTableState st, String uuid) {
+		for (int s = 0; s < 4; s++)
+			if (uuid.equals(st.players[s]))
+				return s;
+		return -1;
+	}
+
+	/** join 显示名：消息 name → hello name → 默认名 */
+	private static String nameOf(JsonObject msg, RichiNetSession session) {
+		String name = RichiNetProtocol.str(msg, "name");
+		if (name == null || name.isEmpty())
+			name = session.name == null ? NAME_DEFAULT : session.name;
+		return name;
+	}
+
 	private static void leaveSession(RichiNetSession session) {
 		if (session == null || session.joinedTable == null)
 			return;
 		String key = session.joinedTable;
 		session.joinedTable = null;
 		session.seat = -1;
+		if (session.uuid != null && session.uuid.equals(TABLE_LINKS.get(key)))
+			TABLE_LINKS.remove(key);
 		TableRef ref = findTable(key);
 		if (ref != null && session.uuid != null)
 			MahjongLobby.externalLeaveTable(ref.level(), ref.origin(), session.uuid);
@@ -362,6 +507,262 @@ public final class RichiNetManager {
 	}
 
 	// ==================================================================
+	// 镜面接入（外部牌谱驱动牌桌）
+	// ==================================================================
+
+	/**
+	 * 整桌投影：用外部对局的完整快照一次性覆盖四家（手牌/牌河/副露/拔北/立直/点数）与局目。
+	 * <p>载荷：{@code {"table","seats":[{hand,river,melds,kita,riichi,points,riichi_river_idx}×4],
+	 * "drawn_seat","turn_seat","round","round_wind","honba","carried","banner","hands_exposed","points",
+	 * "wall","dora"}}。未给的字段沿用牌桌当前值。
+	 */
+	private static void onMirrorAll(RichiNetSession session, JsonObject msg) {
+		if (!requireJoined(session))
+			return;
+		TableRef ref = findTable(session.joinedTable);
+		RiichiGame game = ref == null ? null : RichiTableManager.getGame(ref.origin());
+		if (game == null) {
+			sendError(session, "该桌没有进行中的对局");
+			return;
+		}
+		List<JsonObject> seats = new ArrayList<>();
+		if (msg.has("seats") && msg.get("seats").isJsonArray()) {
+			for (var e : msg.getAsJsonArray("seats"))
+				seats.add(e.isJsonObject() ? e.getAsJsonObject() : new JsonObject());
+		}
+		int[] exposed = null;
+		if (msg.has("hands_exposed") && msg.get("hands_exposed").isJsonArray())
+			exposed = intArray(msg.getAsJsonArray("hands_exposed"), -1);
+		int[] points = null;
+		if (msg.has("points") && msg.get("points").isJsonArray())
+			points = intArray(msg.getAsJsonArray("points"), Integer.MIN_VALUE);
+		String[] names = null;
+		if (msg.has("names") && msg.get("names").isJsonArray()) {
+			var arr = msg.getAsJsonArray("names");
+			names = new String[arr.size()];
+			for (int i = 0; i < names.length; i++) {
+				var e = arr.get(i);
+				names[i] = e == null || e.isJsonNull() || !e.isJsonPrimitive() ? null : e.getAsString();
+			}
+		}
+		game.mirrorTable(seats,
+				RichiNetProtocol.optInt(msg, "drawn_seat", -1),
+				RichiNetProtocol.optInt(msg, "turn_seat", -1),
+				RichiNetProtocol.str(msg, "banner"),
+				RichiNetProtocol.optInt(msg, "round", -1),
+				RichiNetProtocol.optInt(msg, "round_wind", -1),
+				RichiNetProtocol.optInt(msg, "honba", -1),
+				RichiNetProtocol.optInt(msg, "carried", -1),
+				exposed, points,
+				RichiNetProtocol.str(msg, "wall"),
+				parseCodes(RichiNetProtocol.str(msg, "dora")),
+				names);
+		ack(session, true, null);
+	}
+
+	/** JSON 数组 → int[]（非法项取 def） */
+	private static int[] intArray(JsonArray arr, int def) {
+		int[] out = new int[arr.size()];
+		for (int i = 0; i < out.length; i++) {
+			try {
+				out[i] = arr.get(i).getAsInt();
+			} catch (Exception e) {
+				out[i] = def;
+			}
+		}
+		return out;
+	}
+
+	/**
+	 * 镜面推进：把外部牌谱的"当前状态"整体投影到指定座位，并让牌桌自己走出这一步。
+	 * <p>载荷：{@code {"table","seat","discard","river","melds","kita","hand","draw","riichi","tsumo"}}。
+	 * river/melds 为整串记法（如 "123m4p" / "0:123m;2:555z!"）。hand = 该座位的"摸牌前手牌"
+	 * （不含本次摸牌，含副露以外的全部暗牌），由 net 层按 {@link RiichiGame#mirrorInjectDraw} 补入摸牌，
+	 * 从而保证牌桌侧摸牌动作与外部牌谱一致。未给的字段沿用牌桌当前值。
+	 * <p>处理顺序：同步座位状态（牌河/副露/拔北/手牌+补牌）→ 立直 → 打牌（无 discard = 自摸）→ 开响应窗口。
+	 */
+	private static void onMirror(RichiNetSession session, JsonObject msg) {
+		if (!requireJoined(session))
+			return;
+		TableRef ref = findTable(session.joinedTable);
+		RiichiGame game = ref == null ? null : RichiTableManager.getGame(ref.origin());
+		if (game == null) {
+			sendError(session, "该桌没有进行中的对局");
+			return;
+		}
+		int seat = game.findSeat(session.uuid);
+		if (seat < 0) {
+			// 本次会话尚未被对局登记（中途接管后 RiichiGame 内的座位仍是旧 UUID）：尝试原地换座
+			if (ref.st().phase == RichiTableState.PHASE_PLAYING
+					&& RichiTableManager.replaceSeatUuid(ref.origin(), session.uuid, session.name)) {
+				seat = game.findSeat(session.uuid);
+			}
+		}
+		if (seat < 0) {
+			sendError(session, "你不在该对局中");
+			return;
+		}
+		ref.st().mirrorUuids.add(session.uuid);
+		String discardStr = RichiNetProtocol.str(msg, "discard");
+		if (discardStr == null || discardStr.isEmpty())
+			discardStr = RichiNetProtocol.str(msg, "tile");
+		int discardCode = -1;
+		if (discardStr != null && !discardStr.isEmpty()) {
+			try {
+				List<Integer> codes = MahjongTileNotation.parse(discardStr);
+				if (!codes.isEmpty())
+					discardCode = codes.get(0);
+			} catch (Exception e) {
+				sendError(session, "discard 牌面记法无效: " + discardStr);
+				return;
+			}
+		}
+		// 1) 状态同步：牌河/副露/拔北/手牌（外部牌谱是权威值）
+		List<Integer> draw = parseCodes(RichiNetProtocol.str(msg, "draw"));
+		applyMirrorState(game, seat, msg, draw);
+		// 1.5) 加杠（外部牌谱该家把已有的碰升级为杠）：在打牌前执行
+		String kakanStr = RichiNetProtocol.str(msg, "kakan");
+		if (kakanStr != null && !kakanStr.isEmpty()) {
+			List<Integer> kc = parseCodes(kakanStr);
+			if (!kc.isEmpty())
+				game.externalAction(session.uuid, "kakan", String.valueOf(kc.get(0)));
+		}
+		// 2) 尚未轮到本家：先让牌桌自动摸切/等 AI 走完（最多推进 playerCount 步，避免死循环）
+		for (int guard = 0; guard <= game.playerCount(); guard++) {
+			if (game.mirrorWaitingDiscard() && game.mirrorTurnSeat() != seat)
+				game.mirrorAutoDiscard();
+			// 已轮到我方 / 进入响应窗口（等 AI 表态）都停止推进
+			if (game.mirrorWaitingDiscard() || game.mirrorWaitingDiscardAfterClaim())
+				break;
+		}
+		if (!game.mirrorWaitingDiscard() || game.mirrorTurnSeat() != seat) {
+			ack(session, false, "未轮到该座位（等待其他家动作或响应窗口结束）");
+			return;
+		}
+		// 3) 立直宣言（外部牌谱 riichi=true 且未立直）
+		if (RichiNetProtocol.optBool(msg, "riichi", false) && !game.player(seat).riichi)
+			game.externalAction(session.uuid, "riichi", "");
+		// 4) 和牌（外部牌谱该家自摸）：走牌桌自摸结算
+		if (RichiNetProtocol.optBool(msg, "tsumo", false)) {
+			boolean ok = game.externalAction(session.uuid, "tsumo", "");
+			ack(session, ok, ok ? null : "自摸失败（时机不符）");
+			return;
+		}
+		// 5) 打牌：按牌面找手牌下标（找不到红五等价/取最后一张）
+		List<Integer> hand = game.player(seat).hand;
+		int index = hand.size() - 1;
+		if (discardCode >= 0) {
+			index = -1;
+			for (int i = 0; i < hand.size(); i++)
+				if (hand.get(i) == discardCode) {
+					index = i;
+					break;
+				}
+			if (index < 0)
+				for (int i = 0; i < hand.size(); i++)
+					if (normalize(hand.get(i)) == normalize(discardCode)) {
+						index = i;
+						break;
+					}
+			if (index < 0) {
+				ack(session, false, "手牌中没有 " + discardStr);
+				return;
+			}
+		}
+		boolean ok = game.mirrorDiscard(seat, index);
+		ack(session, ok, ok ? null : "镜面打牌失败（时机不符）");
+	}
+
+	/** 记法 → 牌码列表（null/非法 = 空列表） */
+	private static List<Integer> parseCodes(String notation) {
+		if (notation == null || notation.isEmpty())
+			return List.of();
+		try {
+			return MahjongTileNotation.parse(notation);
+		} catch (Exception e) {
+			return List.of();
+		}
+	}
+
+	/** 红五归一到普通五（镜面比对用） */
+	private static int normalize(int code) {
+		int base = mcr.riichi_arise.game.TileFlag.base(code);
+		return base == 0 ? 5 : base == 10 ? 15 : base == 20 ? 25 : base;
+	}
+
+	/** 把外部牌谱的牌河/副露/拔北/手牌整串写回座位（手牌 = 摸牌前暗牌，随后补入 draw）。
+	 *  牌河按"含本次打出"理解：这里整串写入（含本次那张），随后 mirrorDiscard 会按
+	 *  {@code wasDrawn} 判重，不会重复追加。 */
+	private static void applyMirrorState(RiichiGame game, int seat, JsonObject msg, List<Integer> draw) {
+		var p = game.player(seat);
+		String river = RichiNetProtocol.str(msg, "river");
+		if (river != null) {
+			List<Integer> codes = parseCodes(river);
+			p.river.clear();
+			p.river.addAll(codes);
+		}
+		String melds = RichiNetProtocol.str(msg, "melds");
+		if (melds != null) {
+			p.melds.clear();
+			if (!melds.isEmpty()) {
+				for (String part : melds.split(";")) {
+					if (part.isEmpty())
+						continue;
+					int from = -1;
+					boolean kakan = part.endsWith("!");
+					if (kakan)
+						part = part.substring(0, part.length() - 1);
+					// 兼容带来源席前缀的写法（"2:123m"）
+					int colon = part.indexOf(':');
+					if (colon > 0) {
+						try {
+							from = Integer.parseInt(part.substring(0, colon));
+						} catch (NumberFormatException ignored) {
+							from = -1;
+						}
+						part = part.substring(colon + 1);
+					}
+					List<Integer> codes = parseCodes(part);
+					if (codes.isEmpty())
+						continue;
+					int[] tiles = new int[codes.size()];
+					for (int i = 0; i < tiles.length; i++)
+						tiles[i] = codes.get(i);
+					p.melds.add(new mcr.riichi_arise.game.riichi.Fuuro(fuuroType(tiles, kakan, from, seat),
+							tiles, tiles[tiles.length - 1], from));
+				}
+			}
+		}
+		int kita = RichiNetProtocol.optInt(msg, "kita", -1);
+		if (kita >= 0) {
+			p.kitaCount = kita;
+			game.tableState().kita[seat] = kita;
+		}
+		String hand = RichiNetProtocol.str(msg, "hand");
+		if (hand != null) {
+			p.hand.clear();
+			p.hand.addAll(parseCodes(hand));
+			for (int c : draw)
+				game.mirrorInjectDraw(seat, c);
+			p.sortHand();
+		}
+		RichiTableManager.markDirty(game.origin());
+	}
+
+	/** 副露类型推断：4 张同种 = 明杠/加杠（加杠看 '!' 标记），3 张同种 = 碰，3 张连续 = 吃 */
+	private static mcr.riichi_arise.game.riichi.Fuuro.Type fuuroType(int[] tiles, boolean kakan, int from, int seat) {
+		boolean same = true;
+		for (int t : tiles)
+			if (normalize(t) != normalize(tiles[0]))
+				same = false;
+		if (tiles.length >= 4)
+			return kakan ? mcr.riichi_arise.game.riichi.Fuuro.Type.KAKAN
+					: (from < 0 || from == seat) ? mcr.riichi_arise.game.riichi.Fuuro.Type.ANKAN
+							: mcr.riichi_arise.game.riichi.Fuuro.Type.MINKAN;
+		return same ? mcr.riichi_arise.game.riichi.Fuuro.Type.PON : mcr.riichi_arise.game.riichi.Fuuro.Type.CHII;
+	}
+
+	// ==================================================================
 	// 服务端 → 客户端推送（RiichiGame 在回合/窗口/写回时调用，主线程）
 	// ==================================================================
 
@@ -410,6 +811,35 @@ public final class RichiNetManager {
 		JsonObject m = RichiNetProtocol.msg(RichiNetProtocol.S_RIICHI_PICK);
 		fillTableSeat(game, m, seat);
 		m.add("hand", codes(game.player(seat).hand));
+		s.send(m);
+	}
+
+	/** 镜面座位轮到打牌：推 hand/options/摸牌家/时限（该家手牌由外部牌谱投影，桥按此推进） */
+	public static void pushMirrorTurn(RiichiGame game, int seat, java.util.List<String> options, int drawnCode) {
+		RichiNetSession s = sessionForSeat(game, seat);
+		if (s == null)
+			return;
+		JsonObject m = RichiNetProtocol.msg(RichiNetProtocol.S_MIRROR_TURN);
+		fillTableSeat(game, m, seat);
+		m.add("hand", codes(game.player(seat).hand));
+		m.add("options", toArray(options));
+		m.addProperty("drawn_seat", game.drawnSeat());
+		m.addProperty("drawn", drawnCode);
+		m.addProperty("riichi", game.player(seat).riichi);
+		m.addProperty("waiting", game.mirrorWaitingDiscard());
+		m.addProperty("window", game.mirrorClaimWindowEnd());
+		s.send(m);
+	}
+
+	/** 镜面座位可响应他家打出的牌：推 claim 选项（含该张牌码与出牌家） */
+	public static void pushMirrorClaim(RiichiGame game, int seat, java.util.List<String> options) {
+		RichiNetSession s = sessionForSeat(game, seat);
+		if (s == null)
+			return;
+		JsonObject m = RichiNetProtocol.msg(RichiNetProtocol.S_MIRROR_CLAIM);
+		fillTableSeat(game, m, seat);
+		m.addProperty("discarder", game.claimDiscarderSeat());
+		m.add("options", toArray(options));
 		s.send(m);
 	}
 
@@ -530,10 +960,17 @@ public final class RichiNetManager {
 	}
 
 	private static void ack(RichiNetSession session, boolean ok, String msg) {
+		ack(session, ok, msg, -1);
+	}
+
+	/** 带座位号的 ack（mirror 接入用；seat >= 0 才写入，桥据此对齐 mirror_seat） */
+	private static void ack(RichiNetSession session, boolean ok, String msg, int seat) {
 		JsonObject m = RichiNetProtocol.msg(RichiNetProtocol.S_ACK);
 		m.addProperty("ok", ok);
 		if (msg != null)
 			m.addProperty("msg", msg);
+		if (seat >= 0)
+			m.addProperty("seat", seat);
 		session.send(m);
 	}
 

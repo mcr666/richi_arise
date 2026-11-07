@@ -397,7 +397,7 @@ public final class PaipuReplay {
 		}
 		MahjongTableClient.applyReplay(new MahjongTablePayload.ViewMessage(
 				s.originPacked, 0, true, 0, // viewerSeat/openHand/dealAnim（回放全部明牌）
-				hands, new int[4], new int[4], new int[4], rivers, melds, snap.kita.clone(),
+				hands, new int[4], new int[4], new int[4], rivers, melds, snap.kita.clone(), new int[4],
 				snap.riichiRiverIdx.clone(), snap.riichiSticks.clone(),
 				new int[] { 1, 1, 1, 1 }, snap.points.clone(), // handsExposed=1：回放手牌全部摊开朝上
 				names, new int[4], new String[4], new String[4], new String[4], // 回放无 AI 形象

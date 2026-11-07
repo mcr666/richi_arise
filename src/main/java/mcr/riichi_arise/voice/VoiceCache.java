@@ -132,9 +132,19 @@ public final class VoiceCache {
 	 */
 	public static boolean hasFanVoicePack() {
 		try {
-			return !Minecraft.getInstance().getResourceManager()
-					.listResources("sounds/voice", l -> l.getPath().endsWith(".mp3")).keySet().stream()
-					.anyMatch(l -> l.getPath().contains("/fan/"));
+			ResourceManager rm = Minecraft.getInstance().getResourceManager();
+			// 1) 扫描全部已启用资源包的 */*/fan/*.mp3（listResources 的过滤谓词只作用于资源路径）
+			boolean scanned = rm.listResources("sounds/voice", l -> l.getPath().endsWith(".mp3"))
+					.keySet().stream().anyMatch(l -> l.getPath().contains("/fan/"));
+			if (scanned)
+				return true;
+			// 2) 兜底：直接探测主命名空间下任一角色的报番文件
+			for (String id : VoiceCharacters.OFFLINE_IDS) {
+				if (rm.getResource(ResourceLocation.fromNamespaceAndPath("riichi_arise",
+						"sounds/voice/" + id + "/fan/tsumo.mp3")).isPresent())
+					return true;
+			}
+			return false;
 		} catch (Throwable e) {
 			return false;
 		}

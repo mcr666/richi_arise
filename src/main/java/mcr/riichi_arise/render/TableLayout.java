@@ -52,10 +52,6 @@ public final class TableLayout {
 	public static final double SMALL_HAND_LEFT_SHIFT = 2.0 / 16.0;
 	/** 副露区外缘与桌沿之间保留的间隙（格，1 个模型单位；仅小型 3×3 桌贴沿时使用） */
 	public static final double MELD_EDGE_GAP = 1.0 / 16.0;
-	/** 副露行向桌心内收距离（格）——大风盘沿用原布局：与手牌行错开 z 带，避免占用同一条线 */
-	public static final double MELD_ROW_INSET = 0.20;
-	/** 大风盘副露区外缘上限（格，沿玩家右侧轴）：邻家行列带从 ±(edge - TILE_WIDTH/2)=±1.572 起，留隙取 1.55 */
-	public static final double MELD_EDGE_CAP = 1.55;
 	/** 大风盘副露区向自家方向（远离桌心，沿 outs）外移量（格，2 个模型单位 = 2/16 格）；小型 3×3 桌不受影响 */
 	public static final double LARGE_MELD_OUTWARD = 2.0 / 16.0;
 	/** 手牌相邻牌间距（格）——牌宽 12px×s/16≈0.15625，紧贴（+0.0007 防共面闪烁） */
@@ -103,16 +99,16 @@ public final class TableLayout {
 			return RIVER_DIST;
 		}
 
-		/** 副露区外缘上限：小型紧贴桌沿只留 MELD_EDGE_GAP；大风盘在原上限 MELD_EDGE_CAP 外再外移 LARGE_MELD_OUTWARD */
+		/** 副露区外缘上限：小型紧贴桌沿只留 MELD_EDGE_GAP；大风盘副露行在桌沿内侧，按牌长半个身位取上限 */
 		public double meldEdgeCap() {
-			return small ? 1.5 - MELD_EDGE_GAP : MELD_EDGE_CAP + LARGE_MELD_OUTWARD;
+			return small ? 1.5 - MELD_EDGE_GAP : 1.55 + LARGE_MELD_OUTWARD;
 		}
 
-		/** 副露行中心距桌心：小型贴玩家侧桌沿（外缘距沿 MELD_EDGE_GAP）；大风盘沿用原内收布局，再向自家方向外移 LARGE_MELD_OUTWARD */
+		/** 副露行中心距桌心：小型贴玩家侧桌沿（外缘距沿 MELD_EDGE_GAP）；大风盘随副露外移量一起向外侧（自家方向）平移，恒比手牌行更靠外 */
 		public double meldRowDist() {
 			return small
 					? 1.5 - MELD_EDGE_GAP - TILE_LONG / 2.0
-					: edgeFor(false) - MELD_ROW_INSET + LARGE_MELD_OUTWARD;
+					: edgeFor(false) + TILE_WIDTH / 2.0 + LARGE_MELD_OUTWARD;
 		}
 
 		/** 第 rowIdx 排（内排 0 = 最靠玩家）行中心距桌心：内排增大即向桌心推进；第 RIVER_ROWS 排起为溢出行，置于最外内排外侧 */
@@ -297,7 +293,9 @@ public final class TableLayout {
 			int[] slots = handSlots == null || h >= handSlots.length ? null : handSlots[h];
 			for (int k = 0; k < hand.size(); k++) {
 				int code = hand.get(k);
-				int slot = slots != null && k < slots.length ? slots[k] : k;
+				// 防御：槽位必须落在手牌行内（0 = 左手端 … HAND_SIZE = 刚摸的分离位）。
+				// 越界会让手牌按 handTarget 一直向右延伸，落到副露行范围内（观感上"切出的牌跑到副露区"）
+				int slot = slots != null && k < slots.length ? Math.max(0, Math.min(HAND_SIZE, slots[k])) : k;
 				// 手切停留槽位里，槽位 == 手牌张数 = 切牌前刚摸那张所在的最右分离位
 				boolean drawnGap = slots != null ? slot == hand.size() : (hasDrawn && k == hand.size() - 1);
 				Vec3 tilePos = handTarget(geom, h, slot, drawnGap)
@@ -333,13 +331,15 @@ public final class TableLayout {
 						flatYaw(dir), dir, true, h, i, dealIndex++ * step));
 			}
 		}
-		// 3) 副露（吃碰杠）：副露行在小型风盘贴近玩家侧桌沿（外缘只留 MELD_EDGE_GAP），大风盘仍向桌心内收，组序从外向内游标式排开——
-		//    每组按实际占宽（平躺自家牌 + 声明牌伸出方向）推进；小型右端贴桌沿只留 MELD_EDGE_GAP，大风盘不超过 MELD_EDGE_CAP，
+		// 3) 副露（吃碰杠）：副露行在小型风盘贴近玩家侧桌沿（外缘只留 MELD_EDGE_GAP），大风盘行心位于手牌行外侧（更靠自家）半个牌宽，
+		//    组序从外向内游标式排开——
+		//    每组按实际占宽（平躺自家牌 + 声明牌伸出方向）推进；小型右端贴桌沿只留 MELD_EDGE_GAP，大风盘不超过 meldEdgeCap()，
 		//    同一家的多组也不会因声明牌相对而压叠。
 		//    所有副露整体靠右排列（游标自外缘内收），新的副露永远紧挨上一组，不插手牌中间。
 		//    组内全部平躺：自家牌长轴垂直副露行（水平面内"竖着"、朝桌心，同牌河牌）；
 		//    声明牌（副露串末尾那张，见 RiichiPlayer.displayOrder）长轴指向来源玩家——
 		//    上家（rel3/左手）横牌在组最左、下家（rel1/右手）在最右、对家（rel2/对面）在中间且长轴朝桌心。
+		//    大风盘横放声明牌与邻家手牌/副露同一圈，只朝桌心平移半个牌宽（不越出手牌行），小型桌沿用原先的整段伸出。
 		//    暗杠（来源自己且 4 张）无声明牌：4 张平躺横排，两端扣盖（背面朝上）、中间两张亮明（正面朝上）。
 		for (int h = 0; h < seats; h++) {
 			Vec3 facingCenter = outs[h].scale(-1);
@@ -371,6 +371,8 @@ public final class TableLayout {
 						case 1 -> n - 1;                // 下家：横牌在最右 [竖]..[竖][横]
 						default -> 1;                   // 对家：横牌在中间（3 张=第 2 位、4 张=中间偏左）
 					};
+					// 防御：副露串异常（组内只有 1 张等）时索引仍落在组内，避免后续 order[flatPos] 越界
+					flatPos = Math.max(0, Math.min(n - 1, flatPos));
 					if (rel == 3) {
 						flatLong = playerLeft;          // 长轴朝左指向左侧上家
 					} else if (rel == 1) {
@@ -380,17 +382,19 @@ public final class TableLayout {
 					}
 				}
 				// 组沿行（playerRight）各侧半宽（中心到外缘），供游标避让（相邻组/相邻家不重叠）
+				// 大风盘：声明牌不再沿行伸出，而是整体朝桌心平移半个牌宽——长边中心落在手牌行上，贴近但不超过手牌行，避免捅进邻家
+				double sideProtrude = geom.small() ? protrude : 0.0;
 				double pitch = ankan ? flatStep : TILE_GAP;
 				double centerOff = (n - 1) / 2.0 * pitch;
 				double inner, outer;
 				if (ankan) {
 					inner = outer = centerOff + halfW;
 				} else if (rel == 3) {
-					inner = centerOff + halfL + protrude; // 横牌最左且向左伸出
+					inner = centerOff + halfL + sideProtrude; // 横牌最左且向左伸出
 					outer = centerOff + halfW;
 				} else if (rel == 1) {
 					inner = centerOff + halfW;
-					outer = centerOff + halfL + protrude; // 横牌最右且向右伸出
+					outer = centerOff + halfL + sideProtrude; // 横牌最右且向右伸出
 				} else {
 					inner = outer = centerOff + halfW;     // 对家横牌在中间、长轴垂直，无伸出
 				}
@@ -411,13 +415,15 @@ public final class TableLayout {
 					continue;
 				}
 				if (rel == 3)
-					u[flatPos] -= protrude; // 上家横牌向左伸（紧贴邻家平躺牌，无豁口）
+					u[flatPos] -= sideProtrude; // 上家横牌向左伸（紧贴邻家平躺牌，无豁口；大风盘不伸）
 				else if (rel == 1)
-					u[flatPos] += protrude; // 下家横牌向右伸
+					u[flatPos] += sideProtrude; // 下家横牌向右伸
 				// 横放声明牌向桌心外移半个牌长差：让其外侧长侧面与同组其他牌的外缘齐平
 				// （长轴与行垂直的上家/下家才是真正"横着"的；对家声明牌与自家牌同向，不偏移）
 				boolean rotatedClaim = flatLong != null && Math.abs(flatLong.dot(facingCenter)) < 0.5;
-				Vec3 flatOffset = rotatedClaim ? facingCenter.scale(-protrude) : Vec3.ZERO;
+				Vec3 flatOffset = rotatedClaim
+						? facingCenter.scale(-(geom.small() ? protrude : halfW)) // 大风盘只平移半个牌宽，长边贴齐手牌行
+						: Vec3.ZERO;
 				// 组内摆放序：声明牌（副露串末尾）放横位，其余自家牌按原序平躺
 				int[] order = new int[n];
 				order[flatPos] = n - 1;
@@ -441,17 +447,17 @@ public final class TableLayout {
 					}
 				}
 				if (kakan && flatTarget != null) {
-					// 加杠的第 4 张：一律与横放牌同一水平面，紧贴其靠桌心一侧摆放（不叠放、不排成明杠）；
-					// 对家横牌长轴朝桌心、伸出方向即桌心方向，同样按 facingCenter 相接
+					// 加杠的第 4 张：叠放在横放声明牌上方（日麻标准：加槓の4枚目はポンの横向き牌の上側に置く）；
+					// 与横放牌同向（长轴同样指向声明来源家），水平位置一致、抬高一个牌厚
 					// index = -2 标记"加杠新增牌"（客户端播放从手牌飞来的动画用）
-					Vec3 near = flatTarget.add(facingCenter.scale(rotatedClaim ? TILE_WIDTH : TILE_LONG));
-					out.add(new Placement(KIND_MELD, flatEntityPos(near, 0), near,
+					out.add(new Placement(KIND_MELD, flatEntityPos(flatTarget, FLAT_THICKNESS), flatTarget,
 							meld.get(meld.size() - 1), flatYaw(flatLong), flatLong, true, h, -2,
 							dealIndex++ * step));
 				}
 			}
 			// 3.4) 拔北位（三麻）：拔北**不算副露**，数量取快照独立字段 st.kita[h]，与副露串无关。
-			//      北风牌平躺、长轴指桌心（与牌河牌同向旋转），自手牌区右上角外 2 模型单位起沿行向右单列排列；
+			//      北风牌平躺、长轴指桌心（与牌河牌同向旋转），自手牌区右上角外 2 模型单位起沿行向左单列排列
+			//      （第 1 张仍贴手牌区右端，之后拔的北依次往玩家左侧排）；
 			//      整块再向桌心内收一张牌宽（TILE_WIDTH），避免贴着手牌行；
 			//      再向桌心内收 3 模型单位、向玩家左侧移 3 模型单位（更靠内侧、不压手牌右端）
 			if (st.playerCount == 3 && st.kita[h] > 0) {
@@ -465,9 +471,13 @@ public final class TableLayout {
 				Vec3 kitaRow = rows[h].subtract(outs[h].scale(TILE_WIDTH + inward)); // 内收一张牌宽 + 3 单位
 				Vec3 kitaDir = outs[h].scale(-1); // 长轴指桌心（同牌河）
 				for (int k = 0; k < kitaN; k++) {
+					// 第 1 张（k=0）贴手牌区右端，之后拔的北（k 增大）依次往玩家左侧排（offset 递增 → 更靠左）
 					Vec3 target = kitaRow.add(geom.lefts()[h].scale(
-							-(rightEnd + 2.0 / 16.0 + TILE_WIDTH / 2.0 + k * TILE_GAP) + leftShift));
-					out.add(new Placement(KIND_KITA, flatEntityPos(target, 0), target, TILE_PEI,
+							-(rightEnd + 2.0 / 16.0 + TILE_WIDTH / 2.0) + k * TILE_GAP + leftShift));
+					// 玻璃之间：该张拔北是否为透明牌由快照逐张下发（同种牌 3 透明 1 普通）
+					boolean kitaGlass = ((st.kitaGlass[h] >> k) & 1) != 0;
+					int kitaCode = kitaGlass ? mcr.riichi_arise.game.TileFlag.glass(TILE_PEI) : TILE_PEI;
+					out.add(new Placement(KIND_KITA, flatEntityPos(target, 0), target, kitaCode,
 							flatYaw(kitaDir), kitaDir, true, h, k, dealIndex++ * step));
 				}
 			}
@@ -482,15 +492,19 @@ public final class TableLayout {
 						-1, stickYaw(toCenter), toCenter, true, h, k, dealIndex++ * step));
 			}
 		}
-		// 4) 中央宝牌指示牌区：5 叠按叠序摆放，底张背面朝上；已揭开的叠数翻开上张（lift=FLAT_THICKNESS）
+		// 4) 中央宝牌指示牌区（王牌山）：5 叠按叠序摆放，底张背面朝上；已揭开的叠数翻开上张（lift=FLAT_THICKNESS）。
+		// 注意不能用 doraCodes() 的长度控叠数——空串会解析失败返回 0 张（整块王牌山消失），
+		// 叠数由 DORA_STACKS 固定，缺数据的位置按未知牌背补齐
 		Vec3 doraLong = f.scale(-1);
 		List<Integer> dora = st.doraCodes();
-		for (int i = 0; i < DORA_STACKS && 2 * i + 1 < dora.size(); i++) {
+		for (int i = 0; i < DORA_STACKS; i++) {
 			Vec3 stackPos = center.add(f.scale(0.12)).add(r.scale((i - (DORA_STACKS - 1) / 2.0) * 0.157));
-			out.add(new Placement(KIND_DORA, flatEntityPos(stackPos, 0), stackPos, dora.get(2 * i),
+			int bottomCode = 2 * i < dora.size() ? dora.get(2 * i) : -1;
+			int topCode = 2 * i + 1 < dora.size() ? dora.get(2 * i + 1) : -1;
+			out.add(new Placement(KIND_DORA, flatEntityPos(stackPos, 0), stackPos, bottomCode,
 					flatYaw(doraLong), doraLong, false, -1, i, dealIndex++ * step));
 			boolean revealed = i < st.revealedIndicators;
-			out.add(new Placement(KIND_DORA, flatEntityPos(stackPos, FLAT_THICKNESS), stackPos, dora.get(2 * i + 1),
+			out.add(new Placement(KIND_DORA, flatEntityPos(stackPos, FLAT_THICKNESS), stackPos, topCode,
 					flatYaw(doraLong), doraLong, revealed, -1, i, dealIndex++ * step));
 		}
 		// 5) 供托（此前局目流局留存、未结算的立直棒）：王牌指示叠旁的空位堆成一摞（有人和牌即取走清空）

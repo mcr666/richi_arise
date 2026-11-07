@@ -1,7 +1,7 @@
 {
-	"credit": "玻璃牌体模型（玻璃之间）：牌面（北面）保持真实牌面，其余面为玻璃材质（cutout）。第二块为朝南的内侧牌面，供从玻璃背面透视时看到真实牌面",
+	"credit": "玻璃牌体模型（玻璃之间）：结构与普通牌 mahjong_tile_base 一致——北面为牌面 #front，其余五面为 #cover（玻璃牌用 cover_glass，半透明贴图）。render_type=translucent 让牌体真正半透明（cutout 只是硬裁剪，会显得不透明）。南面同样贴 #front（旋转 180°），这样从背面观察时牌面依然渲染，不会像原版玻璃方块那样因背面剔除而看不到牌面",
 	"parent": "minecraft:block/block",
-	"render_type": "minecraft:cutout",
+	"render_type": "minecraft:translucent",
 	"textures": {
 		"front": "riichi_arise:item/mahjong/back",
 		"cover": "riichi_arise:item/mahjong/cover_glass",
@@ -14,17 +14,10 @@
 			"faces": {
 				"north": { "uv": [0, 0, 16, 16], "texture": "#front" },
 				"east": { "uv": [0, 4, 1.5, 8], "texture": "#cover" },
-				"south": { "uv": [3, 0, 6, 4], "texture": "#cover" },
+				"south": { "uv": [0, 0, 16, 16], "texture": "#front" },
 				"west": { "uv": [2.5, 4, 4, 8], "texture": "#cover" },
 				"up": { "uv": [9, 1.5, 6, 0], "texture": "#cover" },
 				"down": { "uv": [7, 4, 4, 5.5], "texture": "#cover" }
-			}
-		},
-		{
-			"from": [2, 0, 5.2],
-			"to": [14, 16, 5.4],
-			"faces": {
-				"south": { "uv": [0, 0, 16, 16], "texture": "#front" }
 			}
 		}
 	],

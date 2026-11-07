@@ -41,7 +41,13 @@ public class MahjongLobbyPayloads {
 	public static final int ACT_JOIN_QUEUE = 0, ACT_LEAVE_QUEUE = 1, ACT_START = 2,
 			ACT_ADD_AI = 3, ACT_REMOVE_AI = 4, ACT_KICK = 5, ACT_SET_TYPE = 6, ACT_CLEAR = 7,
 			ACT_VOTE_END = 8, ACT_SET_OPEN = 10, ACT_SET_AVATAR_SEAT = 12, ACT_SET_THINK = 13, ACT_SET_SPEED = 14,
-			ACT_SET_PLAYERS = 15, ACT_SET_ROOM = 16;
+			ACT_SET_PLAYERS = 15, ACT_SET_ROOM = 16,
+			/** 雀魂连接控制面板：建立连接并接管该桌（extra 忽略） */
+			ACT_TAKEOVER_ON = 17,
+			/** 雀魂连接控制面板：关闭外部接管（恢复常规交互） */
+			ACT_TAKEOVER_OFF = 18,
+			/** 雀魂连接控制面板：请求刷新连接状态（仅回推 NetState） */
+			ACT_TAKEOVER_STATUS = 19;
 
 	public record SyncMessage(long originPacked, int phase, List<String> seatNames, int aiMask,
 			List<String> queueNames, boolean canManage, int gameType, int voteCount,
@@ -134,13 +140,61 @@ public class MahjongLobbyPayloads {
 		public static void handleData(final OpenMessage message, final IPayloadContext context) {
 			if (context.flow() == PacketFlow.CLIENTBOUND) {
 				context.enqueueWork(() -> {
-					if (net.minecraft.client.Minecraft.getInstance().screen == null)
+					BlockPos origin = BlockPos.of(message.originPacked());
+					// 该桌已被雀魂连接接管：右键风盘直接打开连接控制面板，不再打开大厅管理界面
+					var state = CLIENT_NET.get(message.originPacked());
+					if (state != null && state.takeover())
+						mcr.riichi_arise.client.RichiNetScreen.open(origin);
+					else if (net.minecraft.client.Minecraft.getInstance().screen == null)
 						net.minecraft.client.Minecraft.getInstance().setScreen(
-								new mcr.riichi_arise.client.MahjongLobbyScreen(BlockPos.of(message.originPacked())));
+								new mcr.riichi_arise.client.MahjongLobbyScreen(origin));
 				});
 			}
 		}
 	}
+
+	/**
+	 * S→C：雀魂连接控制面板状态（端口/连接数/是否已接入/接管中/接管来源/阶段）。
+	 * 客户端缓存按原点存放，控制面板据此渲染。
+	 */
+	public record NetStateMessage(long originPacked, NetState state) implements CustomPacketPayload {
+		public static final Type<NetStateMessage> TYPE = new Type<>(
+				ResourceLocation.fromNamespaceAndPath(RichiiAriseMod.MODID, "richi_net_state"));
+
+		public static final StreamCodec<RegistryFriendlyByteBuf, NetStateMessage> STREAM_CODEC = StreamCodec.of(
+				(RegistryFriendlyByteBuf buf, NetStateMessage msg) -> {
+					buf.writeLong(msg.originPacked());
+					buf.writeUtf(msg.state().port(), 16);
+					buf.writeBoolean(msg.state().running());
+					buf.writeVarInt(msg.state().connections());
+					buf.writeBoolean(msg.state().linked());
+					buf.writeBoolean(msg.state().takeover());
+					buf.writeUtf(msg.state().source(), 64);
+					buf.writeUtf(msg.state().phase(), 16);
+				},
+				(RegistryFriendlyByteBuf buf) -> new NetStateMessage(buf.readLong(),
+						new NetState(buf.readUtf(16), buf.readBoolean(), buf.readVarInt(), buf.readBoolean(),
+								buf.readBoolean(), buf.readUtf(64), buf.readUtf(16))));
+
+		@Override
+		public Type<NetStateMessage> type() {
+			return TYPE;
+		}
+
+		public static void handleData(final NetStateMessage message, final IPayloadContext context) {
+			if (context.flow() == PacketFlow.CLIENTBOUND) {
+				context.enqueueWork(() -> CLIENT_NET.put(message.originPacked(), message.state()));
+			}
+		}
+	}
+
+	/** 雀魂连接状态（客户端只读） */
+	public record NetState(String port, boolean running, int connections, boolean linked,
+			boolean takeover, String source, String phase) {
+	}
+
+	/** 客户端缓存：原点（打包 long）→ 最近一次 NetState */
+	public static final java.util.Map<Long, NetState> CLIENT_NET = new java.util.HashMap<>();
 
 	/**
 	 * S→C：对局开始时的房间类型标题（原版 toast）。
@@ -240,6 +294,8 @@ public class MahjongLobbyPayloads {
 		RichiiAriseMod.addNetworkMessage(SyncMessage.TYPE, SyncMessage.STREAM_CODEC, SyncMessage::handleData);
 		RichiiAriseMod.addNetworkMessage(ActionMessage.TYPE, ActionMessage.STREAM_CODEC, ActionMessage::handleData);
 		RichiiAriseMod.addNetworkMessage(OpenMessage.TYPE, OpenMessage.STREAM_CODEC, OpenMessage::handleData);
+		RichiiAriseMod.addNetworkMessage(NetStateMessage.TYPE, NetStateMessage.STREAM_CODEC,
+				NetStateMessage::handleData);
 		RichiiAriseMod.addNetworkMessage(RoomTitlePayload.TYPE, RoomTitlePayload.STREAM_CODEC,
 				RoomTitlePayload::handleData);
 		mcr.riichi_arise.network.VoicePayloads.register();

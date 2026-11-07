@@ -46,6 +46,13 @@ public class RichiTableState {
 	 * 客户端在 {@link mcr.riichi_arise.render.TableLayout#plan} 中单独摆位。</p>
 	 */
 	public final int[] kita = new int[4];
+	/**
+	 * 各家拔出的北风牌中"哪几张是透明牌"的位标记（位 k = 第 k 张拔北，与 {@link #kita} 对应）。
+	 * <p>玻璃之间每种牌 3 张透明 1 张普通，拔出的北也可能是那张普通牌，因此不能只看房间类型，
+	 * 必须逐张记录真实透明位，否则会把普通北画成透明（或反之）。经快照 {@code kitaGlass} 字段下发，
+	 * 客户端在 {@link mcr.riichi_arise.render.TableLayout#plan} 中按位选择玻璃牌体。resetHand 清零。</p>
+	 */
+	public final int[] kitaGlass = new int[4];
 	/** 思考时间档位：{每巡时限秒, 读秒(长思考库)秒}；thinkIdx 由管理界面切换，开局时套用 */
 	public static final int[][] THINK_PRESETS = { { 5, 20 }, { 10, 30 }, { 60, 0 }, { 3, 5 } };
 	public int thinkIdx = 0;
@@ -109,6 +116,27 @@ public class RichiTableState {
 	public final java.util.Set<String> externalUuids = new java.util.HashSet<>();
 	/** 外部玩家显示名：uuid → 名字（join 时设置，构造 RiichiPlayer 用） */
 	public final java.util.Map<String, String> externalNames = new java.util.HashMap<>();
+	/**
+	 * 镜面接入（net 端口 action=mirror 的整手牌驱动，如外部平台牌谱转播）的座位 UUID 集合：
+	 * 这些座位由外部程序提交整手牌/牌河/副露，不走摸牌引擎，其副露/手牌对真人始终隐藏
+	 * （RichiTableSync 按"非本家"处理；观战/明牌设置也不下发，避免外部牌谱泄露局部状态）。
+	 */
+	public final java.util.Set<String> mirrorUuids = new java.util.HashSet<>();
+	/**
+	 * 整桌投影（整桌外部接管，如雀魂对局转播）：四家全部由外部快照驱动，牌桌自身不再推进摸打/响应
+	 * （不跑 AI 摸切、不开响应窗口、关闭本地吃碰杠判定），牌局内容完全以外部为准。
+	 */
+	public boolean mirrorAll;
+	/** 整桌投影的座位显示名覆盖（外部对局内玩家昵称；空串/null = 沿用牌桌自己的座位名） */
+	public final String[] seatNameOverride = new String[4];
+	/**
+	 * 外部接管（雀魂连接）：大厅"查看牌谱"右键开启的连接控制面板中建立连接后置 true。
+	 * 接管期间该牌桌完全由外部接管——右键风盘只打开控制面板，其他管理界面（大厅/设置/牌谱列表）
+	 * 不再可打开，直到在控制面板里手动关闭。
+	 */
+	public boolean externalTakeover = false;
+	/** 接管绑定的事件来源（服务器事件字符串如 "richi_arise:client_records"）；空 = 整桌接管 */
+	public String takeoverSource = "";
 	/** 服务端 Marker 代理实体：每个 AI 座位对应一个 Marker，可被选择器选中/tp；key=座位 0..3，value=实体 UUID */
 	public final java.util.Map<Integer, java.util.UUID> aiMarkerUuids = new java.util.HashMap<>();
 	/** 管理界面预约的 AI 座位（等待阶段设置，开局时该座位固定安排 AI） */
@@ -149,6 +177,11 @@ public class RichiTableState {
 
 	public RichiTableState() {
 		java.util.Arrays.fill(points, 25000);
+	}
+
+	/** 雀魂连接状态（控制面板展示用，见 RichiNetManager.status） */
+	public record NetStatus(String port, boolean running, int connections, boolean linked,
+			boolean takeover, String source, String phase) {
 	}
 
 	/** 配对起始点数：三麻 35000 / 四麻 25000（雀魂规则，开局 startGame 按人数填充） */

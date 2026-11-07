@@ -55,14 +55,6 @@ public class MahjongPointDeltaScreen extends Screen {
 		mc.setScreen(new MahjongPointDeltaScreen(data));
 	}
 
-	/** 关闭和牌结算界面后本地立即打开（数据来自服务端预置包，不必等其他人确认） */
-	public static void openPrepared(MahjongPointDeltaPayload.PointDeltaMessage data) {
-		Minecraft mc = Minecraft.getInstance();
-		if (mc.player == null || waitingForOthers || mc.screen instanceof MahjongPointDeltaScreen)
-			return;
-		mc.setScreen(new MahjongPointDeltaScreen(data));
-	}
-
 	/** 服务端推进下一局：关闭已打开的点数变化界面，并清掉等待提示 */
 	public static void closeIfOpen() {
 		waitingForOthers = false;

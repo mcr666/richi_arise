@@ -45,6 +45,47 @@ public static void setGame(BlockPos origin, mcr.riichi_arise.game.riichi.RiichiG
 		GAMES.put(origin.immutable(), game);
 }
 
+/**
+ * 镜面中途接管：把进行中对局（RiichiGame）里某个 AI 座位的 UUID/名字原地换成外部程序，
+ * 使其随后的推牌/摸牌都归属该外部会话。成功返回 true。
+ */
+public static boolean replaceSeatUuid(BlockPos origin, String uuid, String name) {
+	var game = GAMES.get(origin);
+	if (game == null)
+		return false;
+	var st = TABLES.get(origin);
+	if (st == null)
+		return false;
+	if (st.mirrorAll) { // 整桌投影：会话直接并入当前座位（四家均由外部快照覆盖）
+		game.renameSeat(0, uuid, name);
+		st.players[0] = uuid;
+		st.aiSeat[0] = false;
+		st.externalUuids.add(uuid);
+		st.mirrorUuids.add(uuid);
+		st.externalNames.put(uuid, name);
+		markDirty(origin);
+		return true;
+	}
+	for (int s = 0; s < st.playerCount; s++) {
+		String u = st.players[s];
+		if (u == null || !u.equals(mcr.riichi_arise.game.riichi.RiichiBot.aiUuid(s))
+				|| st.npcUuids.contains(u))
+			continue;
+		var p = game.player(s);
+		if (p == null || !p.uuid.equals(u))
+			continue;
+		game.renameSeat(s, uuid, name);
+		st.players[s] = uuid;
+		st.aiSeat[s] = false;
+		st.externalUuids.add(uuid);
+		st.mirrorUuids.add(uuid);
+		st.externalNames.put(uuid, name);
+		markDirty(origin);
+		return true;
+	}
+	return false;
+}
+
 /** 取牌局状态，不存在则新建空大厅（等待排队；不再自动演示发牌）。新建时应用该桌持久化设置 */
 public static RichiTableState getOrCreate(ServerLevel level, BlockPos origin) {
 	BlockPos key = origin.immutable();

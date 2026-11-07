@@ -87,13 +87,21 @@ public class MahjongLobbyScreen extends Screen {
 	// 灰色半透明按钮（与座位/列表行同款样式，替代原版 Button）
 	// ==================================================================
 
-	private record UiBtn(int x, int y, int w, int h, java.util.function.Supplier<String> label, Runnable action) {
+	/** rightAction：右键点击行为（null = 与左键相同，仅打开雀魂连接控制面板的按钮使用） */
+	private record UiBtn(int x, int y, int w, int h, java.util.function.Supplier<String> label, Runnable action,
+			Runnable rightAction) {
 	}
 
 	private final java.util.List<UiBtn> btns = new java.util.ArrayList<>();
 
 	private void addBtn(int x, int y, int w, int h, java.util.function.Supplier<String> label, Runnable action) {
-		this.btns.add(new UiBtn(x, y, w, h, label, action));
+		this.btns.add(new UiBtn(x, y, w, h, label, action, null));
+	}
+
+	/** 带右键行为的按钮：右键触发 rightAction（"查看牌谱"右键 = 打开雀魂连接控制面板） */
+	private void addBtn(int x, int y, int w, int h, java.util.function.Supplier<String> label, Runnable action,
+			Runnable rightAction) {
+		this.btns.add(new UiBtn(x, y, w, h, label, action, rightAction));
 	}
 
 	@Override
@@ -137,9 +145,10 @@ public class MahjongLobbyScreen extends Screen {
 					onClose(); // 开局后关闭界面，直接看发牌
 				});
 		boolean finished = this.sync.canManage() && this.sync.phase() == PHASE_FINISHED;
+		// 查看牌谱：左键 = 牌谱列表；右键 = 雀魂连接控制面板（建立连接后由外部接管本桌）
 		addBtn(colLX, y + 40, colW, 18,
 				() -> Component.translatable("gui.riichi_arise.lobby.btn_paipu").getString(),
-				PaipuListScreen::open);
+				PaipuListScreen::open, () -> RichiNetScreen.open(this.origin));
 		// 设置：固定停靠面板左下角（不随左列按钮流，独立于队列/座位布局）→ 内容设置界面（客户端/个人设定/世界规则）
 		addBtn(colLX, top + 220, colW, 18,
 				() -> Component.translatable("gui.riichi_arise.lobby.btn_settings").getString(),
@@ -198,6 +207,12 @@ public class MahjongLobbyScreen extends Screen {
 
 	@Override
 	public void tick() {
+		// 该桌已被雀魂连接接管：管理界面自动切换为连接控制面板（接管期间只保留该面板入口）
+		MahjongLobbyPayloads.NetState net = MahjongLobbyPayloads.CLIENT_NET.get(this.origin.asLong());
+		if (net != null && net.takeover()) {
+			RichiNetScreen.open(this.origin);
+			return;
+		}
 		refresh();
 	}
 
@@ -354,11 +369,14 @@ public class MahjongLobbyScreen extends Screen {
 	@Override
 	public boolean mouseClicked(double mouseX, double mouseY, int button) {
 		if (this.sync != null) {
-			// 灰色半透明按钮（列表样式）命中
-			if (this.pickerSeat < 0 && button == 0) {
+			// 灰色半透明按钮（列表样式）命中：左键 = 主行为；右键 = rightAction（无则忽略）
+			if (this.pickerSeat < 0 && (button == 0 || button == 1)) {
 				for (UiBtn b : this.btns) {
 					if (mouseX >= b.x() && mouseX < b.x() + b.w() && mouseY >= b.y() && mouseY < b.y() + b.h()) {
-						b.action().run();
+						if (button == 0)
+							b.action().run();
+						else if (b.rightAction() != null)
+							b.rightAction().run();
 						return true;
 					}
 				}

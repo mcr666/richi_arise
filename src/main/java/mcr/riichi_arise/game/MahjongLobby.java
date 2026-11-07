@@ -184,7 +184,37 @@ public final class MahjongLobby {
 				if (canManage(sp))
 					kick(sp, origin, st, extra);
 			}
+			case MahjongLobbyPayloads.ACT_TAKEOVER_ON -> {
+				// 雀魂连接控制面板：开始连接 → 开启内网端口并由外部接管该桌
+				if (canManage(sp)) {
+					String err = mcr.riichi_arise.net.RichiNetManager.takeover(sp.getServer(),
+							origin, mcr.riichi_arise.net.RichiNetConfig.SOURCE_CLIENT);
+					if (err != null)
+						sp.displayClientMessage(Component.literal("§c<雀魂连接>§r " + err), true);
+					pushNetState(sp, origin);
+				}
+			}
+			case MahjongLobbyPayloads.ACT_TAKEOVER_OFF -> {
+				// 控制面板内手动关闭：解除接管，该桌恢复常规交互
+				if (canManage(sp)) {
+					mcr.riichi_arise.net.RichiNetManager.release(origin);
+					pushNetState(sp, origin);
+				}
+			}
+			case MahjongLobbyPayloads.ACT_TAKEOVER_STATUS -> {
+				// 控制面板打开时拉一次状态（面板渲染依赖 NetState）
+				pushNetState(sp, origin);
+			}
 		}
+	}
+
+	/** 推一包雀魂连接状态给指定玩家（控制面板渲染用） */
+	public static void pushNetState(ServerPlayer sp, BlockPos origin) {
+		RichiTableState.NetStatus st = mcr.riichi_arise.net.RichiNetManager.status(origin);
+		net.neoforged.neoforge.network.PacketDistributor.sendToPlayer(sp,
+				new MahjongLobbyPayloads.NetStateMessage(origin.asLong(),
+						new MahjongLobbyPayloads.NetState(st.port(), st.running(), st.connections(),
+								st.linked(), st.takeover(), st.source(), st.phase())));
 	}
 
 	/** 非潜行右击风盘：加入/退出等待队列（对局中提示等待） */
@@ -193,6 +223,11 @@ public final class MahjongLobby {
 		RichiTableState st = RichiTableManager.get(origin);
 		if (st == null || !(level.getBlockState(origin).getBlock() instanceof FengPanBlock))
 			return;
+		if (st.externalTakeover) {
+			// 外部接管期间：本桌交互统一由连接控制面板管理，不接受排队
+			sp.displayClientMessage(Component.translatable("message.riichi_arise.lobby_takeover"), true);
+			return;
+		}
 		if (st.phase == RichiTableState.PHASE_PLAYING) {
 			sp.displayClientMessage(Component.translatable("message.riichi_arise.lobby_in_game"), true);
 			return;
@@ -237,12 +272,17 @@ public final class MahjongLobby {
 		// 入队不再自动开局：由管理界面「开始对局」按钮（ACT_START）手动启动
 	}
 
-	/** 右击风盘（无论是否潜行）：请求客户端打开管理界面，并先推一包当前大厅状态（界面打开即有数据渲染） */
+	/**
+	 * 右击风盘（无论是否潜行）：请求客户端打开管理界面，并先推一包当前大厅状态（界面打开即有数据渲染）。
+	 * 该桌已被雀魂连接接管时改推连接控制面板状态，客户端据此直接打开控制面板（不打开大厅管理界面）。
+	 */
 	public static void openLobby(ServerPlayer sp, BlockPos origin) {
 		ServerLevel level = sp.serverLevel();
 		RichiTableState st = RichiTableManager.get(origin);
 		if (st != null)
 			broadcastSync(level, origin, st); // 界面加载依赖 SyncMessage；此前仅潜行路径路过 toggleQueue 才有广播
+		// 无论是否接管都推一次连接状态：客户端据 takeover 决定打开大厅管理界面还是连接控制面板
+		pushNetState(sp, origin);
 		net.neoforged.neoforge.network.PacketDistributor.sendToPlayer(sp,
 				new MahjongLobbyPayloads.OpenMessage(origin.asLong()));
 	}
@@ -459,9 +499,61 @@ public final class MahjongLobby {
 	// ==================================================================
 
 	/**
+	 * 整桌投影中途接入：外部对局（如雀魂转播）接管整张牌桌，四家全部改由外部快照驱动。
+	 * 参战座位全部转为外部座位（取消 AI，手牌/牌河/副露由外部整体覆盖），会话坐在首个座位。
+	 */
+	public static boolean externalJoinAll(ServerLevel level, BlockPos origin, String uuid, String name) {
+		RichiTableState st = RichiTableManager.get(origin);
+		if (st == null || st.phase != RichiTableState.PHASE_PLAYING)
+			return false;
+		st.mirrorAll = true;
+		for (int s = 0; s < st.playerCount; s++) {
+			if (st.npcUuids.contains(st.players[s]))
+				continue; // Murmol NPC 等实体参牌者保持不动（只投影牌面）
+			st.aiSeat[s] = false;
+		}
+		st.players[0] = uuid;
+		st.externalUuids.add(uuid);
+		st.mirrorUuids.add(uuid);
+		st.externalNames.put(uuid, name);
+		RichiTableManager.markDirty(origin);
+		return true;
+	}
+
+	/**
+	 * 镜面中途接入：把外部程序直接接管到进行中对局的一个"可投影"座位。
+	 * 优先空座位（含已离桌的真人座位），其次未预约的 AI 座位（改为无 ServerPlayer 的外部座位）。
+	 * 接管后该座位由外部牌谱全权投影（手牌/牌河/副露），无玩家输入。
+	 */
+	public static boolean externalJoinPlaying(ServerLevel level, BlockPos origin, String uuid, String name) {
+		RichiTableState st = RichiTableManager.get(origin);
+		if (st == null || st.phase != RichiTableState.PHASE_PLAYING)
+			return false;
+		int seat = -1;
+		for (int s = 0; s < st.playerCount && seat < 0; s++)
+			if (st.players[s] == null)
+				seat = s;
+		if (seat < 0)
+			for (int s = 0; s < st.playerCount; s++) {
+				String u = st.players[s];
+				if (u != null && u.equals(RiichiBot.aiUuid(s)) && !st.npcUuids.contains(u)) {
+					seat = s;
+					break;
+				}
+			}
+		if (seat < 0)
+			return false;
+		st.players[seat] = uuid;
+		st.aiSeat[seat] = false;
+		st.externalUuids.add(uuid);
+		st.mirrorUuids.add(uuid);
+		st.externalNames.put(uuid, name);
+		RichiTableManager.markDirty(origin);
+		return true;
+	}
+
+	/**
 	 * 外部程序玩家加入指定桌等候队列（net 层 join 调用；无 ServerPlayer/实体）。
-	 * 占据方式与真人相同（队列 UUID），额外登记 externalUuids/externalNames；
-	 * 满员时与 NPC 一样顶替 AI 预约或队内参牌者。对局中不可加入。
 	 */
 	public static boolean externalJoinTable(ServerLevel level, BlockPos origin, String uuid, String name) {
 		RichiTableState st = RichiTableManager.get(origin);

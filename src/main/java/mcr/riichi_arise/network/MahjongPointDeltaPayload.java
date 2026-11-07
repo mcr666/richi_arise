@@ -11,13 +11,13 @@ import mcr.riichi_arise.RichiiAriseMod;
 
 /**
  * 点数变化界面推送（S→C）：和牌结算界面结束后展示本局四家点数变化（局前 → 局后）。
- * mode=0 展示 / mode=1 关闭 / mode=2 预置（只缓存数据，等本地关闭结算界面后再打开）。
+ * mode=0 展示 / mode=1 关闭。多人荣和时服务端等各家和牌结算界面全部展示完，再统一发 mode=0。
  * 客户端 6s 自动确认（回 settle_confirm 推进）。
  */
 public class MahjongPointDeltaPayload {
-	public static final int MODE_SHOW = 0, MODE_CLOSE = 1, MODE_PREPARE = 2;
+	public static final int MODE_SHOW = 0, MODE_CLOSE = 1;
 
-	/** 预置的本局点数变化数据（关闭结算界面后本地直接打开，不必等服务端推送 SHOW） */
+	/** 最近一次收到的点数变化数据（仅调试/查重参考：界面统一由服务端 MODE_SHOW 包打开） */
 	public static volatile PointDeltaMessage prepared;
 
 	/** 取指定桌的预置数据（origin 不符/未预置返回 null） */
@@ -48,8 +48,6 @@ public class MahjongPointDeltaPayload {
 						return;
 					}
 					prepared = message;
-					if (message.mode() == MODE_PREPARE)
-						return; // 只缓存：等玩家关闭和牌结算界面时再本地打开
 					mcr.riichi_arise.client.MahjongPointDeltaScreen.open(message);
 				});
 			}
@@ -89,16 +87,6 @@ public class MahjongPointDeltaPayload {
 			String[] names, int[] before, int[] after) {
 		net.neoforged.neoforge.network.PacketDistributor.sendToPlayer(player,
 				new PointDeltaMessage(MODE_SHOW, originPacked, playerCount,
-						java.util.Arrays.asList(names),
-						java.util.List.of(before[0], before[1], before[2], before[3]),
-						java.util.List.of(after[0], after[1], after[2], after[3])));
-	}
-
-	/** 服务端便捷方法：向单个玩家预置点数变化数据（不打开界面） */
-	public static void sendPrepare(net.minecraft.server.level.ServerPlayer player, long originPacked, int playerCount,
-			String[] names, int[] before, int[] after) {
-		net.neoforged.neoforge.network.PacketDistributor.sendToPlayer(player,
-				new PointDeltaMessage(MODE_PREPARE, originPacked, playerCount,
 						java.util.Arrays.asList(names),
 						java.util.List.of(before[0], before[1], before[2], before[3]),
 						java.util.List.of(after[0], after[1], after[2], after[3])));
