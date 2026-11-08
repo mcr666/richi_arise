@@ -20,10 +20,11 @@ public class MahjongLobbyScreen extends Screen {
 
 	private static final int PHASE_WAITING = 0, PHASE_PLAYING = 1, PHASE_FINISHED = 2;
 
-	/** AI 座位角色显示键（顺序与 MahjongLobby.AVATAR_MODES 一致：默认 > 八木唯 > 琳琅 > 福姬 > 瓦西子 > 赤木 > 一姬） */
+	/** AI 座位角色显示键（顺序与 MahjongLobby.AVATAR_MODES 一致：默认 > 八木唯 > 琳琅 > 福姬 > 瓦西子 > 赤木 > 一姬 > 桔螈） */
 	private static final String[] AVATAR_KEYS = { "gui.riichi_arise.lobby.ch_default", "gui.riichi_arise.lobby.ch_bamuwei",
 			"gui.riichi_arise.lobby.ch_linlang", "gui.riichi_arise.lobby.ch_fuji", "gui.riichi_arise.lobby.ch_washizu",
-			"gui.riichi_arise.lobby.ch_akagi", "gui.riichi_arise.lobby.ch_yiji" };
+			"gui.riichi_arise.lobby.ch_akagi", "gui.riichi_arise.lobby.ch_yiji",
+			"gui.riichi_arise.lobby.ch_oraxolotl" };
 
 	private final BlockPos origin;
 	/** 最近一次服务端同步（未收到前显示加载中） */
@@ -94,6 +95,55 @@ public class MahjongLobbyScreen extends Screen {
 
 	private final java.util.List<UiBtn> btns = new java.util.ArrayList<>();
 
+	/** 右键弹出的单项候选（label 已本地化，selected = 当前值） */
+	private record SettingOption(String label, boolean selected, Runnable action) {
+	}
+
+	/** 游戏设置列表行（右侧停靠，样式仿座位列表：左黄标＋右白值，左键循环切换 / 右键弹出候选列表） */
+	private record SettingRow(int x, int y, int w, int h, java.util.function.Supplier<String> label,
+			java.util.function.Supplier<String> value, Runnable action, java.util.List<SettingOption> options) {
+	}
+
+	private final java.util.List<SettingRow> settingRows = new java.util.ArrayList<>();
+
+	private void addSettingRow(int y, java.util.function.Supplier<String> label,
+			java.util.function.Supplier<String> value, Runnable action) {
+		addSettingRow(y, label, value, action, null);
+	}
+
+	private void addSettingRow(int y, java.util.function.Supplier<String> label,
+			java.util.function.Supplier<String> value, Runnable action, java.util.List<SettingOption> options) {
+		int w = settingsW();
+		this.settingRows.add(new SettingRow(settingsX(), y, w, ROW_H - 2, label, value, action, options));
+	}
+
+	/** 右键候选项构造器：label(i) 生成显示名；action(i) 生成选中后的操作 */
+	private interface OptionLabel {
+		String get(int index);
+	}
+
+	private interface OptionAction {
+		Runnable get(int index);
+	}
+
+	private java.util.List<SettingOption> optionList(OptionLabel labels, int selected, OptionAction actions,
+			int count) {
+		java.util.List<SettingOption> list = new java.util.ArrayList<>(count);
+		for (int i = 0; i < count; i++)
+			list.add(new SettingOption(labels.get(i), i == selected, actions.get(i)));
+		return list;
+	}
+
+	/** 右侧游戏设置列表宽度（随屏幕宽度收缩，最少 150） */
+	private int settingsW() {
+		return Math.min(180, Math.max(150, this.width / 4));
+	}
+
+	/** 右侧游戏设置列表停靠位置：屏幕右半边、与面板座位区顶对齐 */
+	private int settingsX() {
+		return this.width - settingsW() - 12;
+	}
+
 	private void addBtn(int x, int y, int w, int h, java.util.function.Supplier<String> label, Runnable action) {
 		this.btns.add(new UiBtn(x, y, w, h, label, action, null));
 	}
@@ -113,10 +163,13 @@ public class MahjongLobbyScreen extends Screen {
 		int left = this.width / 2 - PANEL_W / 2;
 		int top = this.height / 2 - 100;
 		int colW = (PANEL_W - 12) / 2; // 左右两列等宽（列间隙 12）
-		int colLX = left + 4, colRX = left + PANEL_W - 4 - colW;
+		int colLX = left + 4;
 		int queueTop = top + 4 * ROW_H + 6;
 		// 两列内容起点：队列头行下方
 		int y = queueTop + 12 + QUEUE_ROWS * 12 + 2;
+		// 屏幕左下角停靠：设置 / 牌谱查看器（面板外，不随左列按钮流）
+		int dockX = 12, dockW = 100, dockH = 18, dockBottom = this.height - dockH - 12;
+		this.settingRows.clear();
 		if (this.sync.phase() == PHASE_PLAYING) {
 			// 对局中：投票结束对局（旧操作全部无效）
 			addBtn(colLX, y, 130, 18,
@@ -128,12 +181,12 @@ public class MahjongLobbyScreen extends Screen {
 			addBtn(colLX + 134, y, colW - 26, 18,
 					() -> Component.translatable("gui.riichi_arise.lobby.btn_close").getString(), this::onClose);
 			// 设置：对局中同样可打开（内容里的客户端配置切换后立即重建牌桌生效）
-			addBtn(colLX, top + 220, colW, 18,
+			addBtn(dockX, dockBottom, dockW, dockH,
 					() -> Component.translatable("gui.riichi_arise.lobby.btn_settings").getString(),
 					() -> RichiSettingsScreen.open(this.origin));
 			return;
 		}
-		// 左列：加入/退出队列、开始对局、查看牌谱
+		// 左列：加入/退出队列、开始对局（牌谱/设置改停靠屏幕左下角）
 		addBtn(colLX, y, colW, 18,
 				() -> Component.translatable(inQueue() ? "gui.riichi_arise.lobby.btn_leave" : "gui.riichi_arise.lobby.btn_join")
 						.getString(),
@@ -145,56 +198,91 @@ public class MahjongLobbyScreen extends Screen {
 					onClose(); // 开局后关闭界面，直接看发牌
 				});
 		boolean finished = this.sync.canManage() && this.sync.phase() == PHASE_FINISHED;
-		// 查看牌谱：左键 = 牌谱列表；右键 = 雀魂连接控制面板（建立连接后由外部接管本桌）
-		addBtn(colLX, y + 40, colW, 18,
+		// 屏幕左下角停靠：查看牌谱（左键 = 牌谱列表；右键 = 雀魂连接控制面板）、设置
+		addBtn(dockX, dockBottom - 22, dockW, dockH,
 				() -> Component.translatable("gui.riichi_arise.lobby.btn_paipu").getString(),
 				PaipuListScreen::open, () -> RichiNetScreen.open(this.origin));
-		// 设置：固定停靠面板左下角（不随左列按钮流，独立于队列/座位布局）→ 内容设置界面（客户端/个人设定/世界规则）
-		addBtn(colLX, top + 220, colW, 18,
+		addBtn(dockX, dockBottom, dockW, dockH,
 				() -> Component.translatable("gui.riichi_arise.lobby.btn_settings").getString(),
 				() -> RichiSettingsScreen.open(this.origin));
-		// 右列：游戏设置列表（管理员·等待/终局未清理阶段可改；对局中不可调整，点击整行循环切换）
+		// 右侧游戏设置列表（管理员·等待/终局未清理阶段可改；对局中不可调整，整行点击循环切换）
 		boolean adminSettings = this.sync.canManage() && this.sync.phase() != PHASE_PLAYING;
 		if (adminSettings) {
-			// 房间类型：铁之间 ↔ 玻璃之间（点击循环切换，开局时生效）
-			addBtn(colRX, queueTop + 12, colW, 18,
-					() -> Component.translatable("gui.riichi_arise.lobby.btn_room",
-							Component.translatable(this.sync.roomType() == 1
-									? "gui.riichi_arise.lobby.room_glass" : "gui.riichi_arise.lobby.room_tie").getString())
-							.getString(),
-					() -> send(MahjongLobbyPayloads.ACT_SET_ROOM, this.sync.roomType() == 1 ? 0 : 1));
-			// 对局人数：四人 / 三人 切换（队列人数超过目标人数时服务端拒绝）
-			addBtn(colRX, queueTop + 32, colW, 18,
+			String[] typeKeys = { "gui.riichi_arise.lobby.type_single", "gui.riichi_arise.lobby.type_east", "gui.riichi_arise.lobby.type_full" };
+			String[] thinkPresets = { "5+20", "10+30", "60+0", "3+5" };
+			String[] roomKeys = { "gui.riichi_arise.lobby.room_tie", "gui.riichi_arise.lobby.room_glass",
+					"gui.riichi_arise.lobby.room_amethyst" };
+			String[] speedKeys = { "gui.riichi_arise.lobby.speed_fast", "gui.riichi_arise.lobby.speed_mid", "gui.riichi_arise.lobby.speed_slow" };
+			int row = 0;
+			int curRoom = Math.floorMod(this.sync.roomType(), 3);
+			int curType = Math.floorMod(this.sync.gameType(), 3);
+			int curThink = Math.floorMod(this.sync.thinkIdx(), 4);
+			int curSpeed = Math.floorMod(this.sync.aiSpeedIdx(), 3);
+			// 房间类型：铁之间 → 玻璃之间 → 紫水晶之间（左键循环；右键弹出全部候选，开局时生效）
+			addSettingRow(top + row++ * ROW_H,
+					() -> Component.translatable("gui.riichi_arise.lobby.label_room").getString(),
+					() -> Component.translatable(roomKeys[Math.floorMod(this.sync.roomType(), 3)]).getString(),
+					() -> send(MahjongLobbyPayloads.ACT_SET_ROOM, (Math.floorMod(this.sync.roomType(), 3) + 1) % 3),
+					optionList((i) -> Component.translatable(roomKeys[i]).getString(), curRoom,
+							(i) -> () -> send(MahjongLobbyPayloads.ACT_SET_ROOM, i), 3));
+			// 对局人数：四人 / 三人（队列人数超过目标人数时服务端拒绝）
+			addSettingRow(top + row++ * ROW_H,
+					() -> Component.translatable("gui.riichi_arise.lobby.label_players").getString(),
 					() -> Component.translatable(this.sync.playerCount() == 3
 							? "gui.riichi_arise.lobby.players_3" : "gui.riichi_arise.lobby.players_4").getString(),
-					() -> send(MahjongLobbyPayloads.ACT_SET_PLAYERS, this.sync.playerCount() == 3 ? 4 : 3));
-			String[] typeKeys = { "gui.riichi_arise.lobby.type_single", "gui.riichi_arise.lobby.type_east", "gui.riichi_arise.lobby.type_full" };
-			int type = Math.floorMod(this.sync.gameType(), 3);
-			addBtn(colRX, queueTop + 52, colW, 18,
-					() -> Component.translatable("gui.riichi_arise.lobby.btn_type",
-							Component.translatable(typeKeys[Math.floorMod(this.sync.gameType(), 3)]).getString())
-							.getString(),
+					() -> send(MahjongLobbyPayloads.ACT_SET_PLAYERS, this.sync.playerCount() == 3 ? 4 : 3),
+					optionList((i) -> Component.translatable(i == 0 ? "gui.riichi_arise.lobby.players_4"
+							: "gui.riichi_arise.lobby.players_3").getString(),
+							this.sync.playerCount() == 3 ? 1 : 0,
+							(i) -> () -> send(MahjongLobbyPayloads.ACT_SET_PLAYERS, i == 0 ? 4 : 3), 2));
+			addSettingRow(top + row++ * ROW_H,
+					() -> Component.translatable("gui.riichi_arise.lobby.label_type").getString(),
+					() -> Component.translatable(typeKeys[Math.floorMod(this.sync.gameType(), 3)]).getString(),
 					() -> send(MahjongLobbyPayloads.ACT_SET_TYPE,
-							(Math.floorMod(this.sync.gameType(), 3) + 1) % 3));
+							(Math.floorMod(this.sync.gameType(), 3) + 1) % 3),
+					optionList((i) -> Component.translatable(typeKeys[i]).getString(), curType,
+							(i) -> () -> send(MahjongLobbyPayloads.ACT_SET_TYPE, i), 3));
 			// 思考时间档位循环：5+20 → 10+30 → 60+0 → 3+5
-			String[] thinkPresets = { "5+20", "10+30", "60+0", "3+5" };
-			addBtn(colRX, queueTop + 72, colW, 18,
-					() -> Component.translatable("gui.riichi_arise.lobby.btn_think",
-							thinkPresets[Math.floorMod(this.sync.thinkIdx(), 4)]).getString(),
+			addSettingRow(top + row++ * ROW_H,
+					() -> Component.translatable("gui.riichi_arise.lobby.label_think").getString(),
+					() -> thinkPresets[Math.floorMod(this.sync.thinkIdx(), 4)],
 					() -> send(MahjongLobbyPayloads.ACT_SET_THINK,
-							(Math.floorMod(this.sync.thinkIdx(), 4) + 1) % 4));
-			String[] speedKeys = { "gui.riichi_arise.lobby.speed_fast", "gui.riichi_arise.lobby.speed_mid", "gui.riichi_arise.lobby.speed_slow" };
-			addBtn(colRX, queueTop + 92, colW, 18,
-					() -> Component.translatable("gui.riichi_arise.lobby.btn_speed",
-							Component.translatable(speedKeys[Math.floorMod(this.sync.aiSpeedIdx(), 3)]).getString())
-							.getString(),
+							(Math.floorMod(this.sync.thinkIdx(), 4) + 1) % 4),
+					optionList((i) -> thinkPresets[i], curThink,
+							(i) -> () -> send(MahjongLobbyPayloads.ACT_SET_THINK, i), 4));
+			addSettingRow(top + row++ * ROW_H,
+					() -> Component.translatable("gui.riichi_arise.lobby.label_speed").getString(),
+					() -> Component.translatable(speedKeys[Math.floorMod(this.sync.aiSpeedIdx(), 3)]).getString(),
 					() -> send(MahjongLobbyPayloads.ACT_SET_SPEED,
-							(Math.floorMod(this.sync.aiSpeedIdx(), 3) + 1) % 3));
-			addBtn(colRX, queueTop + 112, colW, 18,
-					() -> Component.translatable("gui.riichi_arise.lobby.btn_open",
-							Component.translatable(this.sync.openHand() ? "gui.riichi_arise.lobby.open_on"
-									: "gui.riichi_arise.lobby.open_off").getString()).getString(),
-					() -> send(MahjongLobbyPayloads.ACT_SET_OPEN, this.sync.openHand() ? 0 : 1));
+							(Math.floorMod(this.sync.aiSpeedIdx(), 3) + 1) % 3),
+					optionList((i) -> Component.translatable(speedKeys[i]).getString(), curSpeed,
+							(i) -> () -> send(MahjongLobbyPayloads.ACT_SET_SPEED, i), 3));
+			addSettingRow(top + row++ * ROW_H,
+					() -> Component.translatable("gui.riichi_arise.lobby.label_open").getString(),
+					() -> Component.translatable(this.sync.openHand() ? "gui.riichi_arise.lobby.open_on"
+							: "gui.riichi_arise.lobby.open_off").getString(),
+					() -> send(MahjongLobbyPayloads.ACT_SET_OPEN, this.sync.openHand() ? 0 : 1),
+					optionList((i) -> Component.translatable(i == 1 ? "gui.riichi_arise.lobby.open_on"
+							: "gui.riichi_arise.lobby.open_off").getString(), this.sync.openHand() ? 1 : 0,
+							(i) -> () -> send(MahjongLobbyPayloads.ACT_SET_OPEN, i), 2));
+			// 击飞（默认开）：有人点数 < 0 立即终局
+			addSettingRow(top + row++ * ROW_H,
+					() -> Component.translatable("gui.riichi_arise.lobby.label_tobi").getString(),
+					() -> Component.translatable(this.sync.tobi() ? "gui.riichi_arise.lobby.rule_enabled"
+							: "gui.riichi_arise.lobby.rule_disabled").getString(),
+					() -> send(MahjongLobbyPayloads.ACT_SET_TOBI, this.sync.tobi() ? 0 : 1),
+					optionList((i) -> Component.translatable(i == 1 ? "gui.riichi_arise.lobby.rule_enabled"
+							: "gui.riichi_arise.lobby.rule_disabled").getString(), this.sync.tobi() ? 1 : 0,
+							(i) -> () -> send(MahjongLobbyPayloads.ACT_SET_TOBI, i), 2));
+			// 食替（默认关）：吃/碰后当巡不能打出所鸣的同一张牌
+			addSettingRow(top + row++ * ROW_H,
+					() -> Component.translatable("gui.riichi_arise.lobby.label_kuikae").getString(),
+					() -> Component.translatable(this.sync.kuikae() ? "gui.riichi_arise.lobby.rule_enabled"
+							: "gui.riichi_arise.lobby.rule_disabled").getString(),
+					() -> send(MahjongLobbyPayloads.ACT_SET_KUIKAE, this.sync.kuikae() ? 0 : 1),
+					optionList((i) -> Component.translatable(i == 1 ? "gui.riichi_arise.lobby.rule_enabled"
+							: "gui.riichi_arise.lobby.rule_disabled").getString(), this.sync.kuikae() ? 1 : 0,
+							(i) -> () -> send(MahjongLobbyPayloads.ACT_SET_KUIKAE, i), 2));
 		}
 		// 清理桌子：停靠屏幕右下角（面板外，不与对局设置挤占）；终局未清理时显示，清桌后回到等待阶段自动隐藏
 		if (finished) {
@@ -223,7 +311,7 @@ public class MahjongLobbyScreen extends Screen {
 		int left = this.width / 2 - PANEL_W / 2;
 		int top = this.height / 2 - 100;
 		int colW = (PANEL_W - 12) / 2;
-		int colLX = left + 4, colRX = left + PANEL_W - 4 - colW;
+		int colLX = left + 4;
 		int queueTop = top + 4 * ROW_H + 6;
 
 		graphics.drawCenteredString(font, this.title, this.width / 2, top - 14, 0xFFFFFF);
@@ -281,11 +369,18 @@ public class MahjongLobbyScreen extends Screen {
 				graphics.drawString(font, (i + 1) + ". " + name, colLX + 8,
 						queueTop + 12 + i * 12, 0xFFFFFF, false);
 		}
-		// 游戏设置列表头（右半边，仅管理员）
-		if (this.sync.canManage() && this.sync.phase() != PHASE_PLAYING)
+		// 游戏设置列表（右侧停靠，样式仿座位列表：左黄标＋右白值）
+		if (!this.settingRows.isEmpty()) {
 			graphics.drawString(font,
 					Component.translatable("gui.riichi_arise.lobby.settings").getString(),
-					colRX, queueTop, 0xAAAAAA, false);
+					settingsX() + 6, top - 12, 0xAAAAAA, false);
+			for (SettingRow r : this.settingRows) {
+				boolean hov = mouseX >= r.x() && mouseX < r.x() + r.w() && mouseY >= r.y() && mouseY < r.y() + r.h();
+				graphics.fill(r.x(), r.y(), r.x() + r.w(), r.y() + r.h(), hov ? 0x509090C0 : 0x30A0A0A0);
+				graphics.drawString(font, r.label().get(), r.x() + 6, r.y() + 6, 0xFFFFA0, false);
+				graphics.drawString(font, r.value().get(), r.x() + 80, r.y() + 6, 0xFFFFFF, false);
+			}
+		}
 
 		// 灰色半透明按钮（与列表行同款样式：悬停高亮）
 		for (UiBtn b : this.btns) {
@@ -306,9 +401,9 @@ public class MahjongLobbyScreen extends Screen {
 			if (this.sync.phase() == PHASE_PLAYING)
 				graphics.drawCenteredString(font, phase, this.width / 2, queueTop + 96, 0xFFAA55);
 			else
-				// 终局：设置列表下方（终局未清理也可调整对局设置）
-				graphics.drawCenteredString(font, phase, colRX + colW / 2,
-						queueTop + 136, 0xFFAA55);
+				// 终局：管理员显示在右侧设置列表下方；非管理员显示在右半区顶部
+				graphics.drawCenteredString(font, phase, settingsX() + settingsW() / 2,
+						this.settingRows.isEmpty() ? top + 4 : top + 8 * ROW_H + 6, 0xFFAA55);
 		}
 
 		// 座位 AI 类型快速选择列表（最后绘制，盖住队列/按钮；右键座位弹出，显示顺序见 pickerOrder）
@@ -340,6 +435,37 @@ public class MahjongLobbyScreen extends Screen {
 				graphics.drawString(font, label, px + 2, ey + 2, color, false);
 			}
 		}
+		// 右键游戏设置弹出的候选列表（与座位 AI 列表同款外观；最后绘制，盖住右侧列表）
+		SettingRow picked = settingPickerTarget();
+		if (picked != null) {
+			int px = picked.x(), py = settingPickerTop(picked);
+			int ph = picked.options().size() * SET_PICK_ROW + 6;
+			graphics.fill(px - 4, py, px + picked.w() + 4, py + ph, 0xFF101018);
+			graphics.renderOutline(px - 4, py, picked.w() + 8, ph, 0x505000FF);
+			for (int i = 0; i < picked.options().size(); i++) {
+				SettingOption opt = picked.options().get(i);
+				int ey = py + 3 + i * SET_PICK_ROW;
+				int eyBottom = ey + SET_PICK_ROW;
+				if (mouseX >= px - 2 && mouseX < px + picked.w() + 2 && mouseY >= ey && mouseY < eyBottom)
+					graphics.fill(px - 2, ey, px + picked.w() + 2, eyBottom, 0x405088FF);
+				String label = (opt.selected() ? "✔ " : "  ") + opt.label();
+				graphics.drawString(font, label, px + 2, ey + 2, opt.selected() ? 0xFFCC66 : 0xFFFFFF, false);
+			}
+		}
+	}
+
+	/** 当前右键候选列表对应的设置行（无候选 / 行已重建时返回 null） */
+	private SettingRow settingPickerTarget() {
+		if (this.settingPickerRow < 0 || this.settingPickerRow >= this.settingRows.size())
+			return null;
+		SettingRow r = this.settingRows.get(this.settingPickerRow);
+		return r.options() == null || r.options().isEmpty() ? null : r;
+	}
+
+	/** 候选列表顶部：优先贴着该行下方，底部溢出时上移，保证整张列表不超出屏幕 */
+	private int settingPickerTop(SettingRow r) {
+		int h = r.options().size() * SET_PICK_ROW + 6;
+		return Math.max(4, Math.min(r.y() + r.h(), this.height - h - 8));
 	}
 
 	/** 座位行数：四麻 4 行，三麻只显示前 3 席（座位 4 在该模式下不存在） */
@@ -369,6 +495,31 @@ public class MahjongLobbyScreen extends Screen {
 	@Override
 	public boolean mouseClicked(double mouseX, double mouseY, int button) {
 		if (this.sync != null) {
+			// 右键候选列表优先：点击条目 = 选中并关闭；点击列表外 = 直接关闭（不穿透到下层）
+			if (this.settingPickerRow >= 0) {
+				SettingRow r = settingPickerTarget();
+				int px = r == null ? 0 : r.x(), py = r == null ? 0 : settingPickerTop(r);
+				int rowIndex = r == null ? -1 : (int) ((mouseY - py - 3) / SET_PICK_ROW);
+				if (r != null && mouseX >= px - 4 && mouseX < px + r.w() + 4
+						&& rowIndex >= 0 && rowIndex < r.options().size()) {
+					r.options().get(rowIndex).action().run();
+				}
+				this.settingPickerRow = -1;
+				return true;
+			}
+			// 右侧游戏设置列表命中：左键循环切换；右键弹出全部候选列表
+			if (this.pickerSeat < 0 && (button == 0 || button == 1)) {
+				for (int i = 0; i < this.settingRows.size(); i++) {
+					SettingRow r = this.settingRows.get(i);
+					if (mouseX >= r.x() && mouseX < r.x() + r.w() && mouseY >= r.y() && mouseY < r.y() + r.h()) {
+						if (button == 0)
+							r.action().run();
+						else if (r.options() != null && !r.options().isEmpty())
+							this.settingPickerRow = i; // 右键：弹出候选列表
+						return true;
+					}
+				}
+			}
 			// 灰色半透明按钮（列表样式）命中：左键 = 主行为；右键 = rightAction（无则忽略）
 			if (this.pickerSeat < 0 && (button == 0 || button == 1)) {
 				for (UiBtn b : this.btns) {
@@ -395,6 +546,7 @@ public class MahjongLobbyScreen extends Screen {
 				int seat = (int) ((mouseY - top) / ROW_H);
 				if (button == 1 && this.sync.seatAI()[seat]) {
 					this.pickerSeat = seat; // 右键：打开角色选择列表
+					this.settingPickerRow = -1; // 与设置候选列表互斥
 				} else if (button == 0 && this.sync.seatAI()[seat]) {
 					// 左击循环：沿角色列表循环切换；未知（空）= 从默认开始
 					String cur = this.sync.seatAvatarModes()[seat];
@@ -426,6 +578,10 @@ public class MahjongLobbyScreen extends Screen {
 	/** 弹出列表的座位（-1 = 关闭）；条目按 pickerOrder 显示 */
 	private int pickerSeat = -1;
 	private static final int PICK_ROW = 13, PICK_W = 140;
+
+	/** 右键弹出的游戏设置候选列表：行下标（-1 = 关闭） */
+	private int settingPickerRow = -1;
+	private static final int SET_PICK_ROW = 13;
 
 	/** 弹出列表显示顺序：移除AI > 默认 > 八木唯 > 琳琅 > 福姬 > 瓦西子 > 赤木（下标 = AVATAR_MODES 下标） */
 	private static int[] pickerOrder() {

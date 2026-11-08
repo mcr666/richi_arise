@@ -22,20 +22,27 @@ public final class VoiceClient {
 		if (voiceId == null || voiceId.isEmpty())
 			return;
 		VoiceEvents ev = VoiceEvents.byCode(event);
-		// 和牌语音（荣/自摸）：并行播放（多家荣和同时喊，互不打断）；结算界面等语音播完才打开
+		// 世界播报：音源取牌桌中心，按本地玩家距离衰减（与普通 MC 音效一致）
+		net.minecraft.world.phys.Vec3 source = tableSource(originPacked);
+		// 和牌语音（荣/自摸）：新语音打断尚未播完的前一条（避免叠音）；结算界面等语音播完才打开
 		if (ev == VoiceEvents.RON || ev == VoiceEvents.TUMO)
-			VoicePlayer.playConcurrent(voiceId, ev);
+			VoicePlayer.playConcurrent(voiceId, ev, source);
 		else
-			VoicePlayer.play(voiceId, ev); // 其它事件（吃/碰/杠/立直）照旧打断式播放
+			VoicePlayer.play(voiceId, ev, source, null); // 其它事件（吃/碰/杠/立直）同样打断式播放
 	}
 
-	/** 收到 S→C 报番事件：在该座位的 act 语音之后按役种顺序追加播报（无报番音频的角色静默跳过） */
+	/** 收到 S→C 报番事件：在该座位的 act 语音之后按役种顺序追加播报（无报番音频的角色回退默认角色） */
 	public static void onFanEvent(long originPacked, int seat, java.util.List<String> yakuKeys) {
 		MahjongLobbyPayloads.LobbySync sync = MahjongLobbyPayloads.CLIENT_SYNC.get(originPacked);
 		if (sync == null || sync.seatVoices() == null || seat < 0 || seat >= sync.seatVoices().length)
 			return;
 		// 空语音（默认角色）也交给 YakuVoices 处理：它会清空上一局残留的报番/段位语音状态
-		YakuVoices.enqueue(sync.seatVoices()[seat], yakuKeys);
+		YakuVoices.enqueue(sync.seatVoices()[seat], yakuKeys, tableSource(originPacked));
+	}
+
+	/** 牌桌中心的世界坐标（方块中心），语音按此位置做距离衰减 */
+	private static net.minecraft.world.phys.Vec3 tableSource(long originPacked) {
+		return net.minecraft.world.phys.Vec3.atCenterOf(net.minecraft.core.BlockPos.of(originPacked));
 	}
 
 	/** 对局开始：确保当前桌所有入座玩家的语音已缓存（客户端本地缓存） */

@@ -17,6 +17,8 @@ import javazoom.jl.decoder.Header;
 import javazoom.jl.decoder.SampleBuffer;
 
 import mcr.riichi_arise.RichiConfig;
+import net.minecraft.client.Minecraft;
+import net.minecraft.world.phys.Vec3;
 
 /**
  * 内置 mp3 播放器（客户端）。
@@ -56,18 +58,29 @@ public final class VoicePlayer {
 	/** 报番代次：清掉报番语音时递增，只中止报番类任务（不影响正在播的荣/自摸等 act 语音） */
 	private static volatile long fanToken;
 
-	/** 一次播放请求：音频流 + 其代次 + 是否报番类 + 报番代次 + 开始播放回调 + 播完回调（均可为 null） */
-	private record Job(InputStream in, long gen, boolean fan, long fanToken, Runnable onStart, Runnable onDone) {
+	/** 一次播放请求：音频流 + 其代次 + 是否报番类 + 报番代次 + 音源世界坐标 + 开始播放回调 + 播完回调（回调均可为 null） */
+	private record Job(InputStream in, long gen, boolean fan, long fanToken, Vec3 source, Runnable onStart, Runnable onDone) {
 	}
+
+	/** 世界播报可听半径（与 MC 音源线性衰减一致：超出即不播） */
+	private static final double SOUND_RANGE = 16.0;
 
 	/** 播报某角色某事件的语音；无可用音频（文件缺失/未下载）时写日志并跳过 */
 	public static void play(String charId, VoiceEvents ev) {
-		play(charId, ev, null);
+		play(charId, ev, null, null);
 	}
 
 	/** 同上；语音自然播完后回调 onDone（播放线程调用） */
 	public static void play(String charId, VoiceEvents ev, Runnable onDone) {
+		play(charId, ev, null, onDone);
+	}
+
+	/** 同上；source 为音源世界坐标（null = 不做距离衰减），语音自然播完后回调 onDone */
+	public static void play(String charId, VoiceEvents ev, Vec3 source, Runnable onDone) {
 		if (charId == null || charId.isEmpty())
+			return;
+		// 世界播报：超出可听半径直接不播（与 MC 普通音效一致，也省去开流/解码）
+		if (source != null && worldGain(source) <= 0.01)
 			return;
 		InputStream in = VoiceCache.open(charId, ev);
 		if (in == null) {
@@ -81,7 +94,7 @@ public final class VoicePlayer {
 		synchronized (PENDING) {
 			while (!PENDING.isEmpty())
 				closeQuietly(PENDING.poll().in()); // 丢弃未播的积压
-			PENDING.add(new Job(in, gen, false, 0, null, onDone));
+			PENDING.add(new Job(in, gen, false, 0, source, null, onDone));
 			PENDING.notifyAll();
 		}
 		startWorker();
@@ -92,31 +105,33 @@ public final class VoicePlayer {
 	 * 音频缺失时静默跳过。随后的 {@link #play} 会递增代次并清空积压，即新 act 语音/清场会打断报番。
 	 */
 	public static void enqueue(String charId, String fanKey) {
-		enqueue(charId, fanKey, null);
+		enqueue(charId, fanKey, null, null);
 	}
 
-	/** 同上；该条语音自然播完后回调 onDone（播放线程调用，被新语音打断则不回调） */
-	public static void enqueue(String charId, String fanKey, Runnable onDone) {
-		enqueueOrSkip(charId, fanKey, null, onDone);
+	/** 同上；source 为音源世界坐标（null = 不做距离衰减），该条语音自然播完后回调 onDone（播放线程调用） */
+	public static void enqueue(String charId, String fanKey, Vec3 source, Runnable onDone) {
+		enqueueOrSkip(charId, fanKey, source, null, onDone);
 	}
 
 	/** 入队一条报番语音；音频缺失时返回 false（由调用方决定如何补齐进度） */
 	public static boolean enqueueOrSkip(String charId, String fanKey, Runnable onDone) {
-		return enqueueOrSkip(charId, fanKey, null, onDone);
+		return enqueueOrSkip(charId, fanKey, null, null, onDone);
 	}
 
 	/**
 	 * 入队一条报番语音：onStart 在该条真正开始播放时回调（用于让界面文字与语音同时出现），
-	 * onDone 在自然播完后回调；音频缺失时返回 false（由调用方决定如何补齐进度）。
+	 * onDone 在自然播完后回调；音频缺失/超出可听范围时返回 false（由调用方决定如何补齐进度）。
 	 */
-	public static boolean enqueueOrSkip(String charId, String fanKey, Runnable onStart, Runnable onDone) {
+	public static boolean enqueueOrSkip(String charId, String fanKey, Vec3 source, Runnable onStart, Runnable onDone) {
 		if (charId == null || charId.isEmpty() || fanKey == null || fanKey.isEmpty())
+			return false;
+		if (source != null && worldGain(source) <= 0.01)
 			return false;
 		InputStream in = VoiceCache.openFan(charId, fanKey);
 		if (in == null)
 			return false;
 		synchronized (PENDING) {
-			PENDING.add(new Job(in, generation, true, fanToken, onStart, onDone));
+			PENDING.add(new Job(in, generation, true, fanToken, source, onStart, onDone));
 			PENDING.notifyAll();
 		}
 		startWorker();
@@ -143,11 +158,13 @@ public final class VoicePlayer {
 	}
 
 	/**
-	 * 与主播放并行播一条语音（多家荣和的"荣"语音同时播报）：独占一条音频行，由系统混音器叠加；
-	 * 不打断当前播放，但之后 play()/stopAll() 递增代次时立即中止。无音频时静默跳过。
+	 * 播一条和牌语音（荣/自摸）：新语音入队即打断尚未播完的前一条（含主通道与并行通道），避免叠音。
+	 * 独占一条音频行播放；之后 play()/stopAll() 递增代次时立即中止。无音频或超出可听范围时静默跳过。
 	 */
-	public static void playConcurrent(String charId, VoiceEvents ev) {
+	public static void playConcurrent(String charId, VoiceEvents ev, Vec3 source) {
 		if (charId == null || charId.isEmpty())
+			return;
+		if (source != null && worldGain(source) <= 0.01)
 			return;
 		InputStream in = VoiceCache.open(charId, ev);
 		if (in == null) {
@@ -155,11 +172,16 @@ public final class VoicePlayer {
 					charId, ev.act());
 			return;
 		}
-		long gen = generation;
+		// 先递增代次并清空积压：正在播的上一条（含报番）在帧边界立即中止，避免两段语音重叠
+		long gen = ++generation;
+		synchronized (PENDING) {
+			while (!PENDING.isEmpty())
+				closeQuietly(PENDING.poll().in());
+		}
 		CONCURRENT.incrementAndGet();
 		Thread t = new Thread(() -> {
 			try (InputStream src = in) {
-				playOwnLine(src, gen);
+				playOwnLine(src, gen, source);
 			} catch (Throwable e) {
 				LogUtils.getLogger().warn("[voice] 并行播放失败: {}", e.toString());
 			} finally {
@@ -179,8 +201,8 @@ public final class VoicePlayer {
 		}
 	}
 
-	/** 在独立音频行上解码播放（供并行播放；代次变化即中止） */
-	private static void playOwnLine(InputStream in, long gen) throws Exception {
+	/** 在独立音频行上解码播放（供并行播放；代次变化即中止；按音源距离逐帧衰减） */
+	private static void playOwnLine(InputStream in, long gen, Vec3 source) throws Exception {
 		Bitstream bitstream = new Bitstream(new BufferedInputStream(in, 8192));
 		SourceDataLine out = null;
 		try {
@@ -202,8 +224,9 @@ public final class VoicePlayer {
 				}
 				short[] samples = output.getBuffer();
 				int len = output.getBufferLength();
-				if (len > 0)
-					out.write(toBytes(samples, len), 0, len * 2);
+				double gain = worldGain(source);
+				if (len > 0 && gain > 0.01)
+					out.write(toBytes(samples, len, gain), 0, len * 2);
 				bitstream.closeFrame();
 			}
 			if (out != null && generation == gen)
@@ -352,8 +375,9 @@ public final class VoicePlayer {
 				if (out != null) {
 					short[] samples = output.getBuffer();
 					int len = output.getBufferLength();
-					if (len > 0)
-						out.write(toBytes(samples, len), 0, len * 2);
+					double gain = worldGain(job.source());
+					if (len > 0 && gain > 0.01)
+						out.write(toBytes(samples, len, gain), 0, len * 2);
 				}
 				bitstream.closeFrame();
 			}
@@ -429,9 +453,26 @@ public final class VoicePlayer {
 		}
 	}
 
-	/** short[]（PCM 小端有符号）→ byte[]，供 SourceDataLine.write；按 {@link RichiConfig#VOICE_VOLUME} 应用增益 */
-	private static byte[] toBytes(short[] s, int len) {
-		double gain = RichiConfig.VOICE_VOLUME.get().doubleValue();
+	/**
+	 * 世界播报增益（与 MC 音效一致）：音源到本地听者眼睛的距离线性衰减，16 格外静音。
+	 * source 为 null 或本地无玩家实体时按满音量（用于非世界场景）。
+	 */
+	private static double worldGain(Vec3 source) {
+		if (source == null)
+			return 1.0;
+		Minecraft mc = Minecraft.getInstance();
+		net.minecraft.world.entity.Entity listener = mc.getCameraEntity() != null ? mc.getCameraEntity() : mc.player;
+		if (listener == null)
+			return 0.0;
+		double dist = Math.sqrt(source.distanceToSqr(listener.getEyePosition()));
+		if (dist >= SOUND_RANGE)
+			return 0.0;
+		return 1.0 - dist / SOUND_RANGE;
+	}
+
+	/** short[]（PCM 小端有符号）→ byte[]，供 SourceDataLine.write；按 {@link RichiConfig#VOICE_VOLUME} 与距离增益应用音量 */
+	private static byte[] toBytes(short[] s, int len, double distanceGain) {
+		double gain = RichiConfig.VOICE_VOLUME.get().doubleValue() * distanceGain;
 		byte[] b = new byte[len * 2];
 		for (int i = 0; i < len; i++) {
 			short v = s[i];

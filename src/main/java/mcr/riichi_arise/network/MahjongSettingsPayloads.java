@@ -24,10 +24,28 @@ import mcr.riichi_arise.net.RichiNetManager;
  * 客户端配置（观战摊手等）与个人语音不改世界规则，不走本包。
  */
 public class MahjongSettingsPayloads {
-	/** C→S 动作：请求同步 / 设 gamerule / 开端口 / 关端口 */
-	public static final int ACT_REQUEST_SYNC = 0, ACT_SET_GAMERULE = 1, ACT_NET_START = 2, ACT_NET_STOP = 3;
+	/** C→S 动作：请求同步 / 设 gamerule / 开端口 / 关端口 / 上报左右键对调偏好 */
+	public static final int ACT_REQUEST_SYNC = 0, ACT_SET_GAMERULE = 1, ACT_NET_START = 2, ACT_NET_STOP = 3,
+			ACT_SET_HAND_SWAP = 4;
 	/** gamerule 下标（ACT_SET_GAMERULE 的 extra）：autoOpenNetPort */
 	public static final int RULE_AUTO_NET = 0;
+
+	/** 玩家左右键对调偏好（UUID → 是否对调）：客户端配置本地保存，登录/切换时上报，服务端据此分发交互 */
+	private static final java.util.Map<java.util.UUID, Boolean> HAND_SWAP = new java.util.concurrent.ConcurrentHashMap<>();
+
+	public static boolean isHandSwapped(java.util.UUID uuid) {
+		return HAND_SWAP.getOrDefault(uuid, false);
+	}
+
+	public static void clearHandSwap(java.util.UUID uuid) {
+		HAND_SWAP.remove(uuid);
+	}
+
+	/** 客户端：上报当前左右键偏好（登录与切换时调用） */
+	public static void sendHandSwap(boolean swapped) {
+		net.neoforged.neoforge.network.PacketDistributor.sendToServer(
+				new SettingsAction(ACT_SET_HAND_SWAP, 0, swapped ? 1 : 0));
+	}
 
 	/** S→C：设置状态同步 */
 	public record SettingsSync(boolean autoOpenNetPort,
@@ -115,6 +133,12 @@ public class MahjongSettingsPayloads {
 					return;
 				RichiNetManager.stop();
 				sendSync(sp);
+			}
+			case ACT_SET_HAND_SWAP -> {
+				if (msg.flag() != 0)
+					HAND_SWAP.put(sp.getUUID(), true);
+				else
+					HAND_SWAP.remove(sp.getUUID());
 			}
 			default -> {
 			}

@@ -16,6 +16,7 @@ import net.neoforged.neoforge.client.event.ClientTickEvent;
 import java.util.HashSet;
 import java.util.Set;
 
+import mcr.riichi_arise.RichiConfig;
 import mcr.riichi_arise.MahjongParticleTypes;
 import mcr.riichi_arise.MahjongItems;
 import mcr.riichi_arise.MahjongTileItem;
@@ -46,6 +47,8 @@ public class MahjongClient {
 	/** 提示前的等待 tick 数与最多尝试次数 */
 	private static final int FAN_PACK_CHECK_DELAY = 40;
 	private static final int FAN_PACK_CHECK_MAX_TRIES = 10;
+	/** 本次进服是否已上报左右键偏好（服务端据此分发左右键交互） */
+	private static boolean handSwapSynced;
 
 	@SubscribeEvent
 	public static void onClientSetup(FMLClientSetupEvent event) {
@@ -77,6 +80,10 @@ public class MahjongClient {
 		event.registerAboveAll(net.minecraft.resources.ResourceLocation.fromNamespaceAndPath(
 				mcr.riichi_arise.RichiiAriseMod.MODID, "table_overlay"),
 				(guiGraphics, partialTick) -> MahjongTableOverlay.render(guiGraphics));
+		// 紫水晶之间：屏幕左下角的公开备选牌区（3 格实时更新；参战者/开对局信息旁观者可见）
+		event.registerAboveAll(net.minecraft.resources.ResourceLocation.fromNamespaceAndPath(
+				mcr.riichi_arise.RichiiAriseMod.MODID, "amethyst_candidates"),
+				(guiGraphics, partialTick) -> AmethystCandidateOverlay.render(guiGraphics));
 	}
 
 	/**
@@ -106,6 +113,14 @@ public class MahjongClient {
 	public static void onRegisterRenderers(net.neoforged.neoforge.client.event.EntityRenderersEvent.RegisterRenderers event) {
 		event.registerBlockEntityRenderer(mcr.riichi_arise.MahjongBlockEntities.MAHJONG_TILE.get(),
 				MahjongTileBlockRenderer::new);
+		event.registerEntityRenderer(mcr.riichi_arise.MahjongEntities.ORAXOLOTL.get(), OraxolotlRenderer::new);
+	}
+
+	/** 桔螈模型层（实体渲染与麻将桌 AI 形象共用同一套烘焙模型） */
+	@SubscribeEvent
+	public static void onRegisterLayerDefinitions(
+			net.neoforged.neoforge.client.event.EntityRenderersEvent.RegisterLayerDefinitions event) {
+		event.registerLayerDefinition(OraxolotlModel.LAYER_LOCATION, OraxolotlModel::createBodyLayer);
 	}
 
 	/** 手持风盘（大/小型）时，扫描附近风盘并在每个桌面中心外围生成 astral_burst 粒子圈 */
@@ -121,7 +136,12 @@ public class MahjongClient {
 		if (player == null || level == null) {
 			fanPackChecked = false; // 离开世界/未进游戏：下次进入时重新检查
 			fanPackTries = 0;
+			handSwapSynced = false;
 			return;
+		}
+		if (!handSwapSynced) {
+			handSwapSynced = true;
+			mcr.riichi_arise.network.MahjongSettingsPayloads.sendHandSwap(RichiConfig.SWAP_HAND_BUTTONS.get());
 		}
 		if (!fanPackChecked) {
 			fanPackTries++;
@@ -135,6 +155,7 @@ public class MahjongClient {
 			}
 		}
 		WinEffectClient.tick(); // 推进和牌特效时间线
+		RiichiEffectClient.tick(); // 推进立直特效时间线（支持多人立直叠加）
 		// 每 4 tick 刷新一轮粒子圈（粒子本身有寿命，持续补充保持可见）
 		if (tickCounter % 4 != 0)
 			return;

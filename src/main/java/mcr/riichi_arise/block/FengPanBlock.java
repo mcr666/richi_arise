@@ -603,6 +603,11 @@ public class FengPanBlock extends Block {
 		return TableLayout.handTarget(TableLayout.of(level, origin), seat, index);
 	}
 
+	/** 第 index 张拔北的桌面位置（抢北和牌特效定位用） */
+	public static Vec3 kitaTilePos(net.minecraft.server.level.ServerLevel level, BlockPos origin, int seat, int index) {
+		return TableLayout.kitaTarget(TableLayout.of(level, origin), seat, index);
+	}
+
 	/** 立即清掉某玩家的回合/响应倒计时叠加层：发一次 0/0（客户端即刻隐藏），
 	 *  并把去重键置为 "0:0"，避免下一巡首包因键相同被当成重复而漏发 */
 	public static void clearCountdown(net.minecraft.server.level.ServerPlayer p) {

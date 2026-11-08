@@ -27,9 +27,9 @@ public final class VoiceCharacters {
 	/** 天凤 SE 站点根（在线角色的语音文件以此为前缀） */
 	public static final String TENHOU_SE_BASE = "https://chen310.github.io/tenhou-se";
 
-	/** 离线内置的 6 名角色 id（语音文件稍后由用户补入） */
+	/** 离线内置的角色 id（语音文件随 mod 打包） */
 	public static final List<String> OFFLINE_IDS = List.of(
-			"linlang", "yiji", "fuji", "bamuwei", "akagi", "washizu");
+			"linlang", "yiji", "fuji", "bamuwei", "akagi", "washizu", "oraxolotl");
 
 	private static final Map<String, Character> REG = new LinkedHashMap<>();
 
@@ -38,13 +38,14 @@ public final class VoiceCharacters {
 	}
 
 	static {
-		// —— 离线内置 6 名（语音稍后补文件） ——
+		// —— 离线内置角色（语音随 mod 打包） ——
 		put("linlang", "琳琅", true);
 		put("yiji", "一姬", true);
 		put("fuji", "福姬", true);
 		put("bamuwei", "八木唯", true);
 		put("akagi", "赤木しげる", true);
 		put("washizu", "鷲巣巌", true);
+		put("oraxolotl", "桔螈", true);
 
 		// —— 在线角色（手动点击加载；id → 中文名，抄录自 tenhou-se 站点角色表） ——
 		put("qiancangtou", "浅仓透", false);

@@ -100,8 +100,22 @@ public class MahjongTicker {
 		if (!(event.getLevel() instanceof net.minecraft.server.level.ServerLevel serverLevel))
 			return;
 		var origin = mcr.riichi_arise.game.RichiTableManager.nearest(serverLevel, interaction.position(), 8);
-		if (origin != null)
-			mcr.riichi_arise.block.FengPanBlock.handleHandInteract(serverLevel, origin, interaction, event.getEntity());
+		if (origin == null)
+			return;
+		if (mcr.riichi_arise.network.MahjongSettingsPayloads.isHandSwapped(event.getEntity().getUUID())) {
+			// 对调后右键 = 摸切/跳过（仅本桌在座玩家）
+			var st = mcr.riichi_arise.game.RichiTableManager.get(origin);
+			if (st == null || !(event.getEntity() instanceof net.minecraft.server.level.ServerPlayer sp))
+				return;
+			for (int seat = 0; seat < 4; seat++) {
+				if (st.playerOf(serverLevel, seat) == sp) {
+					mcr.riichi_arise.block.FengPanBlock.handleHandAttack(sp, origin, st, seat);
+					return;
+				}
+			}
+			return;
+		}
+		mcr.riichi_arise.block.FengPanBlock.handleHandInteract(serverLevel, origin, interaction, event.getEntity());
 	}
 
 	/** 左键手牌交互实体（richi_hand 标签）：当前回合家 = 摸切；回合外 = 过牌 */
@@ -119,12 +133,25 @@ public class MahjongTicker {
 		if (st == null)
 			return;
 		event.setCanceled(true);
+		if (mcr.riichi_arise.network.MahjongSettingsPayloads.isHandSwapped(player.getUUID())) {
+			// 对调后左键 = 选中/打牌（与右键手牌行为一致）
+			if (event.getTarget() instanceof net.minecraft.world.entity.Interaction interaction
+					&& interaction.getTags().contains("richi_hand"))
+				mcr.riichi_arise.block.FengPanBlock.handleHandInteract(player.serverLevel(), origin, interaction, player);
+			return;
+		}
 		for (int seat = 0; seat < 4; seat++) {
 			if (st.playerOf(player.serverLevel(), seat) == player) {
 				mcr.riichi_arise.block.FengPanBlock.handleHandAttack(player, origin, st, seat);
 				return;
 			}
 		}
+	}
+
+	/** 玩家下线时清理左右键偏好缓存 */
+	@SubscribeEvent
+	public static void onPlayerLogout(net.neoforged.neoforge.event.entity.player.PlayerEvent.PlayerLoggedOutEvent event) {
+		mcr.riichi_arise.network.MahjongSettingsPayloads.clearHandSwap(event.getEntity().getUUID());
 	}
 
 	/**

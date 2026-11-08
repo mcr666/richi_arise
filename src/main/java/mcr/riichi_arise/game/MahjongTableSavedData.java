@@ -29,14 +29,19 @@ public final class MahjongTableSavedData extends SavedData {
 
 	private static final String VOICES_KEY = "player_voices";
 
-	/** 每玩家和牌特效风格（UUID → 0..3；全局跨桌持久化，缺省 = 星陨华彩） */
+	/** 每玩家和牌特效风格（UUID → 0..4；4 = 随机；全局跨桌持久化，缺省 = 光环） */
 	private final Map<String, Integer> playerWinEffects = new HashMap<>();
 
 	private static final String WIN_EFFECTS_KEY = "player_win_effects";
 
+	/** 每玩家立直特效风格（UUID → 0..4；0 = 关闭，4 = 随机，缺省 = 基础光环）。显式关闭也要落盘，故不省略 0 */
+	private final Map<String, Integer> playerRiichiEffects = new HashMap<>();
+
+	private static final String RIICHI_EFFECTS_KEY = "player_riichi_effects";
+
 	/** 一张风盘的可持久化设置（RichiTableState 中对应字段的快照） */
 	public record Entry(int gameType, int playerCount, int thinkIdx, int aiSpeedIdx, boolean openHand,
-			int roomType, boolean[] reservedAI, String[] avatarModes) {
+			int roomType, boolean tobi, boolean kuikae, boolean[] reservedAI, String[] avatarModes) {
 	}
 
 	public MahjongTableSavedData() {
@@ -61,7 +66,7 @@ public final class MahjongTableSavedData extends SavedData {
 			modes[i] = m == null ? "" : m;
 		}
 		tables.put(key(origin), new Entry(st.gameType, st.playerCount, st.thinkIdx, st.aiSpeedIdx, st.openHand,
-				st.roomType, reserved, modes));
+				st.roomType, st.tobi, st.kuikae, reserved, modes));
 		setDirty();
 	}
 
@@ -75,7 +80,10 @@ public final class MahjongTableSavedData extends SavedData {
 		st.thinkIdx = e.thinkIdx();
 		st.aiSpeedIdx = e.aiSpeedIdx();
 		st.openHand = e.openHand();
-		st.roomType = e.roomType() == RichiTableState.ROOM_GLASS ? RichiTableState.ROOM_GLASS : RichiTableState.ROOM_TIE;
+		st.roomType = (e.roomType() == RichiTableState.ROOM_GLASS || e.roomType() == RichiTableState.ROOM_AMETHYST)
+				? e.roomType() : RichiTableState.ROOM_TIE;
+		st.tobi = e.tobi();
+		st.kuikae = e.kuikae();
 		for (int i = 0; i < 4; i++) {
 			st.reservedAI[i] = e.reservedAI()[i];
 			st.aiAvatarModes[i] = e.avatarModes()[i];
@@ -96,18 +104,27 @@ public final class MahjongTableSavedData extends SavedData {
 		setDirty();
 	}
 
-	/** 玩家当前和牌特效风格（0..3）；未设置时返回 fallback */
+	/** 玩家当前和牌特效风格（0..4，4 = 随机）；未设置时返回 fallback */
 	public int getWinEffect(String uuid, int fallback) {
 		Integer v = playerWinEffects.get(uuid);
 		return v == null ? fallback : v;
 	}
 
-	/** 设置玩家和牌特效风格（0..3）；等于默认值时不留条目 */
+	/** 设置玩家和牌特效风格（0..4，4 = 随机；0 = 关闭也要持久化，与未设置的缺省值区分） */
 	public void setWinEffect(String uuid, int style) {
-		if (style <= 0)
-			playerWinEffects.remove(uuid);
-		else
-			playerWinEffects.put(uuid, style);
+		playerWinEffects.put(uuid, style);
+		setDirty();
+	}
+
+	/** 玩家当前立直特效风格（0..4，0 = 关闭，4 = 随机）；未设置时返回 fallback */
+	public int getRiichiEffect(String uuid, int fallback) {
+		Integer v = playerRiichiEffects.get(uuid);
+		return v == null ? fallback : v;
+	}
+
+	/** 设置玩家立直特效风格（0..4，4 = 随机）；0 = 关闭也要持久化（与未设置的缺省值区分） */
+	public void setRiichiEffect(String uuid, int style) {
+		playerRiichiEffects.put(uuid, style);
 		setDirty();
 	}
 
@@ -130,8 +147,23 @@ public final class MahjongTableSavedData extends SavedData {
 					if (kv.length == 2) {
 						try {
 							int v = Integer.parseInt(kv[1]);
-							if (v > 0)
+							if (v >= 0 && v <= 4) // 0..3 旧语义不变；4 = 随机
 								data.playerWinEffects.put(kv[0], v);
+						} catch (NumberFormatException ignored) {
+						}
+					}
+				}
+				continue;
+			}
+			if (k.equals(RIICHI_EFFECTS_KEY)) {
+				ListTag effects = tag.getList(k, Tag.TAG_STRING);
+				for (int i = 0; i < effects.size(); i++) {
+					String[] kv = effects.getString(i).split("=", 2);
+					if (kv.length == 2) {
+						try {
+							int v = Integer.parseInt(kv[1]);
+							if (v >= 0 && v <= 4) // 0..3 旧语义不变；4 = 随机
+								data.playerRiichiEffects.put(kv[0], v);
 						} catch (NumberFormatException ignored) {
 						}
 					}
@@ -148,7 +180,9 @@ public final class MahjongTableSavedData extends SavedData {
 			for (int i = 0; i < 4 && i < list.size(); i++)
 				modes[i] = list.getString(i);
 			data.tables.put(k, new Entry(t.getInt("g"), t.contains("p") ? t.getInt("p") : 4, t.getInt("t"), t.getInt("s"), t.getBoolean("o"),
-					t.contains("rt") ? t.getInt("rt") : 0, reserved, modes));
+					t.contains("rt") ? t.getInt("rt") : 0,
+					t.contains("tb") ? t.getBoolean("tb") : true, t.contains("kk") && t.getBoolean("kk"),
+					reserved, modes));
 		}
 		return data;
 	}
@@ -164,6 +198,8 @@ public final class MahjongTableSavedData extends SavedData {
 			t.putInt("s", en.aiSpeedIdx());
 			t.putBoolean("o", en.openHand());
 			t.putInt("rt", en.roomType());
+			t.putBoolean("tb", en.tobi());
+			t.putBoolean("kk", en.kuikae());
 			int mask = 0;
 			ListTag list = new ListTag();
 			for (int i = 0; i < 4; i++) {
@@ -183,6 +219,10 @@ public final class MahjongTableSavedData extends SavedData {
 		for (Map.Entry<String, Integer> e : playerWinEffects.entrySet())
 			effects.add(StringTag.valueOf(e.getKey() + "=" + e.getValue()));
 		tag.put(WIN_EFFECTS_KEY, effects);
+		ListTag riichiEffects = new ListTag();
+		for (Map.Entry<String, Integer> e : playerRiichiEffects.entrySet())
+			riichiEffects.add(StringTag.valueOf(e.getKey() + "=" + e.getValue()));
+		tag.put(RIICHI_EFFECTS_KEY, riichiEffects);
 		return tag;
 	}
 }

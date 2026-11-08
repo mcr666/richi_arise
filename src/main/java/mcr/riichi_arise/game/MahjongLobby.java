@@ -97,9 +97,10 @@ public final class MahjongLobby {
 				}
 			}
 		case MahjongLobbyPayloads.ACT_SET_ROOM -> {
-				// 房间类型切换（等待/终局未清理）：extra = 0 铁之间 / 1 玻璃之间（开局时生效）
+				// 房间类型切换（等待/终局未清理）：extra = 0 铁之间 / 1 玻璃之间 / 2 紫水晶之间（开局时生效）
 				// 对局进行中切换：只提示不改配置，并照常下发原值（房间按钮回到当前实际类型）
-				if (canManage(sp) && (extra == RichiTableState.ROOM_TIE || extra == RichiTableState.ROOM_GLASS)) {
+				if (canManage(sp) && (extra == RichiTableState.ROOM_TIE || extra == RichiTableState.ROOM_GLASS
+						|| extra == RichiTableState.ROOM_AMETHYST)) {
 					if (st.phase != RichiTableState.PHASE_PLAYING) {
 						st.roomType = extra;
 						saveSettings(sp, origin, st);
@@ -176,6 +177,22 @@ public final class MahjongLobby {
 			case MahjongLobbyPayloads.ACT_SET_OPEN -> {
 				if (canManage(sp) && st.phase != RichiTableState.PHASE_PLAYING) {
 					st.openHand = extra == 1;
+					saveSettings(sp, origin, st);
+					broadcastSync(sp.serverLevel(), origin, st);
+				}
+			}
+			case MahjongLobbyPayloads.ACT_SET_TOBI -> {
+				// 击飞：有人点数 < 0 立即终局（默认开）
+				if (canManage(sp) && st.phase != RichiTableState.PHASE_PLAYING) {
+					st.tobi = extra == 1;
+					saveSettings(sp, origin, st);
+					broadcastSync(sp.serverLevel(), origin, st);
+				}
+			}
+			case MahjongLobbyPayloads.ACT_SET_KUIKAE -> {
+				// 食替：吃/碰后当巡不能打出所鸣的同一张牌（默认关）
+				if (canManage(sp) && st.phase != RichiTableState.PHASE_PLAYING) {
+					st.kuikae = extra == 1;
 					saveSettings(sp, origin, st);
 					broadcastSync(sp.serverLevel(), origin, st);
 				}
@@ -390,6 +407,8 @@ public final class MahjongLobby {
 		st.turnLimit = RichiTableState.THINK_PRESETS[st.thinkIdx][0] * 20;
 		for (int i = 0; i < 4; i++)
 			st.longBank[i] = RichiTableState.THINK_PRESETS[st.thinkIdx][1] * 20;
+		// 锁定本局房间类型：此后大厅 roomType 只影响下一局，终局残影始终按本局类型渲染
+		st.gameRoomType = st.roomType;
 		RiichiGame game = new RiichiGame(level, origin, st);
 		RichiTableManager.setGame(origin, game);
 		clearQueueDisplay(level, origin);
@@ -750,14 +769,30 @@ public final class MahjongLobby {
 	}
 
 	/**
-	 * 和牌特效（个人设定，0..3）：仅可设置自己的；全局持久化并广播各桌 Sync，
+	 * 和牌特效（个人设定，0..4；4 = 随机）：仅可设置自己的；全局持久化并广播各桌 Sync，
 	 * 使他人也按其设置看到和牌特效。
 	 */
 	public static void setWinEffect(ServerPlayer sp, int style) {
-		if (style < 0 || style > 3)
+		if (style < 0 || style > 4)
 			return;
 		ServerLevel level = sp.serverLevel();
 		MahjongTableSavedData.get(level).setWinEffect(sp.getUUID().toString(), style);
+		for (BlockPos origin : RichiTableManager.originsIn(level)) {
+			RichiTableState st = RichiTableManager.get(origin);
+			if (st != null)
+				broadcastSync(level, origin, st);
+		}
+	}
+
+	/**
+	 * 立直特效（个人设定，0 = 关闭 / 1 = 光环 / 2 = 星环 / 3 = 光柱 / 4 = 随机）：仅可设置自己的；
+	 * 全局持久化并广播各桌 Sync，立直时由服务端按声明者设置向全桌发送特效通知。
+	 */
+	public static void setRiichiEffect(ServerPlayer sp, int style) {
+		if (style < 0 || style > 4)
+			return;
+		ServerLevel level = sp.serverLevel();
+		MahjongTableSavedData.get(level).setRiichiEffect(sp.getUUID().toString(), style);
 		for (BlockPos origin : RichiTableManager.originsIn(level)) {
 			RichiTableState st = RichiTableManager.get(origin);
 			if (st != null)
@@ -995,20 +1030,21 @@ public final class MahjongLobby {
 				voice = mcr.riichi_arise.game.riichi.AiCharacters.voice(mode);
 			}
 			seatVoices[seat] = voice;
-			// 和牌特效风格：人类 = 个人设定（全局持久化），AI/空座 = 0（粒子环）
+			// 和牌特效风格：人类 = 个人设定（全局持久化），AI/空座 = 1（默认光环）
 			st.winEffects[seat] = st.players[seat] != null && !st.aiSeat[seat]
-					? sd.getWinEffect(st.players[seat], 0)
-					: 0;
+					? sd.getWinEffect(st.players[seat], 1)
+					: 1;
 		}
 		for (ServerPlayer p : nearby) {
 			String ownVoice = sd.getVoice(p.getUUID().toString());
-			int ownWinEffect = sd.getWinEffect(p.getUUID().toString(), 0);
+			int ownWinEffect = sd.getWinEffect(p.getUUID().toString(), 1);
+			int ownRiichiEffect = sd.getRiichiEffect(p.getUUID().toString(), 1);
 			net.neoforged.neoforge.network.PacketDistributor.sendToPlayer(p,
 					new MahjongLobbyPayloads.SyncMessage(origin.asLong(), st.phase,
 						java.util.Arrays.asList(seatNames), aiMask, queueNames, canManage(p), st.gameType,
 						voteCount, st.openHand, seatModes, st.thinkIdx, st.aiSpeedIdx,
 						ownVoice == null ? "" : ownVoice, java.util.Arrays.asList(seatVoices), st.playerCount,
-						st.roomType, ownWinEffect));
+						st.roomType, ownWinEffect, ownRiichiEffect, st.tobi, st.kuikae));
 		}
 		// 悬浮提示随状态同步：等待期显示（空队列给加入提示），其它阶段清除
 		if (st.phase == RichiTableState.PHASE_WAITING)

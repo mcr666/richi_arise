@@ -11,7 +11,7 @@ import java.util.Map;
  * （随仓库附带的报番语音资源包在 {@code resourcepacks/riichi_arise_fan_voice}）。
  * 资源包未安装、或该角色没有报番音频时静默跳过，结算界面回退为固定节奏逐条显示。
  * 映射键与 {@code Mahjong4jBridge.WinResult.yakuNames()} 的英文役名一致（同 YakuNames 表），
- * 另含宝牌计数键（DORA/URA/RED/KITA + 数量，表/里/红/拔北通用按数量报）。
+ * 另含宝牌计数键（DORA/URA/RED/KITA + 数量，统一按张数报 dora 系列；拔北与宝牌同音）。
  * </p>
  */
 public final class YakuVoices {
@@ -90,9 +90,11 @@ public final class YakuVoices {
 	 * 结算列表末尾的宝牌条目随对应语音逐条显现（{@link FanAnnouncer#startedExtras()}）；
 	 * 服务端顺序为表 → 红 → 拔北（三麻）→ 里</li>
 	 * </ul>
+	 * 该角色没有报番音频（如只有 act 语音的桔螈）时借用有报番音频的默认角色，保证能出声（音色不同）。
 	 * 一条役种音频都没有时通知界面回退固定节奏。
+	 * @param source 音源世界坐标（牌桌中心），报番语音按此位置做距离衰减；null = 不做距离衰减
 	 */
-	public static void enqueue(String voiceId, List<String> keys) {
+	public static void enqueue(String voiceId, List<String> keys, net.minecraft.world.phys.Vec3 source) {
 		if (voiceId == null || voiceId.isEmpty() || keys == null) {
 			// 该家没有语音（默认角色/未选语音）：清掉上一局残留的报番与段位语音状态，
 			// 否则结算界面会误判报番已完成（一次性显示）或沿用其他角色的段位语音
@@ -131,9 +133,53 @@ public final class YakuVoices {
 		// 只有宝牌没有役种音频（如役名无对应音频）时也要照常报宝牌，不能整轮丢弃。
 		List<String> files = new ArrayList<>(fanKeys);
 		files.addAll(extraKeys);
-		com.mojang.logging.LogUtils.getLogger().info("[voice] 报番计划 {} 役种={} 宝牌={} 文件={}",
-				voiceId, zh, extraKeys, files);
-		FanAnnouncer.begin(zh, files, extraKeys.size(), voiceId);
+		// 该角色整轮没有报番音频（oraxolotl 等只有 act 语音）：整轮借用默认角色，避免同一轮内音色混用；
+		// 若只是个别条目缺文件（角色本身有报番音频），保持原角色，缺的那条静默，不做单条借用
+		String id = resolveFanVoice(voiceId, files);
+		com.mojang.logging.LogUtils.getLogger().info("[voice] 报番计划 {} 键={} 役种={} 宝牌={} 文件={}",
+				id, keys, zh, extraKeys, files);
+		FanAnnouncer.begin(zh, files, extraKeys.size(), id, source);
+	}
+
+	/** 报番音频探测哨兵：资源包里的内置角色都带 {@code fan/dora.mp3}，用它判断该角色是否整轮缺报番音频 */
+	private static final String FAN_SENTINEL = "dora";
+
+	/**
+	 * 报番语音角色兜底：该角色没有报番音频时，借用资源包内有报番音频的默认角色（第一个可用的离线角色），
+	 * 保证和牌仍能报出役种（音色不同），并写日志提示缺资源，便于后续补专属 {@code fan/*.mp3}。
+	 */
+	private static String resolveFanVoice(String voiceId, List<String> files) {
+		if (files.isEmpty() || hasFanVoice(voiceId))
+			return voiceId;
+		String alt = fanVoiceOtherThan(voiceId);
+		if (!alt.isEmpty()) {
+			com.mojang.logging.LogUtils.getLogger().info(
+					"[voice] 角色 {} 缺报番语音资源，借用 {} 的报番语音（音色不同，后续可补专属 fan 音频）",
+					voiceId, alt);
+			return alt;
+		}
+		// 资源包整体未安装：保持原角色，由 FanAnnouncer 回退固定节奏（不刷兜底日志）
+		return voiceId;
+	}
+
+	/** 除 exclude 外第一个有报番音频的离线角色（没有则返回空串）：仅用于整轮换音色的兜底 */
+	private static String fanVoiceOtherThan(String exclude) {
+		for (String id : VoiceCharacters.OFFLINE_IDS) {
+			if (id.equals(exclude))
+				continue;
+			if (hasFanVoice(id))
+				return id;
+		}
+		return "";
+	}
+
+	/** 该角色是否有报番音频（探测资源包内 fan/dora.mp3） */
+	private static boolean hasFanVoice(String id) {
+		try (java.io.InputStream in = VoiceCache.openFan(id, FAN_SENTINEL)) {
+			return in != null;
+		} catch (Exception e) {
+			return false;
+		}
 	}
 
 	/**
@@ -147,8 +193,9 @@ public final class YakuVoices {
 		return key;
 	}
 
-	/** 宝牌计数键 → 音频文件名：表/里/红/拔北通用 dora 系列（拔北与宝牌一样按张数分开报，
-	 *  无专属音频，与其他宝牌共用 dora/doraN/dora13）；缺音频时走现有缺失回退（随相邻语音一并显现） */
+	/** 宝牌计数键 → 音频文件名：表/里/红/拔北统一用 dora 系列（拔北与宝牌同音）。
+	 *  <p>「拔北1 + 宝牌1」会同为 {@code dora}：队列按条目逐个入队、每条各自新开音频流，
+	 *  同名文件不会去重/覆盖，两条会连续各播一次。</p> */
 	private static String doraKey(String token) {
 		String num = token.replaceFirst("^(DORA|URA|RED|KITA)", "");
 		int count;
@@ -159,6 +206,7 @@ public final class YakuVoices {
 		}
 		if (count <= 0)
 			return null;
+		// 拔北（KITA）与表/里/红宝牌共用 dora 系列：按条目入队，同名不会合并
 		return count >= 13 ? "dora13" : count == 1 ? "dora" : "dora" + count;
 	}
 }

@@ -3,7 +3,7 @@
 	"parent": "minecraft:block/block",
 	"render_type": "minecraft:translucent",
 	"textures": {
-		"front": "riichi_arise:item/mahjong/back",
+		"front": "riichi_arise:item/mahjong_glass/unknown",
 		"cover": "riichi_arise:item/mahjong/cover_glass",
 		"particle": "riichi_arise:item/mahjong/cover_glass"
 	},

@@ -283,6 +283,18 @@ public final class PaipuReplay {
 		ArrayDeque<Integer> rinshan = new ArrayDeque<>(tryParse(h.rinshan));
 		s0.wallCount = wall.size();
 		out.add(s0);
+		// 紫水晶之间：T 行带"实际摸入牌"（d 事件第 6 段）即本局启用备选牌区。
+		// 回放按真实规则维护备选区：庄家首切后从牌山尾翻 3 张，选走一张后牌山仍够 3 张则补 1 张。
+		// 备选牌在翻出时即离开牌山，因此回放的牌山存量与真实对局一致。
+		boolean amethystHand = false;
+		for (String[] t : h.events)
+			if (t.length > 5 && t[2].equals("d") && t[5].trim().matches("\\d+")) {
+				amethystHand = true;
+				break;
+			}
+		final int dealerSeat = g.playerCount > 0 ? s.handIdx % g.playerCount : 0;
+		ArrayDeque<Integer> cand = new ArrayDeque<>();
+		boolean candReady = false;
 		String lastMeldNoDrawSeat = null; // 上次吃/碰/明杠的席位（该家切牌不摸）
 		boolean lastKong = false; // 上一步是暗杠/加杠（下一步摸岭上）
 		for (String[] t : h.events) {
@@ -292,9 +304,17 @@ public final class PaipuReplay {
 			String action = t[2];
 			switch (action) {
 				case "d" -> {
-					// 摸牌推导：吃/碰/明杠后该家不摸；暗杠/加杠后摸岭上；其余摸牌山尾
+					// 摸牌推导：日志显式记录了本次摸入的牌（紫水晶之间选牌）时优先采用；
+					// 否则按旧规则：吃/碰/明杠后该家不摸；暗杠/加杠后摸岭上；其余摸牌山尾
+					int loggedDraw = t.length > 5 && t[5].trim().matches("\\d+") ? parseInt(t[5]) : -1;
 					boolean noDraw = String.valueOf(seat).equals(lastMeldNoDrawSeat);
-					if (noDraw)
+					if (loggedDraw >= 0) {
+						snap.hands[seat].add(loggedDraw);
+						lastMeldNoDrawSeat = null;
+						// 备选牌在翻牌时已离开牌山：优先从备选区扣除，不在备选区才从牌山扣
+						if (!(amethystHand && candReady && cand.remove(Integer.valueOf(loggedDraw))))
+							wall.remove(Integer.valueOf(loggedDraw));
+					} else if (noDraw)
 						lastMeldNoDrawSeat = null;
 					else if (lastKong && !rinshan.isEmpty())
 						snap.hands[seat].add(rinshan.pollLast());
@@ -322,6 +342,17 @@ public final class PaipuReplay {
 						snap.riichiRiverIdx[seat] = snap.rivers[seat].size() - 1;
 						snap.riichiSticks[seat] = 1;
 						snap.points[seat] -= 1000;
+					}
+					if (amethystHand) {
+						if (!candReady && seat == dealerSeat) {
+							// 庄家首切后：从牌山尾翻出接下来的 3 张备选牌
+							candReady = true;
+							for (int k = 0; k < 3 && !wall.isEmpty(); k++)
+								cand.add(wall.pollLast());
+						} else if (candReady && loggedDraw >= 0 && wall.size() >= 3) {
+							// 选走一张后牌山仍够 3 张：补 1 张进备选区（不足则不再补充）
+							cand.add(wall.pollLast());
+						}
 					}
 					snap.turnSeat = seat;
 					snap.wallCount = wall.size();
@@ -402,9 +433,10 @@ public final class PaipuReplay {
 				new int[] { 1, 1, 1, 1 }, snap.points.clone(), // handsExposed=1：回放手牌全部摊开朝上
 				names, new int[4], new String[4], new String[4], new String[4], // 回放无 AI 形象
 				h.dora, snap.indicators, snap.wallCount,
-				snap.turnSeat, Math.floorMod(s.handIdx, 4) + 1, Math.floorMod(s.handIdx / 4, 4), 0, 0,
+				snap.turnSeat, Math.floorMod(s.handIdx, g.playerCount) + 1,
+				Math.floorMod(s.handIdx / g.playerCount, 4), 0, 0,
 				-1, -1, -1, RichiTableState.PHASE_PLAYING, g.playerCount, banner, new int[] { -1, -1, -1, -1 },
-				RichiTableState.ROOM_TIE, new int[4]));
+				RichiTableState.ROOM_TIE, "", -1, new int[4]));
 	}
 
 	private static boolean sameTile(int a, int b) {
@@ -630,7 +662,7 @@ public final class PaipuReplay {
 
 		// 面板底：先量高度（四家块 + 头尾），再画（超出屏幕截断）
 		List<List<String>> seatBlocks = new ArrayList<>();
-		for (int seat = 0; seat < 4; seat++)
+		for (int seat = 0; seat < g.playerCount; seat++)
 			seatBlocks.add(seatLines(snap, seat));
 		int bh = 30; // 标题+指示牌+动作标题
 		for (List<String> b : seatBlocks)
@@ -641,11 +673,11 @@ public final class PaipuReplay {
 		gfx.fill(left, top, left + PANEL_W, top + 1, 0xFF5588FF);
 		gfx.fill(left, bottom - 1, left + PANEL_W, bottom, 0xFF5588FF);
 
-		// 标题行：局目 / 巡目 / 步数（风/局与服务端一致：round=handIdx%4+1，wind=handIdx/4）
+		// 标题行：局目 / 巡目 / 步数（风/局与服务端一致：round=handIdx%参战人数+1，wind=handIdx/参战人数）
 		String[] winds = { "東", "南", "西", "北" };
-		String wind = winds[Math.floorMod(s.handIdx / 4, 4)];
-		int roundNo = Math.floorMod(s.handIdx, 4) + 1;
-		String title = wind + roundNo + "局　巡 " + (snap.discards / 4 + 1) + "　" + (s.cursor) + "/" + h.events.size()
+		String wind = winds[Math.floorMod(s.handIdx / g.playerCount, 4)];
+		int roundNo = Math.floorMod(s.handIdx, g.playerCount) + 1;
+		String title = wind + roundNo + "局　巡 " + (snap.discards / g.playerCount + 1) + "　" + (s.cursor) + "/" + h.events.size()
 				+ (s.playing ? " ▶" : " ‖");
 		gfx.drawString(font, title, left + 6, top + 6, 0xFFFFA0, false);
 		// 宝牌指示牌
@@ -657,11 +689,11 @@ public final class PaipuReplay {
 		gfx.drawString(font, ind.toString(), left + 6, top + 17, 0x88CCFF, false);
 
 		int y = top + 30;
-		for (int seat = 0; seat < 4 && y < bottom - 24; seat++) {
+		for (int seat = 0; seat < g.playerCount && y < bottom - 24; seat++) {
 			List<String> lines = seatBlocks.get(seat);
 			boolean riichi = snap.riichi[seat];
 			gfx.drawString(font, (riichi ? "[立直] " : "") + nameOf(g, seat), left + 6, y,
-					seat == Math.floorMod(s.handIdx, 4) ? 0xFFCC66 : 0xFFFFFF, false);
+					seat == Math.floorMod(s.handIdx, g.playerCount) ? 0xFFCC66 : 0xFFFFFF, false);
 			y += 12;
 			for (String l : lines) {
 				gfx.drawString(font, l, left + 6, y, 0xE0E0E0, false);

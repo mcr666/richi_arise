@@ -36,9 +36,23 @@ public class RichiTableState {
 	public int gameType = 0;
 	/** 对局人数（大厅切换）：4=四人麻雀 3=三人麻雀；三麻只使用座位 0/1/2（座位 3 留空不参与） */
 	public int playerCount = 4;
-	/** 房间类型（大厅切换）：0=铁之间（标准）1=玻璃之间（无红宝牌/无拔北，每种牌随机 3 张透明牌） */
-	public static final int ROOM_TIE = 0, ROOM_GLASS = 1;
+	/** 房间类型（大厅切换）：0=铁之间（标准）1=玻璃之间（无红宝牌，每种牌随机 3 张透明牌）2=紫水晶之间（备选牌） */
+	public static final int ROOM_TIE = 0, ROOM_GLASS = 1, ROOM_AMETHYST = 2;
 	public int roomType = ROOM_TIE;
+	/**
+	 * 本局实际使用的房间类型（开局时从 {@link #roomType} 固定）。
+	 * <p>{@link #roomType} 是"下一局"的大厅配置，终局后仍可修改；而终局保留的桌面残影必须按
+	 * 产生它的那一局渲染，否则改配置后 {@link RichiTableSync} 会按新房间类型重算隐藏手牌的
+	 * 透明位，把上一局的普通牌/玻璃牌互换（旧手牌实体被错套新模式）。</p>
+	 */
+	public int gameRoomType = ROOM_TIE;
+	/**
+	 * 紫水晶之间：始终公开的备选牌区（最多 3 张，牌谱记法；空串 = 无）。
+	 * 由服务端每局庄家首切后从牌山翻出，玩家摸牌时从中选取一张，选走后补 1 张。
+	 */
+	public String candidates = "";
+	/** 紫水晶之间：当前正在选备选牌的座位（-1 = 无）。仅用于客户端提示，选牌本身仍走选项 HUD */
+	public int candidatePickSeat = -1;
 	/**
 	 * 各家拔北数（三麻，雀魂规则）：拔出的北风牌张数，每张和牌时 +1 翻。resetHand 清零。
 	 * <p>拔北<b>不算副露</b>：不计入 {@link #melds}、不破坏门清；渲染经整桌快照的独立 kita 字段同步
@@ -93,6 +107,10 @@ public class RichiTableState {
 	public final int[] aiFlows = new int[4];
 	/** 明牌（默认关）：关时参战雀士看不到他人手牌牌面（打出/推倒后可见），显示未知牌面；观战者始终可见全部 */
 	public boolean openHand = false;
+	/** 击飞（默认开）：有人点数 < 0 时立即终局；关时负数点数继续对局到设定局数 */
+	public boolean tobi = true;
+	/** 食替（默认关）：开时吃/碰后当巡不能打出与所鸣相同的那张牌 */
+	public boolean kuikae = false;
 	/** 当前回合截止时刻（游戏刻，0 = 无计时）；超时自动摸切 */
 	public long turnDeadline;
 	/** 当前回合限时长（刻）：短考 5s（每回合重置）；进入长考后 = 长考银行剩余 */

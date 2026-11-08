@@ -12,6 +12,7 @@ import net.minecraft.world.phys.Vec3;
 import mcr.riichi_arise.block.FengPanBlock;
 import mcr.riichi_arise.block.FengPanSmallBlock;
 import mcr.riichi_arise.game.RichiTableState;
+import mcr.riichi_arise.game.TileFlag;
 
 /**
  * 风盘桌面公共布局（服务端交互代理与客户端渲染共用）：
@@ -221,6 +222,20 @@ public final class TableLayout {
 				.add(geom.lefts()[seat].scale(((RIVER_COLS - 1) / 2.0 - riverCol(index, geom.small())) * 0.17));
 	}
 
+	/**
+	 * 拔北第 index 张的桌面位置（与 {@link #plan} 的拔北位公式一致；结算粒子/抢北特效定位用）。
+	 * 北风平躺、长轴指桌心，第 1 张贴手牌区右端，之后依次往玩家左侧排。
+	 */
+	public static Vec3 kitaTarget(Geom geom, int seat, int index) {
+		double rightEnd = (HAND_SIZE - 1) / 2.0 * TILE_GAP + TILE_WIDTH / 2.0
+				- (geom.small() ? SMALL_HAND_LEFT_SHIFT : 0);
+		double inward = 3.0 / 16.0;
+		double leftShift = 3.0 / 16.0;
+		Vec3 kitaRow = geom.rows()[seat].subtract(geom.outs()[seat].scale(TILE_WIDTH + inward));
+		return kitaRow.add(geom.lefts()[seat].scale(
+				-(rightEnd + 2.0 / 16.0 + TILE_WIDTH / 2.0) + index * TILE_GAP + leftShift));
+	}
+
 	/** 手牌定位标签（显示实体与交互代理共用），选中升降时按标签精确找实体 */
 	public static String handTag(int seat, int index) {
 		return "richi_hand_i_" + seat + "_" + index;
@@ -263,6 +278,15 @@ public final class TableLayout {
 	 */
 	public static List<Placement> plan(Geom geom, RichiTableState st, List<List<Integer>> handCodes, boolean animate,
 			int[][] handSlots) {
+		return plan(geom, st, handCodes, animate, handSlots, null);
+	}
+
+	/**
+	 * 同上；flatGlassHands 为客户端「透明牌平放」选项的座位掩码（true = 该座位手牌中的透明牌以平放姿态渲染）。
+	 * 仅客户端传入，服务端（交互代理/布局）恒为 null，保证服务端数据与服务端交互不受影响。
+	 */
+	public static List<Placement> plan(Geom geom, RichiTableState st, List<List<Integer>> handCodes, boolean animate,
+			int[][] handSlots, boolean[] flatGlassHands) {
 		List<Placement> out = new ArrayList<>();
 		int step = animate ? DEAL_INTERVAL_TICKS : 0;
 		// 参战座位数（4=四麻 / 3=三麻）：三麻不为座位 3 生成任何摆位（手牌/牌河/副露/标签/点棒恒空，
@@ -308,6 +332,13 @@ public final class TableLayout {
 					Vec3 flatAxis = outs[h].scale(-1);
 					out.add(new Placement(KIND_HAND, flatEntityPos(tilePos, 0), tilePos, code,
 							flatYaw(flatAxis), flatAxis, expose == RichiTableState.HAND_FACE_UP, h, k, delay));
+				} else if (flatGlassHands != null && h < flatGlassHands.length && flatGlassHands[h]
+						&& TileFlag.isGlass(code)) {
+					// 「透明牌平放」：雀士视角下其他家的透明牌平放面朝上（长轴仍指向桌心，与牌河同向），
+					// 只改本地摆位；自家与其他座位不受影响
+					Vec3 flatAxis = outs[h].scale(-1);
+					out.add(new Placement(KIND_HAND, flatEntityPos(tilePos, 0), tilePos, code,
+							flatYaw(flatAxis), flatAxis, true, h, k, delay));
 				} else {
 					out.add(new Placement(KIND_HAND, standingEntityPos(tilePos), tilePos, code,
 							yRots[h], null, true, h, k, delay));
@@ -357,39 +388,91 @@ public final class TableLayout {
 					continue;
 				int fromSeat = groups.get(g).fromSeat();
 				int rel = fromSeat < 0 ? 0 : (fromSeat - h + 4) % 4;
-				// 加杠：按碰的 3 张布局（2 平躺 + 1 横放），第 4 张叠在横放牌上，不排成明杠
 				boolean kakan = groups.get(g).kakan() && meld.size() == 4;
-				int n = kakan ? meld.size() - 1 : meld.size();
-				boolean ankan = !kakan && fromSeat == h && n == 4; // 暗杠：来源自己且 4 张
-				// 声明牌横放位置：上家(rel3)最左、对家(rel2)中间、下家(rel1)最右；
-				// 横放长轴指向来源玩家：上家朝左、下家朝右、对家朝桌心。
-				int flatPos = -1;
-				Vec3 flatLong = null;
-				if (!ankan) {
-					flatPos = switch (rel) {
-						case 3 -> 0;                    // 上家：横牌在最左 [横][竖]..[竖]
-						case 1 -> n - 1;                // 下家：横牌在最右 [竖]..[竖][横]
-						default -> 1;                   // 对家：横牌在中间（3 张=第 2 位、4 张=中间偏左）
-					};
-					// 防御：副露串异常（组内只有 1 张等）时索引仍落在组内，避免后续 order[flatPos] 越界
-					flatPos = Math.max(0, Math.min(n - 1, flatPos));
-					if (rel == 3) {
-						flatLong = playerLeft;          // 长轴朝左指向左侧上家
-					} else if (rel == 1) {
-						flatLong = playerRight;         // 长轴朝右指向右侧下家
-					} else {
-						flatLong = facingCenter;        // 长轴朝桌心指向对家（垂直副露行）
-					}
-				}
+				// 暗杠：来源自己（正常对局）或无来源（整桌投影的外部牌谱）且 4 张
+				boolean ankan = !kakan && meld.size() == 4 && (fromSeat == h || fromSeat < 0);
 				// 组沿行（playerRight）各侧半宽（中心到外缘），供游标避让（相邻组/相邻家不重叠）
 				// 大风盘：声明牌不再沿行伸出，而是整体朝桌心平移半个牌宽——长边中心落在手牌行上，贴近但不超过手牌行，避免捅进邻家
 				double sideProtrude = geom.small() ? protrude : 0.0;
-				double pitch = ankan ? flatStep : TILE_GAP;
+				// 暗杠：4 张纵向并排，最外侧两张亮明、中间两张扣下（牌背朝外）
+				if (ankan) {
+					double pitch = flatStep;
+					double centerOff = (meld.size() - 1) / 2.0 * pitch;
+					double half = centerOff + halfW;
+					double c = cursor - half;
+					cursor = c - half - MELD_GAP;
+					Vec3 groupCenter = meldRow.add(playerRight.scale(c));
+					for (int j = 0; j < meld.size(); j++) {
+						Vec3 target = groupCenter
+								.add(playerRight.scale((j - (meld.size() - 1) / 2.0) * pitch));
+						boolean faceUp = j == 0 || j == meld.size() - 1; // 两端亮明，中间扣盖
+						out.add(new Placement(KIND_MELD, flatEntityPos(target, 0), target, meld.get(j),
+								flatYaw(facingCenter), facingCenter, faceUp, h, j, dealIndex++ * step));
+					}
+					continue;
+				}
+				// 明杠 / 加杠：4 张按实际占宽排布（横放牌长轴沿副露行，占 TILE_LONG），相邻牌不重叠。
+				// 明杠：1 张横放（被杠的那张，位置仍表示来源：上家最左/对家中段/下家最右）；
+				// 加杠：碰的 3 张 + 补的第 4 张，两张横牌并排放在声明端。
+				if (meld.size() == 4) {
+					boolean[] horizontal = new boolean[4];
+					int[] index = new int[4];
+					boolean[] assigned = new boolean[4];
+					int claimSlot = rel == 3 ? 0 : rel == 1 ? 3 : 1; // 上家最左、下家最右、对家中段
+					horizontal[claimSlot] = true;
+					index[claimSlot] = -3; // 副露声明牌（客户端从牌河飞来）
+					assigned[claimSlot] = true;
+					if (kakan) {
+						// 紧挨声明牌并排（下家声明牌在最右，补牌放其左侧；其余放右侧）
+						int addedSlot = rel == 1 ? claimSlot - 1 : claimSlot + 1;
+						horizontal[addedSlot] = true;
+						index[addedSlot] = -2; // 加杠新增牌（客户端从手牌飞来）
+						assigned[addedSlot] = true;
+					}
+					int own = 0;
+					for (int j = 0; j < 4; j++)
+						if (!assigned[j])
+							index[j] = own++;
+					Vec3 flatLong = rel == 1 ? playerRight : playerLeft; // 横放长轴沿副露行，真正"横着"
+					double innerGap = 0.0015; // 组内相邻牌小缝，避免共面闪烁
+					double total = innerGap * 3.0;
+					for (int j = 0; j < 4; j++)
+						total += horizontal[j] ? TILE_LONG : TILE_WIDTH;
+					double half = total / 2.0;
+					double c = cursor - half;
+					cursor = c - half - MELD_GAP;
+					Vec3 groupCenter = meldRow.add(playerRight.scale(c));
+					Vec3 flatOffset = facingCenter.scale(-(geom.small() ? protrude : halfW));
+					double acc = -half;
+					for (int j = 0; j < 4; j++) {
+						double width = horizontal[j] ? TILE_LONG : TILE_WIDTH;
+						Vec3 target = groupCenter.add(playerRight.scale(acc + width / 2.0));
+						acc += width + innerGap;
+						if (horizontal[j])
+							target = target.add(flatOffset);
+						out.add(new Placement(KIND_MELD, flatEntityPos(target, 0), target, meld.get(j),
+								flatYaw(horizontal[j] ? flatLong : facingCenter),
+								horizontal[j] ? flatLong : facingCenter, true, h, index[j],
+								dealIndex++ * step));
+					}
+					continue;
+				}
+				// 吃/碰（3 张）：声明牌横放，其余自家牌平躺
+				int n = meld.size();
+				// 声明牌横放位置：上家(rel3)最左、对家(rel2)中间、下家(rel1)最右；
+				// 横放长轴指向来源玩家：上家朝左、下家朝右
+				int flatPos = switch (rel) {
+					case 3 -> 0;                    // 上家：横牌在最左 [横][竖]..[竖]
+					case 1 -> n - 1;                // 下家：横牌在最右 [竖]..[竖][横]
+					default -> 1;                   // 对家：横牌在中间
+				};
+				// 防御：副露串异常（组内只有 1 张等）时索引仍落在组内，避免后续 order[flatPos] 越界
+				flatPos = Math.max(0, Math.min(n - 1, flatPos));
+				Vec3 flatLong = rel == 3 ? playerLeft : rel == 1 ? playerRight : facingCenter;
+				double pitch = TILE_GAP;
 				double centerOff = (n - 1) / 2.0 * pitch;
 				double inner, outer;
-				if (ankan) {
-					inner = outer = centerOff + halfW;
-				} else if (rel == 3) {
+				if (rel == 3) {
 					inner = centerOff + halfL + sideProtrude; // 横牌最左且向左伸出
 					outer = centerOff + halfW;
 				} else if (rel == 1) {
@@ -405,15 +488,6 @@ public final class TableLayout {
 				double[] u = new double[n];
 				for (int j = 0; j < n; j++)
 					u[j] = (j - (n - 1) / 2.0) * pitch;
-				if (ankan) {
-					for (int j = 0; j < n; j++) {
-						Vec3 target = groupCenter.add(playerRight.scale(u[j]));
-						boolean faceUp = j == 1 || j == 2; // 两端扣盖（背面朝上），中间两张亮明（正面朝上）
-						out.add(new Placement(KIND_MELD, flatEntityPos(target, 0), target, meld.get(j),
-								flatYaw(facingCenter), facingCenter, faceUp, h, j, dealIndex++ * step));
-					}
-					continue;
-				}
 				if (rel == 3)
 					u[flatPos] -= sideProtrude; // 上家横牌向左伸（紧贴邻家平躺牌，无豁口；大风盘不伸）
 				else if (rel == 1)
@@ -430,13 +504,11 @@ public final class TableLayout {
 				for (int j = 0, oi = 0; j < n; j++)
 					if (j != flatPos)
 						order[j] = oi++;
-				Vec3 flatTarget = null; // 横放声明牌位置（加杠第 4 张紧贴其近侧）
 				for (int j = 0; j < n; j++) {
 					Vec3 target = groupCenter.add(playerRight.scale(u[j]));
 					if (j == flatPos) {
 						Vec3 flatPos3 = target.add(flatOffset);
-						flatTarget = flatPos3;
-						// 声明牌：平躺，长轴指向来源玩家（上家朝左/下家朝右/对家朝桌心）
+						// 声明牌：平躺，长轴指向来源玩家（上家朝左/下家朝右）
 						// index = -3 标记"副露声明牌"（客户端播放从牌河飞来的动画用）
 						out.add(new Placement(KIND_MELD, flatEntityPos(flatPos3, 0), flatPos3, meld.get(order[j]),
 								flatYaw(flatLong), flatLong, true, h, -3, dealIndex++ * step));
@@ -445,14 +517,6 @@ public final class TableLayout {
 						out.add(new Placement(KIND_MELD, flatEntityPos(target, 0), target, meld.get(order[j]),
 								flatYaw(facingCenter), facingCenter, true, h, j, dealIndex++ * step));
 					}
-				}
-				if (kakan && flatTarget != null) {
-					// 加杠的第 4 张：叠放在横放声明牌上方（日麻标准：加槓の4枚目はポンの横向き牌の上側に置く）；
-					// 与横放牌同向（长轴同样指向声明来源家），水平位置一致、抬高一个牌厚
-					// index = -2 标记"加杠新增牌"（客户端播放从手牌飞来的动画用）
-					out.add(new Placement(KIND_MELD, flatEntityPos(flatTarget, FLAT_THICKNESS), flatTarget,
-							meld.get(meld.size() - 1), flatYaw(flatLong), flatLong, true, h, -2,
-							dealIndex++ * step));
 				}
 			}
 			// 3.4) 拔北位（三麻）：拔北**不算副露**，数量取快照独立字段 st.kita[h]，与副露串无关。

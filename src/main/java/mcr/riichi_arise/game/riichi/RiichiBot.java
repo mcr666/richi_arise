@@ -12,7 +12,7 @@ import java.util.function.DoubleSupplier;
  * <li>1 野猪流：可副露、不防守（保留定义，当前仅随机可用路径，无 UI 入口）</li>
  * <li>2 门清流：副露权重低（门槛高，非完全不副露）、防守高（八木唯）</li>
  * <li>3 御无双：不副露、防守适中（保留定义，当前仅随机可用路径，无 UI 入口）</li>
- * <li>4 魂天流：可副露、会防守（福姬）</li>
+ * <li>4 魂天流：可副露、会防守（福姬/桔螈）</li>
  * <li>5 鬼神境：知道他家手牌（选牌按全知可见牌计算）；可副露、可防守（瓦西子/赤木）</li>
  * </ul>
  * <p>算法移植自 mahjong-helper（MIT License）：</p>
@@ -126,11 +126,28 @@ public final class RiichiBot {
 		if (best == null)
 			return null;
 
+		int ci = TileEfficiency.codeToIndex(calledCode);
+		boolean yakuhaiCall = ci == roundWindIdx || ci == selfWindIdx
+				|| ci == 31 || ci == 32 || ci == 33;
+
+		// 死听/绝张保护（修“绝张后付”）：鸣牌后若直接听牌，但剩余和牌张为 0（死听）或仅 1 张（绝张），
+		// 后付等于白送一副露且几乎和不了。死听一律不鸣；绝张仅役牌碰可保留（确有役且可施压），
+		// 其余门清手牌（尤其门清流/魂天流）优先保立直与打点；终盘若已是副露手则允许提速。
+		if (best.shanten <= 0) {
+			if (best.waitsCount <= 0)
+				return null;
+			if (best.waitsCount == 1 && !(best.pon && yakuhaiCall)) {
+				if (p.melds.isEmpty() && flow != 1)
+					return null;
+				if (!p.melds.isEmpty() && turns < 12 && flow != 1)
+					return null;
+			}
+		}
+
 		// 役路门槛（修"无役乱吃碰"）：开门 = 放弃立直，必须仍有一条保证役才允许副露——
 		// 断幺路（开门后全 2-8 数牌）、役牌（三元 + 场风 + 自风，参照 mahjong-helper PlayerInfo 建模）
 		// 对/刻或直接碰；已开门（此前过门槛 = 已有役）不再限制
 		if (p.melds.isEmpty()) {
-			int ci = TileEfficiency.codeToIndex(calledCode);
 			boolean tanyao = ci < 27 && ci % 9 >= 1 && ci % 9 <= 7;
 			if (tanyao)
 				for (int c : p.hand) {
@@ -175,6 +192,32 @@ public final class RiichiBot {
 	}
 
 	/**
+	 * 明杠（大明杠）取舍：杠会翻开新的宝牌指示牌、破坏门清/听牌形，并给全场送宝牌。
+	 * <p>约束（不是一刀切禁止，保证 AI 该杠时仍会杠）：</p>
+	 * <ul>
+	 * <li>门清且手牌一向听以内：不开（保立直/保听牌形）；</li>
+	 * <li>门清且手内宝牌 ≥2：不开（多一张宝牌指示牌对己方收益远不及暴露手牌+破坏门清）；</li>
+	 * <li>门清且已到终盘（14 巡以上）：不开（来不及享受岭上摸牌）；</li>
+	 * <li>防守流（门清流/魂天流/鬼神境）面对他家立直：不开（不送宝牌、不冒险）；</li>
+	 * <li>其余情形（已副露、手牌远离听牌、激进流派）正常开杠，避免 AI 在必须行动时卡住。</li>
+	 * </ul>
+	 */
+	public static boolean shouldOpenMinkan(RiichiPlayer p, List<Integer> handCodes, int turns, int ownDora,
+			boolean opponentRiichi, int flow) {
+		if (p.melds.isEmpty()) {
+			if (shantenOf(handCodes) <= 1)
+				return false;
+			if (ownDora >= 2)
+				return false;
+			if (turns >= 14)
+				return false;
+		}
+		if (opponentRiichi && (flow == 2 || flow == 4 || flow == 5))
+			return false;
+		return true;
+	}
+
+	/**
 	 * 科学防守危险度（TileDanger 移植的聚合层）：对每个立直家计算铳率表，取各家最大值。
 	 *
 	 * @param riichiSeats  立直家座位列表
@@ -183,11 +226,12 @@ public final class RiichiBot {
 	 * @param doraCodes    当前宝牌 code 列表（可重复 = 多重宝牌）
 	 * @param roundWindIdx 场风 34 索引（27=東..30=北）
 	 * @param dealerSeat   庄家座位（推各家自风）
+	 * @param playerCount  参战人数（4=四麻 / 3=三麻；自风按参战人数轮转，三麻不出现"北家"）
 	 * @param kitaCounts   各立直家拔北数（与 riichiSeats 平行；三麻拔北 ≥2 的对手打点更高，
 	 *                     其铳率表权重上调 1.2 倍；四麻全 0 不修正）
 	 */
 	public static double[] defenseDanger(List<Integer> riichiSeats, List<List<Integer>> rivers,
-			int[] visible34, List<Integer> doraCodes, int roundWindIdx, int dealerSeat,
+			int[] visible34, List<Integer> doraCodes, int roundWindIdx, int dealerSeat, int playerCount,
 			List<Integer> kitaCounts) {
 		double[] risk = new double[34];
 		if (riichiSeats == null || riichiSeats.isEmpty())
@@ -204,7 +248,7 @@ public final class RiichiBot {
 			boolean[] safe = new boolean[34];
 			for (int c : river)
 				safe[TileEfficiency.codeToIndex(c)] = true;
-			int selfWind = 27 + Math.floorMod(s - dealerSeat + 4, 4);
+			int selfWind = 27 + Math.floorMod(s - dealerSeat, Math.max(1, playerCount));
 			int turns = Math.max(1, river.size());
 			// 三麻打点修正：拔北 ≥2 的立直家每张北 +1 翻、打点更高，危险度权重上调约 1.2 倍
 			double weight = kitaCounts != null && k < kitaCounts.size() && kitaCounts.get(k) >= 2 ? 1.2 : 1.0;

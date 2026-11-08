@@ -131,12 +131,26 @@ public final class Mahjong4jBridge {
 		}
 	}
 
-	/** 和牌结算结果（点数以庄家/闲家语义给出；doraHits/uraHits/redHits = 命中宝牌的牌面码，供播报聚合） */
+	/** 和牌结算结果（点数以庄家/闲家语义给出；doraHits/uraHits/redHits = 命中宝牌的牌面码，供播报聚合）。
+	 *  <p>役满分两类，以 fu 区分：</p>
+	 *  <ul><li>真役满（役满役种 / 天地和）：fu = 0，han 编码倍数</li>
+	 *  <li>累计役满（普通役+宝牌累计到 13 翻以上）：fu 为真实符数，han 为真实累计翻数</li></ul>
+	 *  宝牌条目只在真役满时省略；累计役满照常列/报（靠 {@link #trueYakuman()} 判定） */
 	public record WinResult(boolean win, boolean yakuman, int han, int fu,
 			List<String> yakuNames, ScoreVal score, List<Integer> doraHits, List<Integer> uraHits,
 			List<Integer> redHits) {
 		public WinResult(boolean win, boolean yakuman, int han, int fu, List<String> yakuNames, ScoreVal score) {
 			this(win, yakuman, han, fu, yakuNames, score, List.of(), List.of(), List.of());
+		}
+
+		/** 真役满（役满役种 / 天地和）：宝牌、拔北、里宝牌不列不计、不播报 */
+		public boolean trueYakuman() {
+			return yakuman && fu == 0;
+		}
+
+		/** 累计役满（宝牌/翻数堆到 13 翻以上）：宝牌、拔北、里宝牌照常列/播 */
+		public boolean cumulativeYakuman() {
+			return yakuman && fu != 0;
 		}
 	}
 
@@ -163,9 +177,9 @@ public final class Mahjong4jBridge {
 	 */
 	public static WinResult score(List<Integer> handWithWinTile, List<Fuuro> melds, int winnerSeat,
 			int dealerSeat, int roundWind, boolean tsumo, boolean riichi, boolean ippatsu,
-			Flags flags, List<Integer> doraIndicators) {
+			Flags flags, List<Integer> doraIndicators, int playerCount) {
 		return score(handWithWinTile, melds, winnerSeat, dealerSeat, roundWind, tsumo, riichi, ippatsu,
-				flags, doraIndicators, 0);
+				flags, doraIndicators, 0, playerCount);
 	}
 
 	/**
@@ -173,10 +187,11 @@ public final class Mahjong4jBridge {
 	 *
 	 * @param kitaHan 和牌者拔北数（三麻）：每张 +1 翻，在宝牌之后追加（役名 KITA/拔北），
 	 *                计入 13 翻累计役满的翻数；不影响"有役才能和"的判定（无役时拔北不单独成和）
+	 * @param playerCount 参战人数（4=四麻 / 3=三麻）：自风按三角轮转，三麻不出现"北家"
 	 */
 	public static WinResult score(List<Integer> handWithWinTile, List<Fuuro> melds, int winnerSeat,
 			int dealerSeat, int roundWind, boolean tsumo, boolean riichi, boolean ippatsu,
-			Flags flags, List<Integer> doraIndicators, int kitaHan) {
+			Flags flags, List<Integer> doraIndicators, int kitaHan, int playerCount) {
 		try {
 			int last = handWithWinTile.get(handWithWinTile.size() - 1);
 			int[] comp = toComp(handWithWinTile); // 含和牌张（Mahjong4j 要求全量）
@@ -185,9 +200,9 @@ public final class Mahjong4jBridge {
 			if (!hands.getCanWin())
 				return new WinResult(false, false, 0, 0, List.of(), ScoreVal.ZERO);
 
-			// 场况：场风随局数（東/南），自风 = 座位相对庄家偏移
+			// 场况：场风随局数（東/南），自风 = 座位相对庄家偏移，按参战人数轮转（三麻东→南→西）
 			Tile bakaze = roundWind == 0 ? Tile.TON : Tile.NAN;
-			Tile jikaze = Tile.values()[27 + (winnerSeat - dealerSeat + 4) % 4];
+			Tile jikaze = Tile.values()[27 + Math.floorMod(winnerSeat - dealerSeat, Math.max(1, playerCount))];
 			GeneralSituation general = new GeneralSituation(false, false, bakaze,
 					toTiles(doraIndicators), List.of());
 			boolean isParent = winnerSeat == dealerSeat;
@@ -196,6 +211,24 @@ public final class Mahjong4jBridge {
 					ippatsu && riichi, riichi, flags.doubleRiichi(), flags.chankan(), flags.rinshan(), jikaze);
 			Player player = new Player(hands, general, personal);
 			player.calculate();
+			// 宝牌翻数用原始手牌分解（重建手牌会把荣和刻移出 comp，导致漏计那 3 张的宝牌翻）
+			int[] doraCompForHan = hands.getHandsComp();
+
+			// 荣和双碰听：mahjong4j 把 4 组刻子全按暗刻算，直接给出四暗刻；但被荣和补成的那组只能算明刻。
+			// 撤销四暗刻：把该刻当副露明刻重建手牌重算 → 只剩三暗刻 + 其余常规役。
+			// 单骑听（和牌张补雀头）不重建，四暗刻（雀魂双倍即四暗刻单骑）仍成立。
+			Tile winTile = toTile(last);
+			if (!tsumo && comp[winTile.ordinal()] >= 3
+					&& player.getYakumanList().contains(Yakuman.SUANKO)
+					&& !hasAnkoExcludingWin(hands, winTile, 4)) {
+				int[] comp2 = comp.clone();
+				comp2[winTile.ordinal()] -= 3;
+				List<Mentsu> mentsu2 = new ArrayList<>(mentsu);
+				mentsu2.add(new Kotsu(true, winTile)); // 荣和补成的刻 = 明刻
+				hands = new Hands(comp2, winTile, mentsu2);
+				player = new Player(hands, general, personal);
+				player.calculate();
+			}
 
 			List<Yakuman> yakumanList = player.getYakumanList();
 			List<String> names = new ArrayList<>();
@@ -205,7 +238,6 @@ public final class Mahjong4jBridge {
 				for (Yakuman y : yakumanList)
 					names.add(y.name());
 				// 雀魂倍役满补判（mahjong4j 无对应 resolver）：大四喜/四暗刻单骑/纯正九莲宝灯/国士十三面 各 +1 倍
-				Tile winTile = toTile(last);
 				if (yakumanList.contains(Yakuman.DAISUSHI))
 					count++; // 雀魂：大四喜 = 倍役满
 				if (yakumanList.contains(Yakuman.SUANKO) && hasAnkoExcludingWin(hands, winTile, 4)) {
@@ -339,7 +371,7 @@ public final class Mahjong4jBridge {
 			if (han <= 0)
 				return new WinResult(false, false, 0, 0, names, ScoreVal.ZERO);
 			// 宝牌（含红宝牌简化：红五不算宝）
-			int[] fullComp = hands.getHandsComp();
+			int[] fullComp = doraCompForHan;
 			for (Tile doraTile : general.getDora())
 				han += fullComp[doraTile.ordinal()];
 			// 符数取整：Mahjong4j 的 getFu() 可能返回未取整值（如 22/24），非法符会导致计分异常被吞
@@ -350,7 +382,9 @@ public final class Mahjong4jBridge {
 			// 副露底符 30：含明副露（非暗杠）的手牌不存在 20 符（喰い平和等按 30 计）
 			if (melds.stream().anyMatch(f -> f.type != Fuuro.Type.ANKAN) && fu < 30)
 				fu = 30;
-			// 宝牌命中明细（含红宝牌/里宝牌，供播报按牌面聚合）；红五优先归入红宝牌
+			// 宝牌命中明细（含红宝牌/里宝牌，供播报按牌面聚合）；红五优先归入红宝牌。
+			// 表宝牌与里宝牌独立判定：同一张牌可能既是表宝牌又是里宝牌（两张指示牌指向同一种牌），
+			// 必须两边都记，否则结算列表明明有"里宝牌×N"却报不出来。
 			List<Integer> allCodes = new ArrayList<>(handWithWinTile);
 			for (Fuuro f : melds)
 				for (int t : f.tiles)
@@ -358,11 +392,13 @@ public final class Mahjong4jBridge {
 			List<Integer> doraHits = new ArrayList<>(), uraHits = new ArrayList<>(), redHits = new ArrayList<>();
 			for (int raw : allCodes) {
 				int c = mcr.riichi_arise.game.TileFlag.base(raw); // 透明牌标志不影响宝牌判定
-				if (c == 0 || c == 10 || c == 20)
+				if (c == 0 || c == 10 || c == 20) {
 					redHits.add(c);
-				else if (doraIndicators.contains(c))
+					continue;
+				}
+				if (doraIndicators.contains(c))
 					doraHits.add(c);
-				else if (riichi && flags.uraDoras().contains(c))
+				if (riichi && flags.uraDoras().contains(c))
 					uraHits.add(c);
 			}
 			// 红宝牌翻数：手牌+副露中的红五（0/10/20）每张 +1 翻
@@ -398,10 +434,11 @@ public final class Mahjong4jBridge {
 				names.add("HOUTEI");
 			}
 			// 累计役满（雀魂规则）：一般役累计翻数每满 13 翻按 1 个役满计（26 翻 = 双倍役满）；
-			// mahjong4j 的 calculateScore 对 han≥13 一律只给单倍役满。han 编码役满倍数
+			// mahjong4j 的 calculateScore 对 han≥13 一律只给单倍役满。
+			// 保留真实 han/fu（fu 非 0）以区别真役满：宝牌/拔北照常列出与播报
 			int k = han / 13;
 			if (k > 0)
-				return new WinResult(true, true, k, 0, names,
+				return new WinResult(true, true, han, fu, names,
 						ScoreVal.yakuman(isParent, k), doraHits, uraHits, redHits);
 			ScoreVal s = ScoreVal.of(Score.calculateScore(isParent, han, fu));
 			return new WinResult(true, false, han, fu, names, s, doraHits, uraHits, redHits);

@@ -103,6 +103,7 @@ public class MahjongHud {
 			case "ankan" -> Component.translatable("gui.riichi_arise.act.ankan").getString();
 			case "kakan" -> Component.translatable("gui.riichi_arise.act.kakan").getString();
 			case "kita" -> Component.translatable("gui.riichi_arise.act.kita").getString(); // 拔北（三麻，无参选项）
+			case "pick" -> Component.translatable("gui.riichi_arise.act.pick").getString(); // 紫水晶之间：选备选牌
 			default -> action;
 		};
 	}
@@ -121,6 +122,11 @@ public class MahjongHud {
 					for (int i = 0; i < parts.length; i++)
 						tiles[i] = Integer.parseInt(parts[i].trim());
 					yield tiles;
+				}
+				case "pick" -> { // data = "索引:牌code"
+					if (!data.contains(":"))
+						yield new int[0];
+					yield new int[] { Integer.parseInt(data.substring(data.indexOf(':') + 1).trim()) };
 				}
 				default -> new int[0];
 			};
@@ -161,6 +167,15 @@ public class MahjongHud {
 		}
 		if (parts.isEmpty())
 			return;
+		// 紫水晶之间选牌：改由备选牌区叠加层以同款样式渲染（序号标在牌面下方），
+		// 这里只保留键盘索引（数字键 1..N 与叠加层上的序号一致），不绘制通用选项面板。
+		if (parts.stream().allMatch(p -> p.action().equals("pick"))) {
+			for (int i = 0; i < parts.size(); i++)
+				buttons.add(new ActButton(String.valueOf(i + 1), "pick", parts.get(i).data(), parts.get(i).tiles(),
+						0, 0, 0, 0));
+			panelX = panelY = panelW = panelH = 0;
+			return;
+		}
 		// 面板底边在倒计时文字上方（倒计时 y = guiHeight-71）；宽度不超屏幕
 		panelW = Math.min(textW + padX * 2, guiGraphics.guiWidth() - 8);
 		panelH = padY * 2 + parts.size() * lineH + lineH;

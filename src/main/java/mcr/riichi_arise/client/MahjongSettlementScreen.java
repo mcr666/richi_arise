@@ -175,8 +175,20 @@ public class MahjongSettlementScreen extends Screen {
 		}
 	}
 
+	/** 单条报番语音的保守时长（刻，2s）：役名与宝牌语音长短差异大，按上限留足，避免提前判"报番结束" */
+	private static final int SETTLE_VOICE_TICKS = 40;
+	/** 报番语音收尾余量（刻）：最后一条播完到判定结束的缓冲 */
+	private static final int SETTLE_VOICE_TAIL = 20;
+
 	/** 报番固定节奏的结束时刻（无报番语音 / 语音超时兜底） */
 	private int announceFallbackEnd() {
+		// 有语音报番时按实际入队条数估算：宝牌/里宝牌语音排在最后，若沿用"列表行数 × 0.5s"的固定节奏估算，
+		// 结束时刻会早于真实语音长度，界面自动确认关闭时把还没播的宝牌/里宝牌语音一并清掉（表现为宝牌漏报）
+		if (mcr.riichi_arise.voice.FanAnnouncer.isActive()) {
+			int items = Math.max(1, mcr.riichi_arise.voice.FanAnnouncer.total());
+			return RichiTableState.SETTLE_ANNOUNCE_DELAY + 15
+					+ SETTLE_VOICE_TICKS * items + SETTLE_VOICE_TAIL;
+		}
 		int n = this.data == null || this.data.yakuList().isBlank() ? 0
 				: this.data.yakuList().split(";").length;
 		return RichiTableState.SETTLE_ANNOUNCE_DELAY + 15
@@ -202,7 +214,7 @@ public class MahjongSettlementScreen extends Screen {
 		if (this.data == null)
 			return -1;
 		if (this.data.fu() == 0)
-			return 4; // 役满（符=0；han 为倍数）
+			return 4; // 真役满（符=0；han 为倍数）
 		if ("nagashi".equals(this.data.winType()))
 			return 0; // 流局满贯
 		int han = this.data.han();
@@ -238,13 +250,14 @@ public class MahjongSettlementScreen extends Screen {
 		switch (tierRank()) {
 			case 4:
 				if (this.data.fu() == 0) {
-					// 役满（han 编码倍数）：1 倍"役满"，n 倍"n倍役满"
+					// 真役满（han 编码倍数）：1 倍"役满"，n 倍"n倍役满"
 					int count = Math.max(1, this.data.han());
 					return count > 1
 							? Component.translatable("gui.riichi_arise.settlement.yakuman_n", count).getString()
 							: Component.translatable("gui.riichi_arise.settlement.yakuman").getString();
 				}
-				return Component.translatable("gui.riichi_arise.settlement.yakuman").getString(); // 累计役满
+				// 累计役满（13 翻以上、符非 0）：段位名单独显示，不与真役满混称"役满"
+				return Component.translatable("gui.riichi_arise.settlement.leijiyiman").getString();
 			case 3:
 				return Component.translatable("gui.riichi_arise.settlement.sanbaiman").getString();
 			case 2:
@@ -263,9 +276,9 @@ public class MahjongSettlementScreen extends Screen {
 		if (this.data == null || "nagashi".equals(this.data.winType()))
 			return null; // 流局满贯无役种报番，不播等级语音
 		if (tierRank() == 4 && this.data.fu() == 0) {
-			// 役满（han 编码倍数）：13 番以上为累计役满，否则 N 倍役满（6 倍以上用 6 倍音频）
+			// 真役满（han 编码倍数）：N 倍役满语音（6 倍以上用 6 倍音频）
 			int count = Math.max(1, this.data.han());
-			return count >= 13 ? "leijiyiman" : "yiman" + Math.min(6, count);
+			return "yiman" + Math.min(6, count);
 		}
 		return switch (tierRank()) {
 			case 4 -> "leijiyiman"; // 累计役满（13 翻以上、符非 0）

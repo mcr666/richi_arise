@@ -2,6 +2,8 @@ package mcr.riichi_arise.voice;
 
 import java.util.List;
 
+import net.minecraft.world.phys.Vec3;
+
 /**
  * 报番同步状态（客户端）：把役种语音的播放进度暴露给结算界面，
  * 实现"本条语音开始 → 对应役种同时显现 + 打点音效"的节奏。
@@ -40,12 +42,17 @@ public final class FanAnnouncer {
 	private static volatile String levelVoiceId = "";
 	/** 最后一条实际有音频的条目下标（-1 = 全部缺失）：它播完即报番结束 */
 	private static volatile int lastVoiced = -1;
+	/** 本次实际入队的语音文件（与 pendingFiles 同序，仅用于逐条播放诊断日志） */
+	private static volatile List<String> activeFiles = List.of();
+	/** 本轮报番的音源世界坐标（牌桌中心，按距离衰减）；null = 不做距离衰减 */
+	private static volatile Vec3 source;
 
 	/**
 	 * 准备一次报番：zhNames 为按播报顺序的役种中文名；files 为待播语音文件名（役种在前、宝牌在后）；
 	 * extraCount 为宝牌计数等附加播报数。此时只记状态，不播放——等结算界面弹出 1s 后由 {@link #start()} 开始。
+	 * @param src 音源世界坐标（牌桌中心），报番/点数语音按此位置做距离衰减；null = 不做距离衰减
 	 */
-	static void begin(List<String> zhNames, List<String> files, int extraCount, String charId) {
+	static void begin(List<String> zhNames, List<String> files, int extraCount, String charId, Vec3 src) {
 		spoken = List.copyOf(zhNames);
 		pendingFiles = List.copyOf(files);
 		extras = Math.max(0, extraCount);
@@ -57,6 +64,7 @@ public final class FanAnnouncer {
 		lastVoiced = -1;
 		voiceId = charId == null ? "" : charId;
 		levelVoiceId = voiceId;
+		source = src;
 		// 新一次报番：先清掉上一轮没播完的报番语音（末尾宝牌/段位语音最容易被留下），
 		// 否则结算界面刚弹出时就会听见上一局的"宝牌"，像是宝牌抢在番名前面
 		VoicePlayer.clearFan();
@@ -73,8 +81,10 @@ public final class FanAnnouncer {
 		active = false;
 		begun = false;
 		lastVoiced = -1;
+		activeFiles = List.of();
 		voiceId = "";
 		levelVoiceId = "";
+		source = null;
 		// 丢掉上一轮没播完的报番语音（末尾宝牌/段位语音），否则它们会排到下一局番名之前先响
 		VoicePlayer.clearFan();
 	}
@@ -99,14 +109,16 @@ public final class FanAnnouncer {
 			// 否则它们会排在本次番名之前先响，听起来像"宝牌比番名还早"
 			VoicePlayer.clearFan();
 			String id = voiceId;
+			Vec3 src = source;
 			List<String> files = pendingFiles;
 			pendingFiles = List.of();
+			activeFiles = files;
 			lastVoiced = -1;
 			List<String> missing = new java.util.ArrayList<>();
 			for (int i = 0; i < files.size(); i++) {
 				int idx = i;
 				String file = files.get(i);
-				boolean ok = VoicePlayer.enqueueOrSkip(id, file,
+				boolean ok = VoicePlayer.enqueueOrSkip(id, file, src,
 						() -> onItemStart(idx), () -> onItemEnd(idx));
 				if (ok)
 					lastVoiced = idx;
@@ -114,6 +126,8 @@ public final class FanAnnouncer {
 					missing.add(file);
 			}
 			// 报番语音由资源包提供（resourcepacks/riichi_arise_fan_voice）：日志里区分「整轮缺失」和「个别缺文件」
+			com.mojang.logging.LogUtils.getLogger().info("[voice] 报番入队 {} 共{}条：{}（缺失：{}）",
+					id, files.size(), files, missing);
 			if (lastVoiced < 0) {
 				started = total;
 				done = true;
@@ -123,10 +137,12 @@ public final class FanAnnouncer {
 				active = false;
 				if (!missing.isEmpty())
 					com.mojang.logging.LogUtils.getLogger().info(
-							"[voice] 未找到报番语音（{}）：{}——需安装报番语音资源包，本次按固定节奏显现",
+							"[voice] 未找到报番语音（{}）：{}——整轮无可用报番资源，本轮整轮静默（按固定节奏显现）",
 							id, missing);
 			} else if (!missing.isEmpty()) {
-				com.mojang.logging.LogUtils.getLogger().warn("[voice] 报番音频缺失（{}）：{}", id, missing);
+				// 只缺个别条目：保持原角色音色，缺的条目静默，不做单条借用（避免同一轮内音色混用）
+				com.mojang.logging.LogUtils.getLogger().warn(
+						"[voice] 报番音频缺个别文件（{}）：{}——保持原角色音色，缺条目静默", id, missing);
 			}
 		}
 	}
@@ -137,7 +153,7 @@ public final class FanAnnouncer {
 		if (levelKey == null || levelKey.isEmpty() || id.isEmpty())
 			return;
 		levelVoiceId = ""; // 一局只播一次，避免残留到无报番的下一局
-		VoicePlayer.enqueue(id, levelKey);
+		VoicePlayer.enqueue(id, levelKey, source, null);
 	}
 
 	/** 第 idx 条语音开始播放：对应条目（及其前没有音频的条目）随语音一起显现 */
@@ -149,6 +165,9 @@ public final class FanAnnouncer {
 			if (n > started)
 				started = n;
 		}
+		List<String> files = activeFiles;
+		com.mojang.logging.LogUtils.getLogger().info("[voice] 报番开播 {}/{} {}",
+				idx + 1, files.size(), idx >= 0 && idx < files.size() ? files.get(idx) : "?");
 		revealSound();
 	}
 
@@ -160,6 +179,9 @@ public final class FanAnnouncer {
 			started = total;
 			done = true;
 		}
+		List<String> files = activeFiles;
+		com.mojang.logging.LogUtils.getLogger().info("[voice] 报番播完 {}/{} {}",
+				idx + 1, files.size(), idx >= 0 && idx < files.size() ? files.get(idx) : "?");
 	}
 
 	/** 役种显现音效（模仿天凤报番的打点音；切回主线程播放） */
@@ -201,5 +223,10 @@ public final class FanAnnouncer {
 	/** 本次报番的附加播报总数（宝牌计数等，对应结算列表末尾的宝牌条目数） */
 	public static int extrasTotal() {
 		return extras;
+	}
+
+	/** 本次报番计划条目总数（役种 + 宝牌计数等附加）：结算界面按实际入队条数估算播报结束时刻 */
+	public static int total() {
+		return total;
 	}
 }

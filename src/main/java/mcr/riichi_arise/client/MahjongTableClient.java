@@ -39,6 +39,7 @@ import net.minecraft.world.phys.Vec3;
 
 import mcr.riichi_arise.client.MahjongTileBlockRenderer;
 import mcr.riichi_arise.MahjongTileItem;
+import mcr.riichi_arise.RichiConfig;
 import mcr.riichi_arise.block.FengPanBlock;
 import mcr.riichi_arise.game.MahjongTileNotation;
 import mcr.riichi_arise.game.RichiTableState;
@@ -84,21 +85,34 @@ public final class MahjongTableClient {
 	private static final Map<Long, TableRender> TABLES = new HashMap<>();
 	/** 隐藏手牌里的玻璃牌背占位码：牌面数据为"未知"，渲染为玻璃牌背（牌面朝内，看不见） */
 	private static final int GLASS_BACK_CODE = -2;
-	/** 各桌 AI 座位假玩家（key = 桌 originPacked，value = 座位 → 假玩家记录） */
+	/** 各桌 AI 座位形象（key = 桌 originPacked，value = 座位 → 形象记录：假玩家或桔螈实体） */
 	private static final Map<Long, Map<Integer, Avatar>> AVATARS = new HashMap<>();
 	/** 各桌牌桌中心（桌 key → 桌心世界坐标），供形象落地后重调视线使用 */
 	private static final Map<Long, Vec3> TABLE_CENTERS = new HashMap<>();
 	/** 各形象上一 tick 是否落地（onGround），用于检测"刚落定"后重调视线 */
 	private static final Map<Avatar, Boolean> AVATAR_GROUND = new HashMap<>();
-	/** 假玩家客户端实体 id 计数（负数且递减，与服务端实体 id 区间隔离） */
+	/** 座位形象客户端实体 id 计数（负数且递减，与服务端实体 id 区间隔离） */
 	private static int nextAvatarEntityId = -1_000_000;
 	/** 角色皮肤是否细手臂（slim）的解析缓存（贴图 → slim） */
 	private static final Map<net.minecraft.resources.ResourceLocation, Boolean> SLIM_CACHE = new HashMap<>();
 
-	/** AI 座位假玩家记录：实体 + 隐形骑乘载具（站姿模式为 null，直接钉位）+ 角色 id + 档案 UUID + 是否站姿 */
+	/**
+	 * AI 座位形象记录：假玩家（+隐形骑乘载具）或桔螈真实实体。
+	 * 桔螈是模组注册的真实实体，{@code mob} 非空、玩家与载具为 null，直接以实体本身出座位。
+	 */
 	private record Avatar(RemotePlayer player,
 			net.minecraft.world.entity.decoration.ArmorStand seat,
-			String form, UUID profileUuid, boolean standing) {
+			String form, UUID profileUuid, boolean standing,
+			mcr.riichi_arise.entity.OraxolotlEntity mob) {
+
+		/** 形象主体（假玩家或桔螈实体） */
+		private net.minecraft.world.entity.Entity body() {
+			return this.mob != null ? this.mob : this.player;
+		}
+
+		private boolean removed() {
+			return this.mob != null ? this.mob.isRemoved() : this.player.isRemoved();
+		}
 	}
 
 	/** 待执行的动画任务（发牌 stagger / 倒牌级联），按桌分组 */
@@ -163,13 +177,13 @@ public final class MahjongTableClient {
 			if (center == null)
 				continue;
 			for (Avatar a : te.getValue().values()) {
-				net.minecraft.world.entity.Entity g = a.standing() ? a.player() : a.seat();
+				net.minecraft.world.entity.Entity g = a.body();
 				if (g == null || g.isRemoved())
 					continue;
 				boolean ground = g.onGround();
 				Boolean prev = AVATAR_GROUND.get(a);
 				if (prev != null && !prev && ground)
-					lookAtTableCenter(a, center, a.player().position());
+					lookAtTableCenter(a, center, a.body().position());
 				AVATAR_GROUND.put(a, ground);
 			}
 		}
@@ -274,10 +288,12 @@ public final class MahjongTableClient {
 	 *
 	 * @param idx      被切出的牌在上一包手牌中的下标
 	 * @param prevSize 上一包手牌张数（含刚摸的牌）
+	 * @param lifted   该牌此前是否被右键选中浮起（浮起后实际位置高了 SELECT_LIFT，起点需跟随）
 	 */
-	private static Vec3 discardOriginPos(TableLayout.Geom geom, int seat, int idx, int prevSize) {
+	private static Vec3 discardOriginPos(TableLayout.Geom geom, int seat, int idx, int prevSize, boolean lifted) {
 		boolean drawnSlot = prevSize > TableLayout.HAND_SIZE && idx == prevSize - 1;
-		return TableLayout.handTarget(geom, seat, Math.min(idx, TableLayout.HAND_SIZE), drawnSlot);
+		Vec3 base = TableLayout.handTarget(geom, seat, Math.min(idx, TableLayout.HAND_SIZE), drawnSlot);
+		return lifted ? base.add(0, TableLayout.SELECT_LIFT, 0) : base;
 	}
 
 	/** 上一包到手牌少一张时，返回被移出那张在上一包中的下标；否则 -1 */
@@ -442,6 +458,28 @@ public final class MahjongTableClient {
 	}
 
 	/**
+	 * 紫水晶之间：可展示备选牌区的对局快照。
+	 * <p>参战者始终可见；旁观者需开启客户端配置"显示对局信息"（{@link RichiConfig#SPECTATOR_SHOW_TABLE}），
+	 * 且服务端在 16 格内仍推送快照。</p>
+	 */
+	public static MahjongTablePayload.ViewMessage amethystView() {
+		// 参战者只看自己所在牌桌（避免附近另一张紫水晶牌桌串台）
+		MahjongTablePayload.ViewMessage own = participatingView();
+		if (own != null)
+			return own.roomType() == RichiTableState.ROOM_AMETHYST
+					&& own.phase() == RichiTableState.PHASE_PLAYING ? own : null;
+		// 旁观者：跟随"显示对局信息"开关
+		if (!RichiConfig.SPECTATOR_SHOW_TABLE.get())
+			return null;
+		for (TableRender t : TABLES.values())
+			if (t.last != null && t.last.viewerSeat() < 0
+					&& t.last.roomType() == RichiTableState.ROOM_AMETHYST
+					&& t.last.phase() == RichiTableState.PHASE_PLAYING)
+				return t.last;
+		return null;
+	}
+
+	/**
 	 * 手切停留用的槽位映射：按切牌前的排列（理牌 13 张 + 末位刚摸的牌）为新的 13 张牌分配旧槽位，
 	 * 切掉的那张处留空 → 牌不会整体右移/回弹，10 tick 后再按新序列归位。
 	 * 摸切（切掉刚摸的那张）或数据对不上时返回 null（无需停留）。
@@ -501,6 +539,61 @@ public final class MahjongTableClient {
 				return null;
 			slots[k] = slot;
 		}
+		return slots;
+	}
+
+	/**
+	 * 隐藏手牌（AI 等）的手切停留槽位：服务端对隐藏座位只下发透明牌的真实牌面（glassOnly）与手牌张数，
+	 * 无法还原被切出那张的具体位置，因此按旧排列重新分配——透明牌按牌面逐张对位（保持切牌前的最左端槽位，
+	 * 被切出的透明牌处留空），未知牌背按顺序填回旧牌背槽位，最后一张留在切牌前的分离摸牌位
+	 * （延续 d 键，10 tick 后滑入牌行）。张数不是"上一包多一张 → 本包少一张"、或透明牌变化超过一张时返回 null。
+	 */
+	private static int[] hiddenCutHoldSlots(int prevN, List<Integer> prevGlass, int newN, List<Integer> newGlass) {
+		if (newN <= 0 || prevN != newN + 1
+				|| prevGlass.size() > prevN || newGlass.size() > newN
+				|| newGlass.size() > prevGlass.size() || prevGlass.size() - newGlass.size() > 1)
+			return null;
+		int[] slots = new int[newN];
+		java.util.Arrays.fill(slots, -1);
+		// 透明牌在旧排列里同样集中最左端：列表序 == 旧槽位，按牌面配对保留原位（切出的那张处自然留空）
+		boolean[] used = new boolean[prevGlass.size()];
+		for (int k = 0; k < newGlass.size(); k++) {
+			int code = newGlass.get(k);
+			int found = -1;
+			for (int j = 0; j < prevGlass.size(); j++)
+				if (!used[j] && prevGlass.get(j).intValue() == code) {
+					found = j;
+					break;
+				}
+			if (found < 0)
+				return null;
+			used[found] = true;
+			slots[k] = found;
+		}
+		// 空位 = 被切出的透明牌所在槽位；切的是普通牌时在牌行最右一张牌背处留空
+		int hole = -1;
+		for (int j = 0; j < prevGlass.size(); j++)
+			if (!used[j]) {
+				if (hole >= 0)
+					return null;
+				hole = j;
+			}
+		if (hole < 0) {
+			hole = prevN - 2;
+			if (hole < prevGlass.size()) // 牌行全是透明牌：不可能手切出普通牌
+				return null;
+		}
+		// 未知牌背：0..prevN-2 为牌行槽位（透明牌占 0..gPrev-1），末位 prevN-1 为切牌前的分离摸牌位
+		java.util.List<Integer> backRowSlots = new ArrayList<>();
+		for (int i = prevGlass.size(); i <= prevN - 2; i++)
+			if (i != hole)
+				backRowSlots.add(i);
+		int newBacks = newN - newGlass.size();
+		if (newBacks <= 0 || backRowSlots.size() < newBacks - 1)
+			return null;
+		for (int b = 0; b < newBacks - 1; b++)
+			slots[newGlass.size() + b] = backRowSlots.get(b);
+		slots[newN - 1] = prevN - 1;
 		return slots;
 	}
 
@@ -585,18 +678,33 @@ public final class MahjongTableClient {
 								< MahjongTileNotation.parse(orEmpty(msg.rivers()[s])).size())
 					table.handCutHoldUntil[s] = tickCounter + 10;
 		// 手切停留窗口内：保留切牌前的槽位排列（切掉的那张处留空、刚摸的牌仍停最右分离位），
-		// 10 tick 后再按新理牌序列归位。隐藏/盖牌手牌无法还原空位，直接归位。
+		// 10 tick 后再按新理牌序列归位；可见手牌按牌面还原空位，隐藏手牌按透明牌码/张数还原（见下）。
 		int[][] handSlots = null;
 		for (int s = 0; s < 4; s++) {
 			if (table.handCutHoldUntil[s] <= tickCounter)
 				continue;
-			if (prev == null || msg.hidden()[s] > 0 || prev.hidden()[s] > 0
-					|| msg.handsExposed()[s] != RichiTableState.HAND_STAND)
+			if (prev == null || msg.handsExposed()[s] != RichiTableState.HAND_STAND) {
 				table.handCutHoldUntil[s] = -1;
-			// 服务端对隐藏座位下发的是"等长的未知占位串"（glassOnly）：它与真实牌面无关，
-			// 直接拿去算槽位会得到乱序/重复/越界槽位，把牌甩到副露行。只在两侧都是真实牌面时启用停留。
-			if (table.handCutHoldUntil[s] <= 0)
 				continue;
+			}
+			// 隐藏手牌（AI / 其他玩家）：服务端只下发透明牌真实牌面（glassOnly）与张数，
+			// 无法按牌面还原空位，另行按"透明牌牌面对位 + 未知牌背顺序填空"分配切牌前的旧槽位，
+			// 与可见手牌一样延迟 10 tick 再归位（铁之间无透明牌时即纯张数回退，同样不再闪烁）。
+			if (msg.hidden()[s] > 0 || prev.hidden()[s] > 0) {
+				int[] hiddenSlots = msg.hidden()[s] > 0 && prev.hidden()[s] > 0
+						? hiddenCutHoldSlots(prev.hidden()[s], parseOrEmpty(orEmpty(prev.hands()[s])),
+								msg.hidden()[s], parseOrEmpty(orEmpty(msg.hands()[s])))
+						: null;
+				if (hiddenSlots == null) {
+					table.handCutHoldUntil[s] = -1;
+					continue;
+				}
+				if (handSlots == null)
+					handSlots = new int[4][];
+				handSlots[s] = hiddenSlots;
+				continue;
+			}
+			// 可见手牌：按真实牌面还原切牌前的空位。
 			List<Integer> prevCodes = MahjongTileNotation.parse(orEmpty(prev.hands()[s]));
 			List<Integer> newCodes = MahjongTileNotation.parse(orEmpty(msg.hands()[s]));
 			if (prevCodes.contains(-1) || newCodes.contains(-1)) {
@@ -618,13 +726,10 @@ public final class MahjongTableClient {
 			for (int s = 0; s < 4; s++)
 				if (st.handsExposed[s] == RichiTableState.HAND_STAND)
 					st.handsExposed[s] = RichiTableState.HAND_FACE_UP;
-		// 流局未听/九种九牌盖牌：自己的手牌对自己始终可见（改为面朝上平摊，不再显示为未知牌背）
-		int viewerSeat = msg.viewerSeat();
-		if (viewerSeat >= 0 && viewerSeat < 4 && msg.hidden()[viewerSeat] == 0
-				&& st.handsExposed[viewerSeat] == RichiTableState.HAND_FACE_DOWN)
-			st.handsExposed[viewerSeat] = RichiTableState.HAND_FACE_UP;
+		// 流局未听/九种九牌盖牌：翻牌标记以服务端 handsExposed 为准，客户端不再把自家改判为面朝上
+		// （此前自家未听时被强行摊平亮出，与"只有听牌家亮牌"的规则不符）；自家也只显示牌背
 		// 手牌码：可见家解析记法；隐藏家按 hidden 数量渲染未知牌背（-1 = 无牌面组件）；
-		// 盖牌（HAND_FACE_DOWN，流局未听/九种九牌途中流局）渲染牌背（自己那家已按上面改为面朝上）
+		// 盖牌（HAND_FACE_DOWN，流局未听/九种九牌途中流局）渲染牌背，透明牌仍按位显示玻璃牌背
 		List<List<Integer>> handCodes = new ArrayList<>(4);
 		for (int s = 0; s < 4; s++) {
 			int count;
@@ -638,9 +743,17 @@ public final class MahjongTableClient {
 				}
 			}
 			if (st.handsExposed[s] == RichiTableState.HAND_FACE_DOWN) {
-				List<Integer> backs = new ArrayList<>();
-				for (int k = 0; k < count; k++)
-					backs.add(-1);
+				// 盖牌：全部只给牌背；玻璃之间保留透明位（自家按真实牌面的玻璃标志，他家按服务端掩码），
+				// 避免翻牌逻辑把透明牌打乱成普通牌背
+				List<Integer> backs = new ArrayList<>(count);
+				List<Integer> ownCodes = msg.hidden()[s] > 0 ? null : parseOrEmpty(orEmpty(msg.hands()[s]));
+				int mask = msg.glassMask()[s];
+				for (int k = 0; k < count; k++) {
+					boolean glass = ownCodes != null
+							? k < ownCodes.size() && mcr.riichi_arise.game.TileFlag.isGlass(ownCodes.get(k))
+							: k < 31 && (mask & (1 << k)) != 0;
+					backs.add(glass ? GLASS_BACK_CODE : -1);
+				}
 				handCodes.add(backs);
 			} else if (msg.hidden()[s] > 0) {
 				int mask = msg.glassMask()[s];
@@ -666,7 +779,16 @@ public final class MahjongTableClient {
 			}
 		}
 		// 玻璃之间：该桌隐藏手牌的透明位已由服务端掩码按位下发（见 GLASS_BACK_CODE）
-		List<Slot> slots = slotPlan(TableLayout.plan(geom, st, handCodes, msg.dealAnim() > 0, handSlots), msg);
+		// 「透明牌平放」：仅雀士视角（viewerSeat>=0），且只对其他家生效；自家手牌与旁观者视角不变
+		boolean[] flatGlassHands = null;
+		int viewer = msg.viewerSeat();
+		if (mcr.riichi_arise.RichiConfig.FLAT_GLASS_HAND_TILES.get() && viewer >= 0) {
+			flatGlassHands = new boolean[4];
+			for (int s = 0; s < 4; s++)
+				flatGlassHands[s] = s != viewer;
+		}
+		List<Slot> slots = slotPlan(
+				TableLayout.plan(geom, st, handCodes, msg.dealAnim() > 0, handSlots, flatGlassHands), msg);
 		// 牌位飞行动画的起点（打牌/加杠/拔北 = 上一包手牌里被移出那张的位置；副露声明牌 = 牌河被取走那张的位置）
 		Vec3[] handSrc = new Vec3[4];
 		Vec3[] kitaSrc = new Vec3[4]; // 拔北牌飞行起点（逐张对比本包手牌取新出现的北风）
@@ -683,13 +805,27 @@ public final class MahjongTableClient {
 					int idx = s < msg.discardPos().length && msg.discardPos()[s] >= 0
 							? msg.discardPos()[s]
 							: firstRemovedIndex(prevHand, newHand);
-					if (idx >= 0)
-						handSrc[s] = TableLayout.standingEntityPos(discardOriginPos(geom, s, idx, prevHand.size()));
+					if (idx >= 0) {
+						// 「透明牌平放」开启时，该家被切出的透明牌本来平放在手牌行，飞行起点也取平放高度
+						boolean flatSrc = flatGlassHands != null && flatGlassHands[s] && idx < prevHand.size()
+								&& mcr.riichi_arise.game.TileFlag.isGlass(prevHand.get(idx));
+						Vec3 srcBase = discardOriginPos(geom, s, idx, prevHand.size(),
+								prev.selectedSeat() == s && prev.selectedIndex() == idx);
+						handSrc[s] = flatSrc ? TableLayout.flatEntityPos(srcBase, 0)
+								: TableLayout.standingEntityPos(srcBase);
+					}
 				} else {
 					// 手牌少一张（副露/杠）：起点为被移出那张的位置
 					int idx = firstRemovedIndex(prevHand, newHand);
-					if (idx >= 0)
-						handSrc[s] = TableLayout.standingEntityPos(TableLayout.handTarget(geom, s, idx));
+					if (idx >= 0) {
+						boolean flatSrc = flatGlassHands != null && flatGlassHands[s] && idx < prevHand.size()
+								&& mcr.riichi_arise.game.TileFlag.isGlass(prevHand.get(idx));
+						Vec3 src = TableLayout.handTarget(geom, s, idx);
+						if (prev.selectedSeat() == s && prev.selectedIndex() == idx)
+							src = src.add(0, TableLayout.SELECT_LIFT, 0);
+						handSrc[s] = flatSrc ? TableLayout.flatEntityPos(src, 0)
+								: TableLayout.standingEntityPos(src);
+					}
 				}
 				// 牌河少一张 = 被副露：起点为被取走那张在牌河中的位置
 				if (newRiver.size() < prevRiver.size())
@@ -712,10 +848,12 @@ public final class MahjongTableClient {
 						}
 					}
 					// 隐藏手牌 / 未找到北风：用上一包的摸牌槽（张数多一张时最右端的刚摸牌）
-					kitaSrc[s] = k >= 0
-							? TableLayout.standingEntityPos(TableLayout.handTarget(geom, s,
-									Math.min(k, TableLayout.HAND_SIZE), k >= TableLayout.HAND_SIZE))
-							: TableLayout.standingEntityPos(TableLayout.handTarget(geom, s, TableLayout.HAND_SIZE, true));
+					Vec3 kitBase = k >= 0
+							? TableLayout.handTarget(geom, s, Math.min(k, TableLayout.HAND_SIZE), k >= TableLayout.HAND_SIZE)
+							: TableLayout.handTarget(geom, s, TableLayout.HAND_SIZE, true);
+					if (k >= 0 && prev.selectedSeat() == s && prev.selectedIndex() == k)
+						kitBase = kitBase.add(0, TableLayout.SELECT_LIFT, 0);
+					kitaSrc[s] = TableLayout.standingEntityPos(kitBase);
 				}
 			}
 		}
@@ -744,7 +882,7 @@ public final class MahjongTableClient {
 	}
 
 	// ==================================================================
-	// AI 座位假玩家（客户端-only RemotePlayer，替代旧 MahjongAvatarEntity）
+	// AI 座位形象：假玩家（客户端-only RemotePlayer）/ 桔螈真实实体
 	// ==================================================================
 
 	/**
@@ -783,21 +921,32 @@ public final class MahjongTableClient {
 			String name = orEmpty(msg.avatarNames()[seat]);
 			if (name.isEmpty())
 				name = Component.translatable("gui.riichi_arise.lobby.ch_" + form).getString();
-			if (cur == null || cur.player().isRemoved() || !cur.form().equals(form)
+			if (cur == null || cur.removed() || !cur.form().equals(form)
 					|| !cur.profileUuid().equals(uuid)
-					|| cur.standing() != wantStanding) {
+					|| (cur.mob() == null && cur.standing() != wantStanding)) {
 				if (cur != null) {
 					avatars.remove(seat);
 					removeAvatar(cur);
 				}
 				cur = createAvatar(level, form, uuid, name, pos, yaw, wantStanding);
-				if (cur != null)
+				if (cur != null) {
 					avatars.put(seat, cur);
+					if (cur.mob() != null)
+						cur.mob().setSitting(!waiting); // 创建即定好动画阶段：等待待机 / 对局 feral_sit
+				}
 			}
 			// 等待阶段不钉位（保持创建时的随机站位）；开局后钉到座位站位
-			if (cur != null && !waiting) {
-				pinAvatar(origin.getY(), pos, yaw, cur);
-				lookAtTableCenter(cur, center, pos); // 对局中始终看向牌桌中心点
+			if (cur != null) {
+				if (cur.mob() != null) {
+					cur.mob().setSitting(!waiting);
+					if (!waiting) {
+						pinAvatar(origin.getY(), pos, yaw, cur);
+						lookAtTableCenter(cur, center, pos);
+					}
+				} else if (!waiting) {
+					pinAvatar(origin.getY(), pos, yaw, cur);
+					lookAtTableCenter(cur, center, pos); // 对局中始终看向牌桌中心点
+				}
 			}
 		}
 		if (avatars.isEmpty())
@@ -859,6 +1008,9 @@ public final class MahjongTableClient {
 	 */
 	private static Avatar createAvatar(ClientLevel level, String form, UUID uuid, String name,
 			Vec3 pos, float yaw, boolean standing) {
+		// 桔螈是模组注册的真实实体：直接生成实体本体出座位，不套假玩家/盔甲架载具
+		if ("oraxolotl".equals(form))
+			return createOraxolotlAvatar(level, form, uuid, pos, yaw);
 		GameProfile profile = new GameProfile(uuid, name);
 		Minecraft mc = Minecraft.getInstance();
 		if (mc.getConnection() != null)
@@ -933,16 +1085,68 @@ public final class MahjongTableClient {
 		}
 		player.setOldPosAndRot();
 		level.addEntity(player);
-		return new Avatar(player, seat, form, uuid, standing);
+		return new Avatar(player, seat, form, uuid, standing, null);
 	}
 
 	/**
-	 * 钉住形象在座位站位（面朝桌心）：坐姿模式更新隐形载具，坐标由 rideTick 挂点跟随；
-	 * 站姿模式每包把假玩家钉到站位水平 x/z。两种模式均同步头身朝向。
-	 * 竖直：站姿与坐姿均由原版重力自行落定（此处保持当前 y 不干预），载具/假人落到脚下实际表面。
+	 * 创建桔螈座位形象：直接生成模组注册的 {@link mcr.riichi_arise.entity.OraxolotlEntity} 本体并加入 ClientLevel。
+	 * 无 AI、无重力、不可推动、不可选中（不挡选牌射线、不响应右键）、不受伤害；
+	 * 动画阶段由 {@link mcr.riichi_arise.entity.OraxolotlEntity#setSitting} 驱动（等待待机 / 对局 feral_sit），
+	 * 水平站位由 pinAvatar 维护，竖直由 settleAvatars 用原版碰撞落定。
+	 */
+	private static Avatar createOraxolotlAvatar(ClientLevel level, String form, UUID uuid, Vec3 pos, float yaw) {
+		mcr.riichi_arise.entity.OraxolotlEntity mob = new mcr.riichi_arise.entity.OraxolotlEntity(
+				mcr.riichi_arise.MahjongEntities.ORAXOLOTL.get(), level) {
+			@Override
+			public boolean isPushable() {
+				return false; // 不被玩家/其他实体挤走
+			}
+
+			@Override
+			public boolean isPickable() {
+				return false; // 不参与实体射线拾取：不挡选牌，也不可被攻击
+			}
+
+			@Override
+			public net.minecraft.world.InteractionResult mobInteract(
+					net.minecraft.world.entity.player.Player player, net.minecraft.world.InteractionHand hand) {
+				return net.minecraft.world.InteractionResult.PASS; // 右键穿透，不触发坐下/起身交互
+			}
+		};
+		mob.setId(--nextAvatarEntityId); // 客户端唯一负数 id，与服务端实体区间隔离
+		mob.setNoAi(true); // 无 AI：不跑寻路/随机漫步（刨土等自主行为随之关闭）
+		mob.setNoGravity(true); // 不自行下落，交由 settleAvatars 用原版碰撞落定
+		mob.setInvulnerable(true);
+		mob.moveTo(pos.x, pos.y, pos.z, yaw, 0.0F);
+		mob.setOldPosAndRot();
+		mob.yBodyRot = yaw;
+		mob.yBodyRotO = yaw;
+		mob.yHeadRot = yaw;
+		mob.yHeadRotO = yaw;
+		level.addEntity(mob);
+		return new Avatar(null, null, form, uuid, false, mob);
+	}
+
+	/**
+	 * 钉住形象在座位站位（面朝桌心）：假玩家坐姿模式更新隐形载具，坐标由 rideTick 挂点跟随；
+	 * 站姿模式每包把假玩家钉到站位水平 x/z；桔螈直接把真实实体本体钉到站位水平 x/z。均同步头身朝向。
+	 * 竖直：站姿/坐姿由原版重力自行落定，桔螈由 {@link #settleAvatars} 用原版碰撞落定（此处保持当前 y 不干预）。
 	 * 水平始终钉住站位 x/z。
 	 */
 	private static void pinAvatar(double baseY, Vec3 pos, float yaw, Avatar avatar) {
+		if (avatar.mob() != null) {
+			// 桔螈真实实体：直接钉住本体水平站位与朝向（竖直由 settleAvatars 落定）
+			mcr.riichi_arise.entity.OraxolotlEntity mob = avatar.mob();
+			if (mob.isRemoved())
+				return;
+			mob.moveTo(pos.x, mob.getY(), pos.z, yaw, 0.0f);
+			mob.setOldPosAndRot();
+			mob.yBodyRot = yaw;
+			mob.yBodyRotO = yaw;
+			mob.yHeadRot = yaw;
+			mob.yHeadRotO = yaw;
+			return;
+		}
 		RemotePlayer player = avatar.player();
 		if (player.isRemoved())
 			return;
@@ -967,9 +1171,13 @@ public final class MahjongTableClient {
 		player.yHeadRotO = yaw;
 	}
 
-	/** 删除假玩家实体（含隐形骑乘载具）；无其他假玩家引用同一档案时清理注入的 PlayerInfo（防标签页/皮肤缓存残留） */
+	/** 删除形象实体（假玩家含隐形骑乘载具；桔螈直接移除自身）；无其他假玩家引用同一档案时清理注入的 PlayerInfo */
 	private static void removeAvatar(Avatar avatar) {
 		AVATAR_GROUND.remove(avatar); // 清理落地跟踪
+		if (avatar.mob() != null) {
+			avatar.mob().discard(); // 桔螈：直接移除实体本体，无载具
+			return;
+		}
 		if (avatar.seat() != null)
 			avatar.seat().discard();
 		avatar.player().discard();
@@ -999,8 +1207,10 @@ public final class MahjongTableClient {
 			return;
 		for (int seat = 0; seat < 4; seat++) {
 			Avatar a = avatars.get(seat);
-			if (a == null || a.player().isRemoved())
+			if (a == null || a.removed())
 				continue;
+			if (a.mob() != null)
+				continue; // 桔螈真实实体：不做玩家挥手动画
 			boolean acted = !java.util.Objects.equals(prev.rivers()[seat], msg.rivers()[seat])
 					|| !java.util.Objects.equals(prev.melds()[seat], msg.melds()[seat])
 					|| prev.handsExposed()[seat] != msg.handsExposed()[seat];
@@ -1025,8 +1235,8 @@ public final class MahjongTableClient {
 	private static void driveAvatarWaves() {
 		for (Map<Integer, Avatar> seats : AVATARS.values()) {
 			for (Avatar a : seats.values()) {
-				if (a.standing())
-					continue; // 站姿：原版 tick 自行推进挥手动画
+				if (a.standing() || a.mob() != null)
+					continue; // 站姿：原版 tick 自行推进挥手动画；桔螈不是玩家，无挥手
 				net.minecraft.client.player.RemotePlayer p = a.player();
 				if (p.isRemoved())
 					continue;
@@ -1046,14 +1256,16 @@ public final class MahjongTableClient {
 	}
 
 	/**
-	 * 形象落地修正（每 tick）：坐姿载具与站姿假人都不会跑原版物理（{@code RemotePlayer#aiStep} 不调 super →
-	 * 没有 travel/重力），统一在此处理——先抬出方块（出生点低于地表时就是"沉进地里"），再让悬空的下落。
+	 * 形象落地修正（每 tick）：坐姿载具、站姿假人、桔螈实体都不会跑原版重力
+	 * （{@code RemotePlayer#aiStep} 不调 super；桔螈无 AI/无重力），统一在此处理——
+	 * 先抬出方块（出生点低于地表时就是"沉进地里"），再让悬空的用原版碰撞下落。
 	 */
 	private static void settleAvatars(ClientLevel level) {
 		for (Map<Integer, Avatar> seats : AVATARS.values()) {
 			for (Avatar a : seats.values()) {
-				// 站姿：假人本体；坐姿：隐形载具（乘客位置由载具挂点维护）
-				net.minecraft.world.entity.Entity body = a.standing() ? a.player() : a.seat();
+				// 站姿：假人本体；坐姿：隐形载具；桔螈：实体本体
+				net.minecraft.world.entity.Entity body = a.mob() != null ? a.mob()
+						: (a.standing() ? a.player() : a.seat());
 				if (body == null || body.isRemoved())
 					continue;
 				liftOutOfBlocks(level, body);
@@ -1074,6 +1286,8 @@ public final class MahjongTableClient {
 
 	/** 让假玩家头部朝向牌桌中心点（横向 yaw + 垂直俯角），对局中始终看向桌心 */
 	private static void lookAtTableCenter(Avatar a, Vec3 center, Vec3 pos) {
+		if (a.mob() != null)
+			return; // 桔螈朝向已由 pinAvatar 钉好；坐姿头部姿势固定，无需俯仰
 		net.minecraft.client.player.RemotePlayer p = a.player();
 		if (p.isRemoved())
 			return;
@@ -1127,11 +1341,12 @@ public final class MahjongTableClient {
 		for (TableLayout.Placement p : plan) {
 			switch (p.kind()) {
 				case TableLayout.KIND_SEAT -> {
-					// 局目轮换（轮庄）后世界位置的东南西北随之改变：庄家位 = (round-1)%4，
-					// 各位置风 = SEAT_NAMES[floorMod(座位 - 庄家位, 4)]（与服务端 broadcastRoundStart 同式）
-					int dealer = (msg.round() - 1) % 4;
+					// 局目轮换（轮庄）后世界位置的东南西北随之改变：庄家位 = (round-1)%参战人数，
+					// 各位置风 = SEAT_NAMES[floorMod(座位 - 庄家位, 参战人数)]（与服务端 broadcastRoundStart 同式）；
+					// 三麻按三角轮换（东→南→西），不会出现"北"
+					int dealer = Math.floorMod(msg.round() - 1, Math.max(1, msg.playerCount()));
 					String wind = msg.round() > 0
-							? TableLayout.SEAT_NAMES[Math.floorMod(p.seat() - dealer, 4)]
+							? TableLayout.SEAT_NAMES[Math.floorMod(p.seat() - dealer, Math.max(1, msg.playerCount()))]
 							: TableLayout.SEAT_NAMES[p.seat()];
 					String text = (msg.turnSeat() == p.seat() ? "▶ " : "") + wind
 							+ "\n" + msg.points()[p.seat()];
@@ -1143,10 +1358,11 @@ public final class MahjongTableClient {
 						occ = handOcc[p.seat()] = new HashMap<>();
 					int n = occ.merge(p.code(), 1, Integer::sum);
 					String key;
-					if (msg.hidden()[p.seat()] > 0) {
-						// 牌背全同（code=-1）：按槽位编号。刚摸的那张固定 "d"；手切后由牌行末位继承 "d"，
+					if (msg.hidden()[p.seat()] > 0 && p.code() < 0) {
+						// 未知牌背（code=-1）全同：按槽位编号。刚摸的那张固定 "d"；手切后由牌行末位继承 "d"，
 						// 于是"分离的牌滑进牌行、牌行消失一张"——连续手切也不会退化成摸切观感
 						//（旧做法每帧统一 +1 偏移，连续手切时前后帧偏移相同，仍表现为刚摸的那张消失）
+						// 隐藏手牌里的透明牌（code>=0）走下面的牌面 key：切牌停留与归位都只做位置插值，实体不重建
 						boolean last = p.index() == msg.hidden()[p.seat()] - 1;
 						boolean drawn = msg.drawnSeat() == p.seat() && last;
 						boolean handCut = msg.drawnSeat() != p.seat() && msg.tedashi()[p.seat()] == 1 && last;
@@ -1225,7 +1441,9 @@ public final class MahjongTableClient {
 				// 新生成的牌：播放"浮起→飞到目标位→降落"的短动画。
 				// 起点必须在创建实体前确定：先把实体生成在目标位、之后再 setPos 到起点，
 				// 会让实体加入世界的那一帧出现在目标坐标（观感上是"瞬移到原位再飞"）。
-				Vec3 src = flightSource(p, handSrc, kitaSrc, claimSrc);
+				Vec3 src = RichiConfig.TILE_MOVE_ANIMATIONS.get()
+						? flightSource(p, handSrc, kitaSrc, claimSrc)
+						: null;
 				e = spawnSlot(level, table, tableKey, geom, slot, false, false, src);
 				if (e != null && src != null)
 					startTileFlight(e, p, src);
@@ -1437,7 +1655,7 @@ public final class MahjongTableClient {
 
 	/**
 	 * 牌位物品堆：已知牌按牌面代码建堆，牌体是否透明由 {@link mcr.riichi_arise.game.TileFlag#GLASS} 位决定
-	 * （模型 overrides 命中 mahjong3d_glass/*，牌面与普通牌一致、侧面/背面为玻璃）。
+	 * （模型 overrides 命中 mahjong3d_glass/*，牌面用 mahjong_glass 专用贴图、侧面/背面为玻璃）。
 	 * 未知牌背 -1 为普通牌背；{@link #GLASS_BACK_CODE} 为对手隐藏手牌里的玻璃牌背。
 	 */
 	private static ItemStack tileStack(TableLayout.Placement p) {

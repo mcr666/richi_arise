@@ -854,7 +854,8 @@ public final class RichiNetManager {
 	private static void fillTableSeat(RiichiGame game, JsonObject m, int seat) {
 		m.addProperty("table", key(game.origin()));
 		m.addProperty("seat", seat);
-		m.addProperty("wind", new String[] { "E", "S", "W", "N" }[Math.floorMod(seat - game.gameDealerSeat() + 4, 4)]);
+		m.addProperty("wind", new String[] { "E", "S", "W", "N" }[Math.floorMod(seat - game.gameDealerSeat(),
+				Math.max(1, game.playerCount()))]);
 	}
 
 	// ==================================================================

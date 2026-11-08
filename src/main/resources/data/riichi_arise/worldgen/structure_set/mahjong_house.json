@@ -1,0 +1,18 @@
+{
+  "placement": {
+    "type": "minecraft:random_spread",
+    "salt": 88123456,
+    "spacing": 40,
+    "separation": 16,
+    "exclusion_zone": {
+      "chunk_count": 10,
+      "other_set": "minecraft:villages"
+    }
+  },
+  "structures": [
+    {
+      "structure": "riichi_arise:mahjong_house",
+      "weight": 1
+    }
+  ]
+}

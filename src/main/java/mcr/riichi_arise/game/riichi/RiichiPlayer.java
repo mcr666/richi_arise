@@ -85,8 +85,8 @@ public class RiichiPlayer {
 		return MahjongTileNotation.format(hand);
 	}
 
-	/** 副露记法（渲染用）：组间 ";"，每组 = "声明家:牌码"，组内声明牌（纵牌）在末尾；
-	 *  加杠组末尾追加 '!'，供渲染层把第 4 张叠在横放牌上（不做成明杠样） */
+	/** 副露记法（渲染用）：组间 ";"，每组 = "声明家:牌码"，组内声明牌（横置）在末尾；
+	 *  加杠组末尾追加 '!'，供渲染层把补的第 4 张与声明牌并排横放（不做成明杠样） */
 	public String meldNotation() {
 		StringBuilder sb = new StringBuilder();
 		for (Fuuro f : melds) {

@@ -34,14 +34,14 @@ public class MahjongLobbyPayloads {
 			List<String> queueNames, boolean canManage, int gameType, int voteCount,
 			boolean openHand, String[] seatAvatarModes, int thinkIdx,
 			int aiSpeedIdx, String ownVoice, String[] seatVoices, int playerCount, int roomType,
-			int ownWinEffect) {
+			int ownWinEffect, int ownRiichiEffect, boolean tobi, boolean kuikae) {
 	}
 
 	/** C→S 动作类型 */
 	public static final int ACT_JOIN_QUEUE = 0, ACT_LEAVE_QUEUE = 1, ACT_START = 2,
 			ACT_ADD_AI = 3, ACT_REMOVE_AI = 4, ACT_KICK = 5, ACT_SET_TYPE = 6, ACT_CLEAR = 7,
 			ACT_VOTE_END = 8, ACT_SET_OPEN = 10, ACT_SET_AVATAR_SEAT = 12, ACT_SET_THINK = 13, ACT_SET_SPEED = 14,
-			ACT_SET_PLAYERS = 15, ACT_SET_ROOM = 16,
+			ACT_SET_PLAYERS = 15, ACT_SET_ROOM = 16, ACT_SET_TOBI = 20, ACT_SET_KUIKAE = 21,
 			/** 雀魂连接控制面板：建立连接并接管该桌（extra 忽略） */
 			ACT_TAKEOVER_ON = 17,
 			/** 雀魂连接控制面板：关闭外部接管（恢复常规交互） */
@@ -53,7 +53,7 @@ public class MahjongLobbyPayloads {
 			List<String> queueNames, boolean canManage, int gameType, int voteCount,
 			boolean openHand, List<String> seatAvatarModes,
 			int thinkIdx, int aiSpeedIdx, String ownVoice, List<String> seatVoices, int playerCount,
-			int roomType, int ownWinEffect) implements CustomPacketPayload {
+			int roomType, int ownWinEffect, int ownRiichiEffect, boolean tobi, boolean kuikae) implements CustomPacketPayload {
 		public static final Type<SyncMessage> TYPE = new Type<>(
 				ResourceLocation.fromNamespaceAndPath(RichiiAriseMod.MODID, "richi_lobby_sync"));
 
@@ -85,7 +85,8 @@ public class MahjongLobbyPayloads {
 									message.canManage(), message.gameType(), message.voteCount(),
 									message.openHand(), seatModes,
 									message.thinkIdx(), message.aiSpeedIdx(), message.ownVoice(), seatVoices,
-									message.playerCount(), message.roomType(), message.ownWinEffect()));
+									message.playerCount(), message.roomType(), message.ownWinEffect(),
+									message.ownRiichiEffect(), message.tobi(), message.kuikae()));
 					// 对局开始：确保入座玩家语音已下载到本地缓存（幂等，仅缺时下载）
 					if (message.phase() == mcr.riichi_arise.game.RichiTableState.PHASE_PLAYING)
 						mcr.riichi_arise.voice.VoiceClient.onGameStart(message.originPacked());
@@ -256,6 +257,9 @@ public class MahjongLobbyPayloads {
 		buf.writeVarInt(msg.playerCount());
 		buf.writeVarInt(msg.roomType());
 		buf.writeVarInt(msg.ownWinEffect());
+		buf.writeVarInt(msg.ownRiichiEffect());
+		buf.writeBoolean(msg.tobi());
+		buf.writeBoolean(msg.kuikae());
 	}
 
 	private static SyncMessage readSync(RegistryFriendlyByteBuf buf) {
@@ -285,9 +289,12 @@ public class MahjongLobbyPayloads {
 		int playerCount = buf.readVarInt();
 		int roomType = buf.readVarInt();
 		int ownWinEffect = buf.readVarInt();
+		int ownRiichiEffect = buf.readVarInt();
+		boolean tobi = buf.readBoolean();
+		boolean kuikae = buf.readBoolean();
 		return new SyncMessage(origin, phase, seats, aiMask, queue, canManage, gameType, voteCount,
 				openHand, seatModes, thinkIdx, aiSpeedIdx, ownVoice, seatVoices, playerCount, roomType,
-				ownWinEffect);
+				ownWinEffect, ownRiichiEffect, tobi, kuikae);
 	}
 
 	public static void register() {

@@ -49,7 +49,7 @@ public final class RichiTableSync {
 					origin.asLong(), -1, false, 0, empty4, zeros, zeros, zeros, empty4, empty4, zeros, new int[4],
 					zeros, zeros, zeros, zeros, empty4, zeros, empty4, empty4, empty4,
 					"", 0, 0, -1, 0, 0, 0, 0, -1, -1, -1, 0, 4, "", new int[4], RichiTableState.ROOM_TIE,
-					new int[4]));
+					"", -1, new int[4]));
 		}
 	}
 
@@ -81,11 +81,14 @@ public final class RichiTableSync {
 		String[] hands = new String[4];
 		int[] hidden = new int[4];
 		int[] tedashi = new int[4];
-		// 玻璃之间：各家手牌里"该座位观者看不见的透明牌位置"掩码。
+		// 玻璃之间：各家隐藏手牌里"透明牌"的显示位置掩码。
 		// 透明牌的牌面本身不泄露（本来就该被他看见），但"摆在哪个位置"会泄露理牌顺序/听哪些牌，
-		// 所以每个观者拿到的是自己那一份位置：其余人渲染时把这几位换成普通牌背。
+		// 所以对手视角的透明牌一律集中在手牌最左端（刚摸入的那张除外，留在真实摸牌位），
+		// 未知牌背排在右侧（见 glassLeftMask）。
 		int[] glassMask = new int[4];
 		String[] names = new String[4];
+		// 本包应按哪一局的房间类型过滤手牌（终局后改大厅配置不影响已结束的一局）
+		int renderRoom = renderRoomType(st);
 		// AI 形象字段由包级去重器按内容缓存下发（见 MahjongTablePayload.dedupe），这里只填原值
 		String[] avatarForms = new String[4];
 		String[] avatarNames = new String[4];
@@ -103,10 +106,10 @@ public final class RichiTableSync {
 				hidden[s] = 0;
 			} else {
 				// 其余座位：玻璃之间只下发透明牌的真实牌面，普通牌保持未知占位
-				hands[s] = mirrorSeat ? "" : glassOnly(st, s);
+				hands[s] = mirrorSeat ? "" : glassOnly(st, s, renderRoom);
 				hidden[s] = hiddenCount(s, st);
-				// 可见性由上面的 visible 分支决定；走到这里即为隐藏座位，按观者洗牌分配透明位
-				glassMask[s] = mirrorSeat ? 0 : glassShuffle(st, s, p);
+				// 可见性由上面的 visible 分支决定；走到这里即为隐藏座位，透明位集中在手牌最左端
+				glassMask[s] = mirrorSeat ? 0 : glassLeftMask(st, s, renderRoom);
 			}
 			tedashi[s] = st.lastTedashi[s];
 			names[s] = seatName(level, st, s);
@@ -133,7 +136,8 @@ public final class RichiTableSync {
 				doraText(st), st.revealedIndicators,
 				wallSize(st), st.turnSeat, st.round, st.roundWind, st.honba, st.carriedSticks,
 				st.selectedSeat, st.selectedIndex, st.drawnSeat, st.phase, st.playerCount,
-				st.banner == null ? "" : st.banner, Arrays.copyOf(st.lastDiscardPos, 4), st.roomType,
+				st.banner == null ? "" : st.banner, Arrays.copyOf(st.lastDiscardPos, 4), renderRoom,
+				st.candidates == null ? "" : st.candidates, st.candidatePickSeat,
 				Arrays.copyOf(st.winEffects, 4));
 		// 形象去重：整局不重发的内容只留索引
 		msg = MahjongTablePayload.dedupe(msg, p.getUUID());
@@ -168,49 +172,51 @@ public final class RichiTableSync {
 	}
 
 	/**
-	 * 玻璃之间：座位 s 的手牌中，观者 p 这一局"看到是玻璃牌背"的位置掩码（bit k = 第 k 张手牌）。
-	 * 玻璃之间每张物理牌固定为"玻璃牌"或"普通牌"（每种牌 3 玻璃 1 普通，见 RiichiWall#markGlassCopies），
-	 * 牌背对外必然是玻璃或普通，所以这里必须按真实牌张如实下发，否则对手看到的背面对不上实际打出的牌。
-	 * 但牌面仍不泄露：位置按观者洗牌后固定（整局不变），对手只能看到"哪几个位置是玻璃牌背"，
-	 * 看不出具体是什么牌，也不会随理牌/摸打跳动。
+	 * 桌面渲染应使用的房间类型：等待阶段用大厅配置（下一局），对局中/终局后固定为开局时捕获的
+	 * {@link RichiTableState#gameRoomType}。
+	 * <p>否则终局保留的残影在改房间类型后会按新类型重算透明牌位，客户端会把上一局的普通牌背
+	 * 重建为玻璃牌背（或反之）。</p>
 	 */
-	private static int glassShuffle(RichiTableState st, int seat, ServerPlayer viewer) {
-		String[] arr = GLASS_SHUFFLE.computeIfAbsent(viewer.getUUID(), k -> new String[4]);
-		String seen = arr[seat];
-		if (seen != null && !seen.isEmpty())
-			return Integer.parseInt(seen);
-		int n = st.handCodes(seat).size();
+	private static int renderRoomType(RichiTableState st) {
+		return st.phase == RichiTableState.PHASE_WAITING ? st.roomType : st.gameRoomType;
+	}
+
+	/**
+	 * 玻璃之间：座位 s 被隐藏的手牌中，"透明牌"的显示位置掩码（bit k = 第 k 张手牌位）。
+	 * <p>
+	 * 透明牌的真实牌面本来就下发给观者（{@link #glassOnly}），真正会泄露的只有"它在理牌序列里的位置"：
+	 * 若透明牌散落在未知牌之间，观者可由自动理牌顺序反推相邻未知牌的范围（例如某张透明 3m 左侧的牌必然小于 3m）。
+	 * 因此把全部透明牌集中到手牌最左端（bit0..g-1）、未知牌背放在右侧，位置与牌值无关，
+	 * 观者最多看出"哪几张是玻璃牌"，看不出未知牌的大小/种类。
+	 * </p>
+	 * <p>该掩码只决定显示位（服务端真实手牌顺序不变），且与观者无关、随本包手牌实时计算，
+	 * 因此不再需要按观者随机洗牌：透明牌张数本就能从下发的牌面数得出。</p>
+	 * <p>唯一例外是"刚摸入的透明牌"：它位于手牌末位的分离摸牌位，若也并进最左端，观者会看到
+	 * 左侧玻璃区凭空多出一张、而真实摸入的那张反而变成不透明。因此保持原有透明牌（前 g-1 张）
+	 * 的最左排列不变，把摸入的那张标在真实末位（bit n-1），使摸牌不改变已有手牌观感。</p>
+	 */
+	private static int glassLeftMask(RichiTableState st, int seat, int renderRoom) {
+		if (renderRoom != RichiTableState.ROOM_GLASS)
+			return 0;
+		List<Integer> hand = st.handCodes(seat);
+		int n = hand.size();
 		int glassCount = 0;
-		if (st.roomType == RichiTableState.ROOM_GLASS)
-			for (int c : st.handCodes(seat))
-				if (c >= 0 && mcr.riichi_arise.game.TileFlag.isGlass(c))
-					glassCount++;
-		int mask = 0;
-		if (glassCount > 0 && n > glassCount) {
-			// 随机挑同样多的手牌位当"玻璃位"（对手只知道有 glassCount 张玻璃牌，不知道具体在哪/是什么）
-			java.util.List<Integer> positions = new java.util.ArrayList<>();
-			for (int k = 0; k < n; k++)
-				positions.add(k);
-			java.util.Collections.shuffle(positions, random);
-			for (int k = 0; k < glassCount; k++)
-				mask |= 1 << Math.min(30, positions.get(k));
-		} else if (glassCount > 0) {
-			for (int k = 0; k < n; k++)
-				mask |= 1 << Math.min(30, k);
+		for (int c : hand)
+			if (c >= 0 && mcr.riichi_arise.game.TileFlag.isGlass(c))
+				glassCount++;
+		int g = Math.min(n, glassCount);
+		if (g <= 0)
+			return 0;
+		// 刚摸入的透明牌：前 g-1 张仍占最左端，摸入的那张标在真实末位（分离摸牌位）
+		if (st.drawnSeat == seat && n <= 31 && n > 0
+				&& hand.get(n - 1) >= 0 && mcr.riichi_arise.game.TileFlag.isGlass(hand.get(n - 1))) {
+			int mask = 0;
+			for (int k = 0; k < Math.min(g - 1, 31); k++)
+				mask |= 1 << k;
+			return mask | (1 << (n - 1));
 		}
-		arr[seat] = String.valueOf(mask);
-		return mask;
+		return (int) ((1L << Math.min(g, 31)) - 1);
 	}
-
-	private static final java.util.Random random = new java.util.Random();
-
-	/** 新一局开始：清掉所有观者的玻璃位置分配（下一包重新洗牌） */
-	public static void resetGlassShuffle() {
-		GLASS_SHUFFLE.clear();
-	}
-
-	/** 各观者 → 座位 → 玻璃位置掩码（整局固定） */
-	private static final java.util.Map<java.util.UUID, String[]> GLASS_SHUFFLE = new java.util.concurrent.ConcurrentHashMap<>();
 
 
 	/** 每次广播前清空一次性解析缓存 */
@@ -229,10 +235,10 @@ public final class RichiTableSync {
 
 	/**
 	 * 隐藏手牌串（玻璃之间；空串 = 铁之间）：透明牌按牌面顺序下发，
-	 * 客户端结合 glassMask 将这些牌放回随机的透明位置，其他位置保持未知。
+	 * 客户端结合 glassMask 把这些透明牌排到手牌最左端，其余手牌位保持未知（普通牌背）。
 	 */
-	private static String glassOnly(RichiTableState st, int seat) {
-		if (st.roomType != RichiTableState.ROOM_GLASS)
+	private static String glassOnly(RichiTableState st, int seat, int renderRoom) {
+		if (renderRoom != RichiTableState.ROOM_GLASS)
 			return "";
 		if (glassCache[seat] == null) {
 			glassCache[seat] = st.glassHands[seat] == null ? "" : st.glassHands[seat];
@@ -266,8 +272,8 @@ public final class RichiTableSync {
 		return wallCache;
 	}
 
-	/** 座位显示名：人类 = 游戏档案名，AI = 流派 AI 名，空位 = 空串 */
-	private static String seatName(ServerLevel level, RichiTableState st, int seat) {
+	/** 座位显示名：人类 = 游戏档案名，AI = 流派 AI 名，空位 = 空串（与桌面/座位列表显示保持一致） */
+	public static String seatName(ServerLevel level, RichiTableState st, int seat) {
 		// 整桌投影：座位名用外部对局（雀魂）的玩家昵称
 		String override = st.seatNameOverride[seat];
 		if (override != null && !override.isEmpty())

@@ -15,6 +15,19 @@ public class RichiConfig {
 	public static final ModConfigSpec.BooleanValue SPECTATOR_SHOW_TABLE;
 	/** 角色语音播放音量（0.0~1.0，默认 0.5）：客户端本地播放，实时作用于 VoicePlayer 输出，不经过原版主音量 */
 	public static final ModConfigSpec.DoubleValue VOICE_VOLUME;
+	/** 切牌动画（默认开）：副露/切牌/拔北等牌的移动过渡动画；关闭时新牌位直接出现在目标位置 */
+	public static final ModConfigSpec.BooleanValue TILE_MOVE_ANIMATIONS;
+	/** 左右键功能对调（默认关）：关 = 左键摸切/跳过、右键选中/打牌；开 = 左右互换 */
+	public static final ModConfigSpec.BooleanValue SWAP_HAND_BUTTONS;
+	/** 紫水晶之间备选牌区（兼选牌框）渲染位置：左上/右上/左下/右下，默认左下 */
+	public static final ModConfigSpec.EnumValue<CandidatePosition> CANDIDATE_POSITION;
+	/** 透明牌平放（默认关）：开启后雀士视角中其他家的透明牌以平放姿态渲染，便于查看；仅本地渲染 */
+	public static final ModConfigSpec.BooleanValue FLAT_GLASS_HAND_TILES;
+
+	/** 备选牌区渲染位置（四角预设） */
+	public enum CandidatePosition {
+		TOP_LEFT, TOP_RIGHT, BOTTOM_LEFT, BOTTOM_RIGHT
+	}
 
 	public static final ModConfigSpec SPEC;
 
@@ -40,6 +53,22 @@ public class RichiConfig {
 				.comment("Mahjong character voice playback volume, 0.0-1.0 (default 0.5). Applies in real time to the character voice player output.")
 				.translation("gui.riichi_arise.voice.volume")
 				.defineInRange("voiceVolume", 0.5, 0.0, 1.0);
+		TILE_MOVE_ANIMATIONS = builder
+				.comment("Mahjong tile move animations: when true, called tiles / discards / kita tiles fly to their target positions. Default: true")
+				.translation("gui.riichi_arise.settings.client_action_anim")
+				.define("tileMoveAnimations", true);
+		SWAP_HAND_BUTTONS = builder
+				.comment("Swap left/right hand controls: false = left click tsumogiri/skip, right click select/discard (default); true = swapped")
+				.translation("gui.riichi_arise.settings.client_swap_buttons")
+				.define("swapHandButtons", false);
+		CANDIDATE_POSITION = builder
+				.comment("Amethyst room candidate area (also the pick box) screen position: TOP_LEFT / TOP_RIGHT / BOTTOM_LEFT (default) / BOTTOM_RIGHT")
+				.translation("gui.riichi_arise.settings.client_candidate_pos")
+				.defineEnum("candidatePosition", CandidatePosition.BOTTOM_LEFT);
+		FLAT_GLASS_HAND_TILES = builder
+				.comment("Lay other players' transparent (glass) hand tiles flat for seated players. Client-side rendering only; default: false")
+				.translation("gui.riichi_arise.settings.client_flat_glass")
+				.define("flatGlassHandTiles", false);
 		builder.pop();
 		SPEC = builder.build();
 	}

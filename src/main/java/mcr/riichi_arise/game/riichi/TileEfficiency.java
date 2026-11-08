@@ -787,6 +787,8 @@ public final class TileEfficiency {
 		public double score;
 		/** 鸣牌后最优切牌的向听数 */
 		public int shanten;
+		/** 鸣牌后若听牌，剩余和牌张数（0 = 死听/绝张，仅听牌时有效；非听牌为 0） */
+		public int waitsCount;
 		/** 是否为碰 */
 		public boolean pon;
 	}
@@ -861,11 +863,13 @@ public final class TileEfficiency {
 		Node14 root = search14(shanten, tiles, left, stopAt);
 		double bestScore = Double.NEGATIVE_INFINITY;
 		int bestShanten = shanten;
+		int bestWaits = 0;
 		for (Map.Entry<Integer, Node13> e : root.children.entrySet()) {
 			Analysis13 a = analyze13(e.getValue(), tiles, left, false, 13);
 			if (a.mixedScore > bestScore) {
 				bestScore = a.mixedScore;
 				bestShanten = a.shanten;
+				bestWaits = a.waitsCount;
 			}
 		}
 		tiles[codeToIndex(selfCodes[0])]++;
@@ -876,6 +880,7 @@ public final class TileEfficiency {
 		o.selfCodes = selfCodes;
 		o.score = bestScore;
 		o.shanten = bestShanten;
+		o.waitsCount = bestWaits;
 		o.pon = pon;
 		return o;
 	}

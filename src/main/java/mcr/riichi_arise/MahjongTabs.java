@@ -23,5 +23,6 @@ public class MahjongTabs {
 						// 雀魂绝艺总纲由 Patchouli 按 book.json 的 creative_tab 自动加入，此处不再重复添加
 						tabData.accept(MahjongTileItem.create(-1)); // 未知牌（背面）
 						tabData.accept(MahjongItems.ITEMS.get(0).get()); // 点棒 1000（立直宣言用）
+						// 桔螈刷怪蛋只进原版「刷怪蛋」栏，不在本模组标签页重复出现
 					}).build());
 }

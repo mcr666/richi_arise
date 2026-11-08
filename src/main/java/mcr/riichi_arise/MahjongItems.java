@@ -46,6 +46,11 @@ public class MahjongItems {
 	public static final DeferredHolder<Item, Item> JUEYI_MANUAL =
 			REGISTRY.register("jueyi_manual", () -> new JueyiManualItem(new Item.Properties().stacksTo(1)));
 
+	/** 桔螈生成蛋（配色取桔色身体 + 浅黄斑点） */
+	public static final DeferredHolder<Item, Item> ORAXOLOTL_SPAWN_EGG =
+			REGISTRY.register("oraxolotl_spawn_egg", () -> new net.minecraft.world.item.SpawnEggItem(
+					MahjongEntities.ORAXOLOTL.get(), 0xE07A2E, 0xFFD37A, new Item.Properties()));
+
 	public static final List<DeferredHolder<Item, Item>> ITEMS = IDS.stream()
 			.map(id -> REGISTRY.register(id, () -> {
 				Item.Properties props = new Item.Properties();
