@@ -10,15 +10,15 @@ import mcr.riichi_arise.network.MahjongPointDeltaPayload;
 /**
  * 点数变化界面（和牌结算界面关闭后展示）：四家点数 局前 → 局后，带结算动画：
  * 出现即显示原点数 + 右侧红/绿增减数 → 1s 后点数 1s 内快速浮动到最终点数 →
- * 四家名字按排名上下滑动排序 → 最后 3s 自动确认（回 settle_confirm 推进服务端）。
+ * 四家名字从变动前点数排名按变动后点数排名上下滑动 → 最后 3s 自动确认（回 settle_confirm 推进服务端）。
  * 点击/回车确认后进入"等待其他玩家"状态（省略号点数循环变动）：界面可继续关闭，
  * 关闭后在动作栏持续提示，直到全员确认、服务端推进下一局。
  */
 public class MahjongPointDeltaScreen extends Screen {
 	// 结算动画时间轴（tick，1/20s）：
-	//   0s    界面出现：四家显示原点数，右侧红/绿点数增减数
+	//   0s    界面出现：四家按变动前点数排名排列，显示原点数，右侧红/绿点数增减数
 	//   1s    点数变动家的点数开始快速浮动，1s 内（即 2s 时）变到最终点数
-	//   2s    点数落定 → 四家名字按排名上下滑动排序成一~四位
+	//   2s    点数落定 → 四家名字从变动前排名滑动到变动后点数排名（1~n 位）
 	//   3s    排序完成 → 开始 3s 自动确认倒计时，超时回传推进
 	private static final int POINTS_DELAY_TICKS = 20;       // 1s：点数开始浮动前
 	private static final int POINTS_DURATION_TICKS = 20;    // 1s（速度已调快一倍）：浮动到最终点数
@@ -76,10 +76,19 @@ public class MahjongPointDeltaScreen extends Screen {
 			return;
 		}
 		waitTicks++;
+		// 已不是该桌参战者（切维度/被移出座位/换桌）：不再后台重发确认，清掉等待状态
+		MahjongPointDeltaPayload.PointDeltaMessage prepared = MahjongPointDeltaPayload.prepared;
+		mcr.riichi_arise.network.MahjongTablePayload.ViewMessage view =
+				MahjongTableClient.participatingView();
+		if (prepared == null || view == null || view.viewerSeat() < 0
+				|| view.originPacked() != prepared.originPacked()) {
+			waitingForOthers = false;
+			waitTicks = 0;
+			return;
+		}
 		// 每 20 tick 重发一次确认：服务端可能还处于结算阶段（确认会被并入下一阶段），重发保证最终生效
 		if (waitTicks % 20 == 1)
-			sendConfirm(MahjongPointDeltaPayload.prepared != null
-					? MahjongPointDeltaPayload.prepared.originPacked() : 0);
+			sendConfirm(prepared.originPacked());
 		// 界面已关闭时在动作栏继续提示，直到全员确认、服务端推进
 		if (!(mc.screen instanceof MahjongPointDeltaScreen))
 			mc.gui.setOverlayMessage(Component.literal(waitingText()), false);
@@ -130,6 +139,10 @@ public class MahjongPointDeltaScreen extends Screen {
 
 	@Override
 	public void onClose() {
+		// ESC/任意方式关闭 = 确认：tick 停止后不会再自动确认，只靠服务端长兜底会表现为"对局卡住"。
+		// 观战者不参与推进（confirm 内部也会跳过），已确认/正在等待的不重复发包。
+		if (!this.waiting && this.data != null && isParticipant())
+			confirm();
 		// 界面关闭不取消等待：动作栏继续提示，直到服务端推进
 		super.onClose();
 	}
@@ -139,17 +152,25 @@ public class MahjongPointDeltaScreen extends Screen {
 		return Math.max(1, Math.min(4, this.data == null ? 4 : this.data.playerCount()));
 	}
 
-	/** 排名行：按最终点数高→低排 1~n 位（同分保持座位序） */
-	private int[] rankOrder() {
+	/** 排名行：按给定点数高→低排 1~n 位；同分保持座位序（Arrays.sort 稳定排序） */
+	private int[] rankOrder(java.util.List<Integer> points) {
 		int n = seats();
 		Integer[] order = new Integer[n];
 		for (int i = 0; i < n; i++)
 			order[i] = i;
-		java.util.Arrays.sort(order, (a, b) -> Integer.compare(this.data.after().get(b), this.data.after().get(a)));
+		java.util.Arrays.sort(order, (a, b) -> Integer.compare(points.get(b), points.get(a)));
 		int[] out = new int[n];
 		for (int i = 0; i < n; i++)
 			out[i] = order[i];
 		return out;
+	}
+
+	/** 某座位在排名数组中的行号（1~n 位，越界回退 0） */
+	private static int indexOf(int[] order, int seat) {
+		for (int i = 0; i < order.length; i++)
+			if (order[i] == seat)
+				return i;
+		return 0;
 	}
 
 	/** 点数动画：1s 延迟后 1s 内从原点数快速浮动到最终点数（缓出：先快后落定） */
@@ -203,25 +224,23 @@ public class MahjongPointDeltaScreen extends Screen {
 				Component.translatable("gui.riichi_arise.points.title").getString(), this.width / 2, y, 0xFFFF55);
 		y += 16;
 		String pt = Component.translatable("gui.riichi_arise.settlement.pt").getString();
-		int[] order = rankOrder();
+		// 变动前/变动后两套排名口径一致：各自按对应的点数高→低排（同分按座位序）
+		int[] beforeOrder = rankOrder(this.data.before());
+		int[] afterOrder = rankOrder(this.data.after());
 		for (int seat = 0; seat < n; seat++) {
 			int before = this.data.before().get(seat);
 			int after = this.data.after().get(seat);
 			int delta = after - before;
 			// 当前显示点数：原点数 → 1s 后 1s 内快速浮动到最终点数（未变动的家恒为原点数）
 			int shown = animatedPoints(before, after);
-			// 行位置：先按座位序，点数落定后按排名上下滑动到 1~n 位
-			int targetRow = 0;
-			for (int i = 0; i < n; i++)
-				if (order[i] == seat) {
-					targetRow = i;
-					break;
-				}
-			double rowF = seat;
+			// 行位置：先按变动前点数排名，点数落定后按变动后点数排名上下滑动到 1~n 位
+			int initialRow = indexOf(beforeOrder, seat);
+			int targetRow = indexOf(afterOrder, seat);
+			double rowF = initialRow;
 			if (age >= REORDER_START) {
 				double p = Math.min(1.0, (age - REORDER_START) / (double) REORDER_DURATION_TICKS);
 				double e = p * p * (3 - 2 * p); // smoothstep
-				rowF = seat + (targetRow - seat) * e;
+				rowF = initialRow + (targetRow - initialRow) * e;
 			}
 			int rowY = (int) Math.round(y + rowF * rowH);
 			g.drawString(this.font, this.data.names().get(seat), left + pad, rowY, 0xFFFFFF, true);

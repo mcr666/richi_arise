@@ -12,7 +12,7 @@ import mcr.riichi_arise.network.RiichiEffectPayload;
 
 /**
  * 立直特效客户端播放器：与和牌特效共享 {@link TableTileEffect} 的同一套样式
- * （0 = 关闭 / 1 = 光环 / 2 = 星环旋舞 / 3 = 光柱），随 {@link RiichiEffectPayload} 下发。
+ * （0 = 关闭 / 1 = 随机 / 2 = 光环 / 3 = 星环旋舞 / 4 = 光柱 / 5..7 星陨·金阁·极光），随 {@link RiichiEffectPayload} 下发。
  * <p>沿用立直特效自身的范围约束：宣言牌旁半径 {@link #RADIUS} 格、高度 {@link #HEIGHT} 格、{@link #DURATION} tick。
  * 多人先后/同时立直时按列表叠加播放（最多 {@link #MAX_ACTIVE} 个），每个特效粒子量很小。</p>
  */

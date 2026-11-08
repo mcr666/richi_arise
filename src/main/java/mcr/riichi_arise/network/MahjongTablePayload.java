@@ -34,6 +34,9 @@ public class MahjongTablePayload {
 	/** 索引 0 保留给"空座"，内容为三个空串 */
 	private static final int PIN_EMPTY = 0;
 
+	/** 横幅本地化串的分隔符：首段为语言键，其后依次为格式化参数（避免与控制字符/名称中的 '|' 冲突） */
+	public static final String BANNER_I18N_SEP = "\u001f";
+
 	public record ViewMessage(long originPacked, int viewerSeat, boolean openHand, int dealAnim,
 			String[] hands, int[] hidden, int[] tedashi, int[] glassMask, String[] rivers, String[] melds,
 			int[] kita, int[] kitaGlass,
@@ -42,7 +45,7 @@ public class MahjongTablePayload {
 			String doraWall, int revealedIndicators, int wallCount,
 			int turnSeat, int round, int roundWind, int honba, int carriedSticks,
 			int selectedSeat, int selectedIndex, int drawnSeat, int phase, int playerCount,
-			String bannerText, int[] discardPos, int roomType, String candidates, int candidatePickSeat,
+			String bannerText, String bannerI18n, int[] discardPos, int roomType, String candidates, int candidatePickSeat,
 			int[] winEffects) implements CustomPacketPayload {
 
 		public static final Type<ViewMessage> TYPE = new Type<>(
@@ -88,7 +91,8 @@ public class MahjongTablePayload {
 					&& Arrays.equals(a.avatarSkins(), b.avatarSkins())
 					&& orEmpty(a.doraWall()).equals(orEmpty(b.doraWall()))
 					&& orEmpty(a.candidates()).equals(orEmpty(b.candidates()))
-					&& orEmpty(a.bannerText()).equals(orEmpty(b.bannerText()));
+					&& orEmpty(a.bannerText()).equals(orEmpty(b.bannerText()))
+					&& orEmpty(a.bannerI18n()).equals(orEmpty(b.bannerI18n()));
 		}
 	}
 
@@ -145,7 +149,7 @@ public class MahjongTablePayload {
 				ids, forms, names, skins, msg.doraWall(), msg.revealedIndicators(), msg.wallCount(),
 				msg.turnSeat(), msg.round(), msg.roundWind(), msg.honba(), msg.carriedSticks(),
 				msg.selectedSeat(), msg.selectedIndex(), msg.drawnSeat(), msg.phase(), msg.playerCount(),
-				msg.bannerText(), msg.discardPos(), msg.roomType(), msg.candidates(), msg.candidatePickSeat(),
+				msg.bannerText(), msg.bannerI18n(), msg.discardPos(), msg.roomType(), msg.candidates(), msg.candidatePickSeat(),
 				msg.winEffects());
 	}
 
@@ -262,6 +266,7 @@ public class MahjongTablePayload {
 		buf.writeVarInt(msg.phase());
 		buf.writeVarInt(msg.playerCount()); // 对局人数（4=四麻 / 3=三麻）：客户端据此跳过空座位渲染
 		buf.writeUtf(orEmpty(msg.bannerText()), 1024);
+		buf.writeUtf(orEmpty(msg.bannerI18n()), 1024); // 横幅本地化键+参数（空 = 按 bannerText 原文渲染）
 		for (int i = 0; i < 4; i++)
 			buf.writeVarInt(msg.discardPos()[i]); // 各家最近打出的牌在原手牌中的位置（飞行起点）
 		buf.writeVarInt(msg.roomType()); // 对局类型（0=铁之间 / 1=玻璃之间 / 2=紫水晶之间）
@@ -334,6 +339,7 @@ public class MahjongTablePayload {
 		int phase = buf.readVarInt();
 		int playerCount = buf.readVarInt();
 		String bannerText = buf.readUtf(1024);
+		String bannerI18n = buf.readUtf(1024);
 		int[] discardPos = new int[4];
 		for (int i = 0; i < 4; i++)
 			discardPos[i] = buf.readVarInt();
@@ -348,7 +354,7 @@ public class MahjongTablePayload {
 				riichiRiverIdx, riichiSticks, handsExposed, points, names,
 				avatarIds, avatarForms, avatarNames, avatarSkins, doraWall,
 				revealedIndicators, wallCount, turnSeat, round, roundWind, honba, carriedSticks,
-				selectedSeat, selectedIndex, drawnSeat, phase, playerCount, bannerText, discardPos, roomType,
+				selectedSeat, selectedIndex, drawnSeat, phase, playerCount, bannerText, bannerI18n, discardPos, roomType,
 				candidates, candidatePickSeat, winEffects);
 	}
 

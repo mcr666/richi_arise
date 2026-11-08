@@ -274,6 +274,7 @@ public class RiichiGame {
 	/** 设置桌心横幅（boss 栏）并刷新显示截止：显示 60 tick 后自动清空 */
 	private void setBanner(String text) {
 		st.banner = text;
+		st.bannerI18n = ""; // 任一单行横幅覆盖时清掉本地化键（需要本地化的横幅在设置后自行补写）
 		bannerUntil = text.isEmpty() ? 0 : level.getGameTime() + 60;
 	}
 
@@ -935,10 +936,10 @@ public class RiichiGame {
 			// boss 栏：最近一次行动（xxx立直）
 			setBanner(p.name + "立直");
 			// 宣言牌特效：按声明者「立直特效」个人设定（0 = 关闭）播放粒子环并通知客户端绘制
-			int riichiStyle = 1;
+			int riichiStyle = 2; // 缺省 = 光环
 			if (seat >= 0 && seat < 4 && !st.aiSeat[seat] && st.players[seat] != null)
 				riichiStyle = mcr.riichi_arise.game.MahjongTableSavedData.get(level)
-						.getRiichiEffect(st.players[seat], 1);
+						.getRiichiEffect(st.players[seat], 2);
 			riichiStyle = resolveEffectStyle(riichiStyle); // 随机档：触发时取一次具体样式
 			Vec3 riichiTilePos = FengPanBlock.riverTilePos(level, origin, seat, st.riichiRiverIdx[seat]);
 			if (riichiStyle > 0) {
@@ -1922,8 +1923,10 @@ public class RiichiGame {
 			ps[i].points -= pays[i];
 			total += pays[i];
 		}
-		st.points[seat] += total + totalRiichiSticks() + st.carriedSticks * 1000;
-		p.points += total;
+		// 立直棒/供托棒归和牌家：PS 必须与 ST 同步记入，否则 finishRound→writeBack（st=ps）会把棒钱抹掉
+		int sticks = totalRiichiSticks() + st.carriedSticks * 1000;
+		st.points[seat] += total + sticks;
+		p.points += total + sticks;
 		java.util.Arrays.fill(st.riichiSticks, 0);
 		st.carriedSticks = 0;
 		StringBuilder payInfo = new StringBuilder();
@@ -2044,10 +2047,17 @@ public class RiichiGame {
 				if (uras.contains(t))
 					uraHits.add(t);
 			}
-		// 拔北：拔出的北风若为宝牌（三麻指示牌为西），按张数计入表宝牌
-		if (p.kitaCount > 0 && doras.contains(TILE_PEI))
-			for (int i = 0; i < p.kitaCount; i++)
-				doraHits.add(TILE_PEI);
+		// 拔北的北仍按牌面参与表/里宝牌（抜きドラ之外另计，三种来源各自成立）：
+		// 指示牌为西 → 计入表宝牌；立直且里宝牌为北 → 计入里宝牌。
+		// 列表按牌面聚合，宝牌/里宝牌各只有一条，张数包含手牌/副露与拔出的北
+		if (p.kitaCount > 0) {
+			if (doras.contains(TILE_PEI))
+				for (int i = 0; i < p.kitaCount; i++)
+					doraHits.add(TILE_PEI);
+			if (p.riichi && uras.contains(TILE_PEI))
+				for (int i = 0; i < p.kitaCount; i++)
+					uraHits.add(TILE_PEI);
+		}
 		appendDora(entries, "宝牌", doraHits);
 		appendDora(entries, "红宝牌", reds);
 		// 拔北（三麻）：宝牌计数条目，排在表/红宝牌之后、里宝牌之前（与语音键顺序一致）
@@ -2082,16 +2092,18 @@ public class RiichiGame {
 		};
 	}
 
-	/** 特效「随机」档的持久化取值（4）：与 0=关闭 / 1..3 具体样式区分 */
-	private static final int EFFECT_STYLE_RANDOM = 4;
+	/** 特效「随机」档的持久化取值（1）：与 0=关闭 / 2..7 具体样式区分 */
+	private static final int EFFECT_STYLE_RANDOM = 1;
+	/** 6 种具体特效样式值（与客户端 TableTileEffect.ACTIVE_STYLES 一致） */
+	private static final int[] EFFECT_ACTIVE_STYLES = { 2, 3, 4, 5, 6, 7 };
 
 	/**
-	 * 随机档在触发层解析：每次立直 / 和牌触发时随机取 1..3 中的一种具体样式，
+	 * 随机档在触发层解析：每次立直 / 和牌触发时从 6 种具体样式中随机取一种，
 	 * 之后整段动画固定使用该样式（不逐 tick 重掷），全桌看到同一效果。
 	 */
 	private int resolveEffectStyle(int style) {
 		if (style == EFFECT_STYLE_RANDOM)
-			return 1 + level.random.nextInt(3);
+			return EFFECT_ACTIVE_STYLES[level.random.nextInt(EFFECT_ACTIVE_STYLES.length)];
 		return style;
 	}
 
@@ -2099,7 +2111,7 @@ public class RiichiGame {
 	private void winEffect(int winnerSeat, Vec3 tilePos) {
 		level.playSound(null, tilePos.x, tilePos.y, tilePos.z,
 				SoundEvents.FIREWORK_ROCKET_LAUNCH, SoundSource.PLAYERS, 1.0f, 1.0f);
-		int style = winnerSeat >= 0 && winnerSeat < 4 ? st.winEffects[winnerSeat] : 1;
+		int style = winnerSeat >= 0 && winnerSeat < 4 ? st.winEffects[winnerSeat] : 2;
 		style = resolveEffectStyle(style);
 		var notice = new mcr.riichi_arise.network.WinEffectPayload.Notice(origin, winnerSeat, style,
 				tilePos.x, tilePos.y, tilePos.z);
@@ -2160,7 +2172,8 @@ public class RiichiGame {
 			}
 			int gain = total + (seat == stickWinner ? sticks : 0);
 			st.points[seat] += gain;
-			p.points += total;
+			// 同 doTsumo：PS 必须与 ST 同步，含立直棒/供托棒（否则 writeBack 会抹掉）
+			p.points += gain;
 			names = names.isEmpty() ? p.name : names + "、" + p.name;
 			String payLine = Component.translatable("message.riichi_arise.pay", p.name, gain).getString();
 			pay = pay.isEmpty() ? payLine : pay + " " + payLine;
@@ -2308,12 +2321,17 @@ public class RiichiGame {
 			else
 				st.handsExposed[seat] = RichiTableState.HAND_FACE_DOWN;
 		}
-		// boss 栏：只显示最近一次行动（xxx放铳xxx / xxx自摸 / xxx流局满贯），点数放第二行；
+		// boss 栏：只显示最近一次行动（xxx放铳xxx / xxx自摸 / xxx流局满贯）；
+		// 荣和只显示放铳关系（不显示支付点数），自摸/流局满贯点数放第二行；
 		// 荒牌流局等其他情况沿用原文案
 		String payLine = pay.isEmpty() ? "" : "\n" + pay;
 		if (msgKey != null && msgKey.contains("win_ron")) {
 			String discarder = claimDiscarder >= 0 && claimDiscarder < 4 ? ps[claimDiscarder].name : "";
-			setBanner(discarder + "放铳" + winner + payLine);
+			// 荣和横幅只显示放铳关系（不显示支付点数）；文本按客户端语言渲染（服务端只下发键 + 参数）
+			setBanner(discarder + "放铳" + winner);
+			st.bannerI18n = "message.riichi_arise.banner.ron"
+					+ mcr.riichi_arise.network.MahjongTablePayload.BANNER_I18N_SEP
+					+ discarder + mcr.riichi_arise.network.MahjongTablePayload.BANNER_I18N_SEP + winner;
 		} else if (msgKey != null && msgKey.contains("win_tsumo")) {
 			setBanner(winner + "自摸" + payLine);
 		} else if (msgKey != null && msgKey.contains("nagashi_mangan")) {
@@ -2382,10 +2400,11 @@ public class RiichiGame {
 		}
 	}
 
-	/** 是否至少有一名参战人类玩家（有客户端 → 结算由客户端倒计时自动确认，服务端只留兜底时限） */
+	/** 是否至少有一名参战人类玩家当前在线（在线才有客户端倒计时自动确认，服务端只留兜底时限；
+	 *  掉线/切维度中的座位既不会回确认也没有界面要看，按无客户端处理） */
 	private boolean hasRealClient() {
 		for (int i = 0; i < pc(); i++)
-			if (!ps[i].ai && !st.externalUuids.contains(ps[i].uuid))
+			if (!ps[i].ai && !st.externalUuids.contains(ps[i].uuid) && st.playerOf(level, i) != null)
 				return true;
 		return false;
 	}
@@ -2473,9 +2492,10 @@ public class RiichiGame {
 		}
 		sendToSpectators(p -> mcr.riichi_arise.network.MahjongPointDeltaPayload.sendTo(p, origin.asLong(), pc(),
 				seatNames(), pointsBeforeRound, st.points));
-		// 兜底：客户端确认包丢失/掉线时仍能续局（正常流程由全员确认提前推进）。
-		// 纯 AI 对局没有人类确认包，用短兜底（否则旁观者要等很久才进下一局）
-		schedule(hasRealClient() ? RichiTableState.SETTLE_FALLBACK_TICKS * 3 : 7 * 20, settleTask);
+		// 服务端权威兜底：客户端动画 + 3s 倒计时共 6s，超出后无论界面是否还开着都推进
+		// （按 ESC/切维度/掉线关掉界面都不会丢自动确认；正常流程仍由各人类的确认包提前推进）。
+		// 纯 AI 对局没有人类确认包，用同量级的短兜底（否则旁观者要等很久才进下一局）
+		schedule(hasRealClient() ? 8 * 20 : 7 * 20, settleTask);
 	}
 
 	/** 结算确认后推进：连庄（局数不变、本场累加）或轮庄（局数+1）；终局不清桌，下一把开始前才清 */
@@ -2528,6 +2548,10 @@ public class RiichiGame {
 		for (int i = 0; i < pc(); i++) {
 			// AI 与外部程序接入座位没有结算界面、不会回确认，不计入等待
 			if (ps[i].ai || st.externalUuids.contains(ps[i].uuid))
+				continue;
+			// 掉线/切维度中的座位当前没有在线玩家，永远等不到确认，不阻塞推进
+			// （此时该座位已按 handlePlayerLeave 移出牌桌，界面也不可能回包）
+			if (st.playerOf(level, i) == null)
 				continue;
 			if (!settleConfirmed[i])
 				return;
@@ -3125,8 +3149,10 @@ public class RiichiGame {
 			st.honba = honba;
 		if (carriedSticks >= 0)
 			st.carriedSticks = carriedSticks;
-		if (banner != null)
+		if (banner != null) {
 			st.banner = banner;
+			st.bannerI18n = ""; // 外部/旧格式传入的原文横幅：不做本地化覆盖
+		}
 		st.drawnSeat = drawnSeat;
 		if (turnSeat >= 0)
 			st.turnSeat = turnSeat;
@@ -3322,6 +3348,7 @@ public class RiichiGame {
 		// boss 栏横幅显示 60 tick 后自动清空（无新行动覆盖时；新行动会刷新 bannerUntil）
 		if (bannerUntil > 0 && now >= bannerUntil) {
 			st.banner = "";
+			st.bannerI18n = "";
 			bannerUntil = 0;
 		}
 	}

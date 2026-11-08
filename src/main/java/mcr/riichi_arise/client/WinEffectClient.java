@@ -8,7 +8,7 @@ import mcr.riichi_arise.network.WinEffectPayload;
 
 /**
  * 和牌特效客户端播放器：与立直特效共享 {@link TableTileEffect} 的同一套样式
- * （0 = 关闭 / 1 = 光环 / 2 = 星环旋舞 / 3 = 光柱），随 {@link WinEffectPayload} 下发。
+ * （0 = 关闭 / 1 = 随机 / 2 = 光环 / 3 = 星环旋舞 / 4 = 光柱 / 5..7 星陨·金阁·极光），随 {@link WinEffectPayload} 下发。
  * <p>沿用和牌特效自身的范围约束：和牌那张牌旁半径 {@link #RADIUS} 格、高度 {@link #HEIGHT} 格、
  * 一次性时间线 {@link #DURATION} tick（1.5 秒）内播完。</p>
  */

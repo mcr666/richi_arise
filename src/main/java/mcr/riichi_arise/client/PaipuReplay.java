@@ -125,7 +125,8 @@ public final class PaipuReplay {
 		final String[] init = new String[4];
 		String wall = "", dora = "", rinshan = ""; // rinshan = 王牌区岭上 4 张（旧格式日志为空）
 		final List<String[]> events = new ArrayList<>(); // T 行 token（不含 T）
-		String result = ""; // H 行结果（展示文本）
+		String result = ""; // H 行结果（展示文本，含支付点数）
+		String bannerResult = ""; // boss 栏横幅文本（与实时 boss 条一致：荣和不含支付点数）
 		String drawResult = ""; // 流局听牌说明
 		boolean ron; // 荣和（供终帧点数结算）
 		int winSeat = -1, fromSeat = -1, pay; // 荣和支付（终帧点数）
@@ -213,7 +214,7 @@ public final class PaipuReplay {
 						boolean ron = t.length > 2 && t[2].equals("r");
 						int win = parseInt(t.length > 3 ? t[3] : "0");
 						String name = nameOf(g, win);
-						String body;
+						String body, bannerBody;
 						if (ron) {
 							h.ron = true;
 							h.winSeat = win;
@@ -223,12 +224,18 @@ public final class PaipuReplay {
 							body = name + " 荣和自 " + nameOf(g, h.fromSeat) + "：" + yaku + "　"
 									+ (t.length > 5 ? t[5] : "?") + "翻" + (t.length > 6 ? t[6] : "?") + "符　"
 									+ (t.length > 7 ? t[7] : "?") + "点";
+							// 横幅与实时 boss 条一致：去掉支付点数（点数仍保留在 result 供牌谱列表展示）
+							bannerBody = name + " 荣和自 " + nameOf(g, h.fromSeat) + "：" + yaku + "　"
+									+ (t.length > 5 ? t[5] : "?") + "翻" + (t.length > 6 ? t[6] : "?") + "符";
 						} else {
 							String yaku = t.length > 6 ? t[6] : "";
 							body = name + " 自摸：" + yaku + "　" + (t.length > 4 ? t[4] : "?") + "翻"
 									+ (t.length > 5 ? t[5] : "?") + "符";
+							bannerBody = body;
 						}
 						h.result = h.result.isEmpty() ? body : h.result + "\n" + body;
+						h.bannerResult = h.bannerResult.isEmpty()
+								? bannerBody : h.bannerResult + "\n" + bannerBody;
 					}
 				}
 				case "E" -> {
@@ -423,7 +430,7 @@ public final class PaipuReplay {
 			names[i] = g.names[i] == null ? "" : g.names[i];
 		String banner = "";
 		if (s.cursor == h.events.size()) {
-			banner = !h.result.isEmpty() ? h.result.replace("\n", "  ")
+			banner = !h.bannerResult.isEmpty() ? h.bannerResult.replace("\n", "  ")
 					: (!h.drawResult.isEmpty() ? "【流局】" + h.drawResult : "【流局】");
 		}
 		MahjongTableClient.applyReplay(new MahjongTablePayload.ViewMessage(
@@ -435,7 +442,7 @@ public final class PaipuReplay {
 				h.dora, snap.indicators, snap.wallCount,
 				snap.turnSeat, Math.floorMod(s.handIdx, g.playerCount) + 1,
 				Math.floorMod(s.handIdx / g.playerCount, 4), 0, 0,
-				-1, -1, -1, RichiTableState.PHASE_PLAYING, g.playerCount, banner, new int[] { -1, -1, -1, -1 },
+				-1, -1, -1, RichiTableState.PHASE_PLAYING, g.playerCount, banner, "", new int[] { -1, -1, -1, -1 },
 				RichiTableState.ROOM_TIE, "", -1, new int[4]));
 	}
 

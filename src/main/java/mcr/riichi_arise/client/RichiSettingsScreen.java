@@ -190,17 +190,17 @@ public class RichiSettingsScreen extends Screen {
 		return Component.translatable(keys[RichiConfig.CANDIDATE_POSITION.get().ordinal()]).getString();
 	}
 
-	/** 和牌特效当前风格下标（与立直特效共享同一套样式：0=关闭，1=光环，2=星环旋舞，3=光柱） */
+	/** 和牌特效当前风格值（与立直特效共享 6 种样式 + 关闭 + 随机） */
 	private int winEffectIndex() {
 		MahjongLobbyPayloads.LobbySync s = MahjongLobbyPayloads.CLIENT_SYNC.get(origin.asLong());
-		int v = s == null ? 1 : s.ownWinEffect();
+		int v = s == null ? 2 : s.ownWinEffect(); // 缺省 = 光环
 		return Math.max(0, Math.min(TableTileEffect.STYLE_COUNT - 1, v));
 	}
 
-	/** 立直特效当前风格下标（0=关闭，1=光环，2=星环旋舞，3=光柱） */
+	/** 立直特效当前风格值（与和牌特效共用同一套 6 种样式 + 关闭 + 随机） */
 	private int riichiEffectIndex() {
 		MahjongLobbyPayloads.LobbySync s = MahjongLobbyPayloads.CLIENT_SYNC.get(origin.asLong());
-		int v = s == null ? 1 : s.ownRiichiEffect();
+		int v = s == null ? 2 : s.ownRiichiEffect(); // 缺省 = 光环
 		return Math.max(0, Math.min(TableTileEffect.STYLE_COUNT - 1, v));
 	}
 
@@ -208,7 +208,7 @@ public class RichiSettingsScreen extends Screen {
 		return Component.translatable(TableTileEffect.STYLE_KEYS[winEffectIndex()]).getString();
 	}
 
-	/** 立直特效风格显示名（0=关闭，1=光环，2=星环旋舞，3=光柱）：取服务端同步的自己当前值 */
+	/** 立直特效风格显示名（0=关闭、1=随机、2=光环、3=星环、4=光柱、5=星陨、6=金阁、7=极光）：取服务端同步的自己当前值 */
 	private String riichiEffectText() {
 		return Component.translatable(TableTileEffect.STYLE_KEYS[riichiEffectIndex()]).getString();
 	}
@@ -319,19 +319,17 @@ public class RichiSettingsScreen extends Screen {
 			}
 			case WIN_EFFECT -> {
 				int cur = winEffectIndex();
-				for (int i = 0; i < TableTileEffect.STYLE_COUNT; i++) {
-					final int style = i;
-					list.add(new SettingOption(Component.translatable(TableTileEffect.STYLE_KEYS[i]).getString(),
-							i == cur, () -> net.neoforged.neoforge.network.PacketDistributor.sendToServer(
+				for (int style : TableTileEffect.SETTING_STYLES) {
+					list.add(new SettingOption(Component.translatable(TableTileEffect.STYLE_KEYS[style]).getString(),
+							style == cur, () -> net.neoforged.neoforge.network.PacketDistributor.sendToServer(
 									new mcr.riichi_arise.network.VoicePayloads.WinEffectSetMessage(style))));
 				}
 			}
 			case RIICHI_EFFECT -> {
 				int cur = riichiEffectIndex();
-				for (int i = 0; i < TableTileEffect.STYLE_COUNT; i++) {
-					final int style = i;
-					list.add(new SettingOption(Component.translatable(TableTileEffect.STYLE_KEYS[i]).getString(),
-							i == cur, () -> net.neoforged.neoforge.network.PacketDistributor.sendToServer(
+				for (int style : TableTileEffect.SETTING_STYLES) {
+					list.add(new SettingOption(Component.translatable(TableTileEffect.STYLE_KEYS[style]).getString(),
+							style == cur, () -> net.neoforged.neoforge.network.PacketDistributor.sendToServer(
 									new mcr.riichi_arise.network.RiichiEffectPayload.SetMessage(style))));
 				}
 			}
@@ -674,22 +672,22 @@ public class RichiSettingsScreen extends Screen {
 				RichiConfig.SPEC.save();
 			}
 			case WIN_EFFECT -> {
-				// 和牌特效：单击循环切换（关闭 → 光环 → 星环旋舞 → 光柱 → 随机 → 关闭），与立直特效共用样式
+				// 和牌特效：单击循环切换（顺序与取值一致：关闭 → 随机 → 光环 → 星环 → 光柱 → 星陨 → 金阁 → 极光）
 				// 提交给服务端持久化并广播，使他人也按自己的设置看到特效
 				MahjongLobbyPayloads.LobbySync s = MahjongLobbyPayloads.CLIENT_SYNC.get(origin.asLong());
-				int cur = s == null ? 1 : s.ownWinEffect();
+				int cur = s == null ? 2 : s.ownWinEffect();
 				net.neoforged.neoforge.network.PacketDistributor.sendToServer(
 						new mcr.riichi_arise.network.VoicePayloads.WinEffectSetMessage(
-								(cur + 1) % TableTileEffect.STYLE_COUNT));
+								TableTileEffect.nextSettingStyle(cur)));
 			}
 			case RIICHI_EFFECT -> {
-				// 立直特效：单击循环切换（关闭 → 光环 → 星环旋舞 → 光柱 → 随机 → 关闭）
+				// 立直特效：单击循环切换（顺序与取值一致：关闭 → 随机 → 光环 → 星环 → 光柱 → 星陨 → 金阁 → 极光）
 				// 提交给服务端持久化并广播，立直时全桌都按声明者的设置看到特效
 				MahjongLobbyPayloads.LobbySync s = MahjongLobbyPayloads.CLIENT_SYNC.get(origin.asLong());
-				int cur = s == null ? 1 : s.ownRiichiEffect();
+				int cur = s == null ? 2 : s.ownRiichiEffect();
 				net.neoforged.neoforge.network.PacketDistributor.sendToServer(
 						new mcr.riichi_arise.network.RiichiEffectPayload.SetMessage(
-								(cur + 1) % TableTileEffect.STYLE_COUNT));
+								TableTileEffect.nextSettingStyle(cur)));
 			}
 			case VOICE_VOLUME -> {
 				// 角色语音音量：每次点击 +10%，100% 后回到 0%（VoicePlayer 逐次读取，立即生效）

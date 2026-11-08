@@ -272,6 +272,16 @@ public final class Mahjong4jBridge {
 				names.add(y.name());
 				han += open ? y.getKuisagari() : y.getHan();
 			}
+			// 两立直替代立直（不叠加显示/计翻）：mahjong4j 的 DoubleReachResolver 要求
+			// isDoubleReach && isReach 同时成立，ReachResolver 又会因 isReach 再发一次 REACH，
+			// 导致双立直手牌列出「立直+两立直」。撤销多余的 REACH，并把 DOUBLE_REACH 补足为 2 翻
+			// （库内 DOUBLE_REACH 仅记 1 翻，靠与 REACH 凑成 2 翻）。结算列表/报番/牌谱都基于
+			// yakuNames 与总翻数，一并修正；一发、门清自摸等仍按 isReach 正常叠加。
+			if (names.contains(NormalYaku.DOUBLE_REACH.name())) {
+				if (names.remove(NormalYaku.REACH.name()))
+					han -= open ? NormalYaku.REACH.getKuisagari() : NormalYaku.REACH.getHan();
+				han += 2 - (open ? NormalYaku.DOUBLE_REACH.getKuisagari() : NormalYaku.DOUBLE_REACH.getHan());
+			}
 			// mahjong4j 的三色同顺/一气通贯判定在顺子列表中同数字/同花色顺子不相邻时漏判
 			// （副露顺子固定追加在门清分解之后）——按全部面子分解自行补判
 			for (org.mahjong4j.hands.MentsuComp mc : hands.getMentsuCompSet()) {
@@ -413,16 +423,22 @@ public final class Mahjong4jBridge {
 				if (ura > 0)
 					han += ura;
 			}
-			// 拔北（三麻）：每张拔出的北风 +1 翻（不走 mahjong4j 役列表，与宝牌同类附加翻；
-			// 计入下方 13 翻累计役满）。不进役名列表——报番时由 RiichiGame 作为宝牌计数条目
-			// （表/红之后、里之前）播报，语音走宝牌计数通道
-			if (kitaHan > 0)
-				han += kitaHan;
-			// 拔出的北风若本身是宝牌（三麻指示牌为西 → 宝牌为北）：每张再按宝牌 +1 翻，并计入宝牌命中明细
-			if (kitaHan > 0 && doraIndicators.contains(TILE_PEI)) {
-				han += kitaHan;
-				for (int i = 0; i < kitaHan; i++)
-					doraHits.add(TILE_PEI);
+			// 拔北（三麻）：拔出的北风每张 +1 翻抜きドラ；同时它仍按牌面参与表/里宝牌判定，
+			// 三种来源各自成立、互不吞并（指示牌为西 → 表宝牌再 +1；立直且里宝牌为北 → 里宝牌再 +1）。
+			// 拔北本身不进役名列表，报番由 RiichiGame 按宝牌计数条目分别播报「拔北/宝牌/里宝牌」，
+			// 因此这里把北同步写入 doraHits/uraHits，供结算列表与语音按张数聚合。
+			if (kitaHan > 0) {
+				han += kitaHan; // 抜きドラ
+				if (doraIndicators.contains(TILE_PEI)) {
+					han += kitaHan;
+					for (int i = 0; i < kitaHan; i++)
+						doraHits.add(TILE_PEI);
+				}
+				if (riichi && flags.uraDoras().contains(TILE_PEI)) {
+					han += kitaHan;
+					for (int i = 0; i < kitaHan; i++)
+						uraHits.add(TILE_PEI);
+				}
 			}
 			// 海底捞月（最后一自摸）/ 河底捞鱼（最后一张荣和）
 			if (flags.haitei() && tsumo) {
@@ -450,54 +466,70 @@ public final class Mahjong4jBridge {
 	/**
 	 * 平和两面听判定：枚举 4 顺子 + 1 对子分解，存在使和牌张所在顺子构成两面听的分解即成立。
 	 * 坎张（和牌张居中）/ 边张（持 12 和 3 或持 89 和 7）/ 单骑（和牌张成对）均不两面。
+	 * 同一牌面有多张时必须枚举和牌张的所有归属：如 12345 听 3/6 和 3，既可分解为 123（边张），
+	 * 也可分解为 345（两面），取两面分解才算平和（日麻按点数最大的分解计番）。
 	 */
 	private static boolean hasRyanmenDecomposition(List<Integer> handWithWinTile) {
 		Tile winTile = toTile(handWithWinTile.get(handWithWinTile.size() - 1));
 		if (winTile.getNumber() == 0)
 			return false; // 字牌不可能两面
 		int[] comp = toComp(handWithWinTile);
-		return ryanmenSearch(comp, winTile.ordinal(), 0, false);
+		return ryanmenSearch(comp, winTile.ordinal(), 0, false, false);
 	}
 
-	/** 递归分解（仅顺子+对子；平和不含刻子）：winOrd 在对子里 = 单骑（不成立），在顺子里按位置判两面 */
-	private static boolean ryanmenSearch(int[] comp, int winOrd, int from, boolean pairUsed) {
+	/**
+	 * 递归分解（仅顺子+对子；平和不含刻子）。
+	 * <p>{@code winAssigned} 表示和牌张已归属某个两面顺子。当前顺子包含和牌张所在牌面时，
+	 * 既可能"本顺子用掉和牌张"，也可能"本顺子用另一张同牌、把和牌张留给其它顺子"，
+	 * 两种归属都要尝试（前者仅在两面听成立时算数）。<br>
+	 * 对子分支：和牌张成对 = 单骑，不成立；仅当该牌 ≥3 张（或和牌张已在别处归属）时，
+	 * 雀头才能用非和牌张。</p>
+	 */
+	private static boolean ryanmenSearch(int[] comp, int winOrd, int from, boolean pairUsed, boolean winAssigned) {
 		int i = from;
 		while (i < 34 && comp[i] == 0)
 			i++;
 		if (i == 34)
-			return pairUsed; // 全部牌恰好分解为 4 顺子 + 1 对子
-		// 对子分支：对子即雀头。若该牌仅 2 张且含和牌张 = 单骑听，此分支必不两面；
-		// 但该牌 ≥3 张时雀头可用非和牌张、和牌张可归入顺子，仍可能是两面，放行并交由递归验证
+			return pairUsed && winAssigned; // 全部牌分解完，且和牌张已归入某个两面顺子
+		// 对子分支（雀头）
 		if (!pairUsed && comp[i] >= 2) {
-			boolean jantoOk = i != winOrd || comp[i] >= 3;
+			boolean jantoOk = i != winOrd || winAssigned || comp[i] >= 3;
 			comp[i] -= 2;
-			boolean ok = jantoOk && ryanmenSearch(comp, winOrd, i, true);
+			boolean ok = jantoOk && ryanmenSearch(comp, winOrd, i, true, winAssigned);
 			comp[i] += 2;
 			if (ok)
 				return true;
 		}
 		// 顺子分支
 		if (i < 27 && i % 9 <= 6 && comp[i + 1] > 0 && comp[i + 2] > 0) {
-			comp[i]--;
-			comp[i + 1]--;
-			comp[i + 2]--;
-			boolean ok;
-			if (winOrd < i || winOrd > i + 2) {
-				ok = ryanmenSearch(comp, winOrd, i, pairUsed); // 和牌张不在本顺子
-			} else if (winOrd == i + 1) {
-				ok = false; // 坎张
-			} else if (winOrd == i) {
-				ok = i % 9 <= 5; // 持 (i+1,i+2) 和 i：边张仅 i%9==6（持 89 和 7）
-			} else {
-				ok = i % 9 >= 1; // 持 (i,i+1) 和 i+2：边张仅 i%9==0（持 12 和 3）
+			boolean winInMeld = winOrd >= i && winOrd <= i + 2;
+			boolean ryanmen = winOrd == i ? i % 9 <= 5 // 持 (i+1,i+2) 和 i：边张仅 i%9==6（持 89 和 7）
+					: winOrd == i + 2 ? i % 9 >= 1 // 持 (i,i+1) 和 i+2：边张仅 i%9==0（持 12 和 3）
+							: false; // 和牌张居中 = 坎张
+			// A：本顺子用掉和牌张（仅两面听成立时才算一次有效归属）
+			if (winInMeld && ryanmen && !winAssigned) {
+				comp[i]--;
+				comp[i + 1]--;
+				comp[i + 2]--;
+				boolean ok = ryanmenSearch(comp, winOrd, i, pairUsed, true);
+				comp[i]++;
+				comp[i + 1]++;
+				comp[i + 2]++;
+				if (ok)
+					return true;
 			}
-			if (ok)
-				ok = ryanmenSearch(comp, winOrd, i, pairUsed); // 和牌张所在顺子两面成立，仍需其余牌可分解
-			comp[i]++;
-			comp[i + 1]++;
-			comp[i + 2]++;
-			if (ok)
-				return true;
+			// B：本顺子用另一张同牌、和牌张仍待分配（和牌张已归属过，或该牌面还有 ≥2 张时才可行）
+			if (!winInMeld || winAssigned || comp[winOrd] >= 2) {
+				comp[i]--;
+				comp[i + 1]--;
+				comp[i + 2]--;
+				boolean ok = ryanmenSearch(comp, winOrd, i, pairUsed, winAssigned);
+				comp[i]++;
+				comp[i + 1]++;
+				comp[i + 2]++;
+				if (ok)
+					return true;
+			}
 		}
 		return false;
 	}

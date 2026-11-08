@@ -190,6 +190,12 @@ public class RichiTableState {
 	public int drawnSeat = -1;
 	/** 结算横幅文本（瞬态，客户端 text_display 渲染；finishRound 设置，resetHand 清空） */
 	public String banner = "";
+	/**
+	 * 结算横幅的本地化键 + 参数（以 {@link mcr.riichi_arise.network.MahjongTablePayload#BANNER_I18N_SEP}
+	 * 分隔，首段为语言键）：非空时客户端按自身语言渲染，空则按 {@link #banner} 原文渲染。
+	 * 仅用于需要按客户端语言显示的横幅（如荣和），瞬态不存档。
+	 */
+	public String bannerI18n = "";
 	/** 剧本牌局（临时，拍视频用）：null = 普通对局；不参与存档。见 FilmScenario */
 	public transient mcr.riichi_arise.game.riichi.FilmScenario film;
 

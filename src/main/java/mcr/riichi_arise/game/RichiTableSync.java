@@ -48,7 +48,7 @@ public final class RichiTableSync {
 			net.neoforged.neoforge.network.PacketDistributor.sendToPlayer(p, new MahjongTablePayload.ViewMessage(
 					origin.asLong(), -1, false, 0, empty4, zeros, zeros, zeros, empty4, empty4, zeros, new int[4],
 					zeros, zeros, zeros, zeros, empty4, zeros, empty4, empty4, empty4,
-					"", 0, 0, -1, 0, 0, 0, 0, -1, -1, -1, 0, 4, "", new int[4], RichiTableState.ROOM_TIE,
+					"", 0, 0, -1, 0, 0, 0, 0, -1, -1, -1, 0, 4, "", "", new int[4], RichiTableState.ROOM_TIE,
 					"", -1, new int[4]));
 		}
 	}
@@ -136,7 +136,8 @@ public final class RichiTableSync {
 				doraText(st), st.revealedIndicators,
 				wallSize(st), st.turnSeat, st.round, st.roundWind, st.honba, st.carriedSticks,
 				st.selectedSeat, st.selectedIndex, st.drawnSeat, st.phase, st.playerCount,
-				st.banner == null ? "" : st.banner, Arrays.copyOf(st.lastDiscardPos, 4), renderRoom,
+				st.banner == null ? "" : st.banner, st.bannerI18n == null ? "" : st.bannerI18n,
+				Arrays.copyOf(st.lastDiscardPos, 4), renderRoom,
 				st.candidates == null ? "" : st.candidates, st.candidatePickSeat,
 				Arrays.copyOf(st.winEffects, 4));
 		// 形象去重：整局不重发的内容只留索引

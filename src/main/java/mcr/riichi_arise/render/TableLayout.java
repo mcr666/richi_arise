@@ -51,14 +51,12 @@ public final class TableLayout {
 	public static final double SMALL_OUTWARD = 3.0 / 16.0;
 	/** 小型风盘手牌区整体向玩家左侧（沿 lefts）偏移量（格，2 个模型单位 = 2/16 格） */
 	public static final double SMALL_HAND_LEFT_SHIFT = 2.0 / 16.0;
-	/** 副露区外缘与桌沿之间保留的间隙（格，1 个模型单位；仅小型 3×3 桌贴沿时使用） */
-	public static final double MELD_EDGE_GAP = 1.0 / 16.0;
 	/** 大风盘副露区向自家方向（远离桌心，沿 outs）外移量（格，2 个模型单位 = 2/16 格）；小型 3×3 桌不受影响 */
 	public static final double LARGE_MELD_OUTWARD = 2.0 / 16.0;
 	/** 手牌相邻牌间距（格）——牌宽 12px×s/16≈0.15625，紧贴（+0.0007 防共面闪烁） */
 	public static final double TILE_GAP = 0.157;
-	/** 相邻副露组之间的最小间隙（格） */
-	public static final double MELD_GAP = 0.02;
+	/** 相邻副露组之间的间隙（格）：0 = 相邻副露组紧挨着（组宽已含声明牌伸出量，直接相接） */
+	public static final double MELD_GAP = 0.0;
 	/** 发牌间隔（tick） */
 	public static final int DEAL_INTERVAL_TICKS = 1;
 	/** 牌渲染缩放：模型宽度 12px（第二窄边），目标 2.5 单位 → 2.5/12 */
@@ -100,15 +98,15 @@ public final class TableLayout {
 			return RIVER_DIST;
 		}
 
-		/** 副露区外缘上限：小型紧贴桌沿只留 MELD_EDGE_GAP；大风盘副露行在桌沿内侧，按牌长半个身位取上限 */
+		/** 副露区外缘上限：小型紧贴桌沿（外缘正好落在桌沿）；大风盘副露行在桌沿内侧，按牌长半个身位取上限 */
 		public double meldEdgeCap() {
-			return small ? 1.5 - MELD_EDGE_GAP : 1.55 + LARGE_MELD_OUTWARD;
+			return small ? 1.5 : 1.55 + LARGE_MELD_OUTWARD;
 		}
 
-		/** 副露行中心距桌心：小型贴玩家侧桌沿（外缘距沿 MELD_EDGE_GAP）；大风盘随副露外移量一起向外侧（自家方向）平移，恒比手牌行更靠外 */
+		/** 副露行中心距桌心：小型贴玩家侧桌沿（牌长外缘正好落在桌沿）；大风盘随副露外移量一起向外侧（自家方向）平移，恒比手牌行更靠外 */
 		public double meldRowDist() {
 			return small
-					? 1.5 - MELD_EDGE_GAP - TILE_LONG / 2.0
+					? 1.5 - TILE_LONG / 2.0
 					: edgeFor(false) + TILE_WIDTH / 2.0 + LARGE_MELD_OUTWARD;
 		}
 
@@ -362,11 +360,11 @@ public final class TableLayout {
 						flatYaw(dir), dir, true, h, i, dealIndex++ * step));
 			}
 		}
-		// 3) 副露（吃碰杠）：副露行在小型风盘贴近玩家侧桌沿（外缘只留 MELD_EDGE_GAP），大风盘行心位于手牌行外侧（更靠自家）半个牌宽，
+		// 3) 副露（吃碰杠）：副露行在小型风盘紧贴玩家侧桌沿（牌长外缘正好落在桌沿），大风盘行心位于手牌行外侧（更靠自家）半个牌宽，
 		//    组序从外向内游标式排开——
-		//    每组按实际占宽（平躺自家牌 + 声明牌伸出方向）推进；小型右端贴桌沿只留 MELD_EDGE_GAP，大风盘不超过 meldEdgeCap()，
+		//    每组按实际占宽（平躺自家牌 + 声明牌伸出方向）推进；小型右端贴桌沿，大风盘不超过 meldEdgeCap()，
 		//    同一家的多组也不会因声明牌相对而压叠。
-		//    所有副露整体靠右排列（游标自外缘内收），新的副露永远紧挨上一组，不插手牌中间。
+		//    所有副露整体靠右排列（游标自外缘内收），相邻副露组之间不留间隙（MELD_GAP = 0），新的副露永远紧挨上一组，不插手牌中间。
 		//    组内全部平躺：自家牌长轴垂直副露行（水平面内"竖着"、朝桌心，同牌河牌）；
 		//    声明牌（副露串末尾那张，见 RiichiPlayer.displayOrder）长轴指向来源玩家——
 		//    上家（rel3/左手）横牌在组最左、下家（rel1/右手）在最右、对家（rel2/对面）在中间且长轴朝桌心。
@@ -377,7 +375,7 @@ public final class TableLayout {
 			Vec3 playerRight = new Vec3(-facingCenter.z, 0, facingCenter.x); // 面朝桌心时的右手（副露行 / 手牌向右延伸）
 			Vec3 playerLeft = playerRight.scale(-1);
 			List<RichiTableState.MeldGroup> groups = st.meldGroupInfos(h);
-			Vec3 meldRow = center.add(outs[h].scale(geom.meldRowDist())); // 贴近玩家侧桌沿（外缘距桌沿 MELD_EDGE_GAP）
+			Vec3 meldRow = center.add(outs[h].scale(geom.meldRowDist())); // 贴近玩家侧桌沿（小型牌长外缘正好贴沿）
 			double halfW = TILE_WIDTH / 2.0;
 			double halfL = TILE_LONG / 2.0;
 			double protrude = halfL - halfW; // 横放声明牌沿行伸出量（长轴与立牌同向时占用更长）
