@@ -138,6 +138,11 @@ public class RiichiWall {
 		return wall.isEmpty() ? -1 : wall.remove(wall.size() - 1);
 	}
 
+	/** 钻石之间：把手牌放回牌山非摸牌端（牌头，远离 draw() 的摸牌端），牌山张数守恒 */
+	public void putBack(java.util.Collection<Integer> codes) {
+		wall.addAll(0, codes);
+	}
+
 	/**
 	 * 剧本用：摸一张，且保证不摸到 forbidden 命中的牌——命中时与牌尾附近一张可换的牌对调
 	 * （违规牌被压向牌山深处，之后仍可能被换回；每次只摸走 1 张，不改变各家摸牌张数）。

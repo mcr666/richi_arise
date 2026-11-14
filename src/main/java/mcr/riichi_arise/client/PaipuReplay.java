@@ -443,7 +443,7 @@ public final class PaipuReplay {
 				snap.turnSeat, Math.floorMod(s.handIdx, g.playerCount) + 1,
 				Math.floorMod(s.handIdx / g.playerCount, 4), 0, 0,
 				-1, -1, -1, RichiTableState.PHASE_PLAYING, g.playerCount, banner, "", new int[] { -1, -1, -1, -1 },
-				RichiTableState.ROOM_TIE, "", -1, new int[4]));
+				RichiTableState.ROOM_TIE, "", -1, new int[4], false, new String[4], ""));
 	}
 
 	private static boolean sameTile(int a, int b) {

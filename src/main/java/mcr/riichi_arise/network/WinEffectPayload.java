@@ -13,11 +13,12 @@ import mcr.riichi_arise.RichiiAriseMod;
 /**
  * 和牌特效通知（S -> C）：和牌时由服务端向桌旁玩家各发一次。
  * <p>带和牌者座位与其"个人设定"里的特效风格：所有观看者都按和牌者的设置渲染（他人也看得到）。
+ * {@code tsumo} 标记自摸，客户端据此把特效延后到砸牌动画落地之后。
  * 具体动画（原版粒子）全部在客户端绘制，范围限制在桌面内。</p>
  */
 public class WinEffectPayload {
 
-	public record Notice(BlockPos origin, int seat, int style, double x, double y, double z)
+	public record Notice(BlockPos origin, int seat, int style, double x, double y, double z, boolean tsumo)
 			implements CustomPacketPayload {
 		public static final Type<Notice> TYPE = new Type<>(
 				ResourceLocation.fromNamespaceAndPath(RichiiAriseMod.MODID, "win_effect"));
@@ -30,9 +31,10 @@ public class WinEffectPayload {
 					buf.writeDouble(msg.x());
 					buf.writeDouble(msg.y());
 					buf.writeDouble(msg.z());
+					buf.writeBoolean(msg.tsumo());
 				},
 				(RegistryFriendlyByteBuf buf) -> new Notice(buf.readBlockPos(), buf.readVarInt(), buf.readVarInt(),
-						buf.readDouble(), buf.readDouble(), buf.readDouble()));
+						buf.readDouble(), buf.readDouble(), buf.readDouble(), buf.readBoolean()));
 
 		@Override
 		public Type<Notice> type() {

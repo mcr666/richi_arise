@@ -41,6 +41,16 @@ public class MahjongLobbyScreen extends Screen {
 		Minecraft.getInstance().setScreen(new MahjongLobbyScreen(origin));
 	}
 
+	/** S→C OpenMessage 入口（仅客户端执行；把 Screen 相关逻辑收在客户端类，避免专用服务端类校验加载 Screen）：
+	 *  该桌已被雀魂连接接管时改开连接控制面板，否则在无已打开界面时打开大厅管理界面。 */
+	public static void openFromNetwork(BlockPos origin) {
+		MahjongLobbyPayloads.NetState state = MahjongLobbyPayloads.CLIENT_NET.get(origin.asLong());
+		if (state != null && state.takeover())
+			RichiNetScreen.open(origin);
+		else if (Minecraft.getInstance().screen == null)
+			open(origin);
+	}
+
 	private void refresh() {
 		boolean had = this.sync != null;
 		int oldType = this.sync != null ? this.sync.gameType() : -1;
@@ -210,21 +220,36 @@ public class MahjongLobbyScreen extends Screen {
 		if (adminSettings) {
 			String[] typeKeys = { "gui.riichi_arise.lobby.type_single", "gui.riichi_arise.lobby.type_east", "gui.riichi_arise.lobby.type_full" };
 			String[] thinkPresets = { "5+20", "10+30", "60+0", "3+5" };
-			String[] roomKeys = { "gui.riichi_arise.lobby.room_tie", "gui.riichi_arise.lobby.room_glass",
-					"gui.riichi_arise.lobby.room_amethyst" };
+			String[] roomKeys = { "gui.riichi_arise.lobby.room_tie", "gui.riichi_arise.lobby.room_diamond",
+					"gui.riichi_arise.lobby.room_amethyst", "gui.riichi_arise.lobby.room_glass",
+					"gui.riichi_arise.lobby.room_lazurite", "gui.riichi_arise.lobby.room_chaos" };
+			// 房间按钮显示顺序 → 实际 roomType 编码（编码保持不变，避免存档/协议含义变化）
+			int[] roomOrder = { mcr.riichi_arise.game.RichiTableState.ROOM_TIE,
+					mcr.riichi_arise.game.RichiTableState.ROOM_DIAMOND,
+					mcr.riichi_arise.game.RichiTableState.ROOM_AMETHYST,
+					mcr.riichi_arise.game.RichiTableState.ROOM_GLASS,
+					mcr.riichi_arise.game.RichiTableState.ROOM_LAZURITE,
+					mcr.riichi_arise.game.RichiTableState.ROOM_CHAOS };
 			String[] speedKeys = { "gui.riichi_arise.lobby.speed_fast", "gui.riichi_arise.lobby.speed_mid", "gui.riichi_arise.lobby.speed_slow" };
 			int row = 0;
-			int curRoom = Math.floorMod(this.sync.roomType(), 3);
+			// 当前房间在显示顺序中的下标（找不到时退回第一项）
+			int roomIdx = -1;
+			for (int i = 0; i < roomOrder.length; i++)
+				if (roomOrder[i] == Math.floorMod(this.sync.roomType(), 6)) {
+					roomIdx = i;
+					break;
+				}
+			final int curRoom = roomIdx < 0 ? 0 : roomIdx;
 			int curType = Math.floorMod(this.sync.gameType(), 3);
 			int curThink = Math.floorMod(this.sync.thinkIdx(), 4);
 			int curSpeed = Math.floorMod(this.sync.aiSpeedIdx(), 3);
-			// 房间类型：铁之间 → 玻璃之间 → 紫水晶之间（左键循环；右键弹出全部候选，开局时生效）
+			// 房间类型：铁之间 → 钻石之间 → 紫水晶之间 → 玻璃之间 → 青金石之间 → 混沌之间（左键循环；右键弹出全部候选，开局时生效）
 			addSettingRow(top + row++ * ROW_H,
 					() -> Component.translatable("gui.riichi_arise.lobby.label_room").getString(),
-					() -> Component.translatable(roomKeys[Math.floorMod(this.sync.roomType(), 3)]).getString(),
-					() -> send(MahjongLobbyPayloads.ACT_SET_ROOM, (Math.floorMod(this.sync.roomType(), 3) + 1) % 3),
+					() -> Component.translatable(roomKeys[curRoom]).getString(),
+					() -> send(MahjongLobbyPayloads.ACT_SET_ROOM, roomOrder[(curRoom + 1) % 6]),
 					optionList((i) -> Component.translatable(roomKeys[i]).getString(), curRoom,
-							(i) -> () -> send(MahjongLobbyPayloads.ACT_SET_ROOM, i), 3));
+							(i) -> () -> send(MahjongLobbyPayloads.ACT_SET_ROOM, roomOrder[i]), 6));
 			// 对局人数：四人 / 三人（队列人数超过目标人数时服务端拒绝）
 			addSettingRow(top + row++ * ROW_H,
 					() -> Component.translatable("gui.riichi_arise.lobby.label_players").getString(),

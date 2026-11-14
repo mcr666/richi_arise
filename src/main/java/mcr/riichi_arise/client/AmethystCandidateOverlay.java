@@ -59,14 +59,7 @@ public final class AmethystCandidateOverlay {
 		var font = mc.font;
 		g.drawString(font, Component.translatable("gui.riichi_arise.table.candidates").getString(), x + PAD,
 				y + PAD - 1, 0xFFFFE9A8, false);
-		// 右上角：当前选牌者（公开信息）
-		int pickSeat = view.candidatePickSeat();
-		if (pickSeat >= 0 && view.names() != null && pickSeat < view.names().length
-				&& view.names()[pickSeat] != null && !view.names()[pickSeat].isEmpty()) {
-			String who = Component
-					.translatable("gui.riichi_arise.table.candidate_picking", view.names()[pickSeat]).getString();
-			g.drawString(font, who, x + panelW - PAD - font.width(who), y + PAD - 1, 0xFFBFBFBF, false);
-		}
+		// 当前选牌者提示改由 boss 栏显示（此处不再绘制，避免与"备选牌"标题重叠）
 
 		int num = 0;
 		for (int i = 0; i < SLOTS; i++) {

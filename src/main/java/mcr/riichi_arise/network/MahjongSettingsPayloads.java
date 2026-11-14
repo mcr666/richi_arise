@@ -24,9 +24,11 @@ import mcr.riichi_arise.net.RichiNetManager;
  * 客户端配置（观战摊手等）与个人语音不改世界规则，不走本包。
  */
 public class MahjongSettingsPayloads {
-	/** C→S 动作：请求同步 / 设 gamerule / 开端口 / 关端口 / 上报左右键对调偏好 */
+	/** C→S 动作：请求同步 / 设 gamerule / 开端口 / 关端口 / 上报左右键对调偏好 / 对局偏好（自动和牌·关闭鸣牌） */
 	public static final int ACT_REQUEST_SYNC = 0, ACT_SET_GAMERULE = 1, ACT_NET_START = 2, ACT_NET_STOP = 3,
-			ACT_SET_HAND_SWAP = 4;
+			ACT_SET_HAND_SWAP = 4, ACT_SET_GAME_PREF = 5;
+	/** 对局偏好下标（ACT_SET_GAME_PREF 的 extra）：0=自动和牌 1=关闭鸣牌 */
+	public static final int PREF_AUTO_WIN = 0, PREF_NO_CLAIMS = 1;
 	/** gamerule 下标（ACT_SET_GAMERULE 的 extra）：autoOpenNetPort */
 	public static final int RULE_AUTO_NET = 0;
 
@@ -45,6 +47,41 @@ public class MahjongSettingsPayloads {
 	public static void sendHandSwap(boolean swapped) {
 		net.neoforged.neoforge.network.PacketDistributor.sendToServer(
 				new SettingsAction(ACT_SET_HAND_SWAP, 0, swapped ? 1 : 0));
+	}
+
+	/** 客户端：上报对局偏好（pref = PREF_AUTO_WIN / PREF_NO_CLAIMS） */
+	public static void sendGamePref(int pref, boolean val) {
+		net.neoforged.neoforge.network.PacketDistributor.sendToServer(
+				new SettingsAction(ACT_SET_GAME_PREF, pref, val ? 1 : 0));
+	}
+
+	/** 服务端：向指定玩家下发对局偏好当前值（切换后回显 / 每局目复位后同步） */
+	public static void sendGamePref(ServerPlayer sp, boolean autoWin, boolean noClaims) {
+		net.neoforged.neoforge.network.PacketDistributor.sendToPlayer(sp, new GamePrefSync(autoWin, noClaims));
+	}
+
+	/** S→C：对局偏好同步（自动和牌 / 关闭鸣牌） */
+	public record GamePrefSync(boolean autoWin, boolean noClaims) implements CustomPacketPayload {
+		public static final Type<GamePrefSync> TYPE = new Type<>(
+				ResourceLocation.fromNamespaceAndPath(RichiiAriseMod.MODID, "richi_game_pref_sync"));
+
+		public static final StreamCodec<RegistryFriendlyByteBuf, GamePrefSync> STREAM_CODEC = StreamCodec.of(
+				(RegistryFriendlyByteBuf buf, GamePrefSync m) -> {
+					buf.writeBoolean(m.autoWin());
+					buf.writeBoolean(m.noClaims());
+				},
+				(RegistryFriendlyByteBuf buf) -> new GamePrefSync(buf.readBoolean(), buf.readBoolean()));
+
+		@Override
+		public Type<GamePrefSync> type() {
+			return TYPE;
+		}
+
+		public static void handleData(final GamePrefSync message, final IPayloadContext context) {
+			if (context.flow() == PacketFlow.CLIENTBOUND)
+				context.enqueueWork(() -> mcr.riichi_arise.client.MahjongTableOverlay
+						.onPrefSync(message.autoWin(), message.noClaims()));
+		}
 	}
 
 	/** S→C：设置状态同步 */
@@ -140,6 +177,19 @@ public class MahjongSettingsPayloads {
 				else
 					HAND_SWAP.remove(sp.getUUID());
 			}
+			case ACT_SET_GAME_PREF -> {
+				// 对局偏好：只对参战中的桌生效（extra 0=自动和牌 1=关闭鸣牌）
+				int[] seat = new int[1];
+				var st = mcr.riichi_arise.game.RichiTableManager.findPlaying(sp, seat);
+				if (st != null) {
+					boolean val = msg.flag() != 0;
+					if (msg.extra() == PREF_AUTO_WIN)
+						st.autoWin[seat[0]] = val;
+					else if (msg.extra() == PREF_NO_CLAIMS)
+						st.noClaims[seat[0]] = val;
+					sendGamePref(sp, st.autoWin[seat[0]], st.noClaims[seat[0]]); // 回显当前值
+				}
+			}
 			default -> {
 			}
 		}
@@ -161,5 +211,6 @@ public class MahjongSettingsPayloads {
 	public static void register() {
 		RichiiAriseMod.addNetworkMessage(SettingsSync.TYPE, SettingsSync.STREAM_CODEC, SettingsSync::handleData);
 		RichiiAriseMod.addNetworkMessage(SettingsAction.TYPE, SettingsAction.STREAM_CODEC, SettingsAction::handleData);
+		RichiiAriseMod.addNetworkMessage(GamePrefSync.TYPE, GamePrefSync.STREAM_CODEC, GamePrefSync::handleData);
 	}
 }

@@ -5,10 +5,11 @@ import java.util.List;
 
 /**
  * 麻雀牌谱记法：数字 + 花色字母（如 "12345m123p456s11z"）。
- * 字牌 z 用 1..7（东南西北中发白）；红五（宝牌）用 0 表示（0m/0p/0s）。
+ * 字牌 z 用 1..7（东南西北白发中）；红五（宝牌）用 0 表示（0m/0p/0s）。
  * 与牌面代码互转：0m..9m=0..9，0p..9p=10..19，0s..9s=20..29，1z..7z=30..36。
  * 透明牌（玻璃之间）用大写花色字母 M/P/S/Z 表示（如 "13M45m" = 3m 为透明牌），
  * 解析后牌面代码带 {@link TileFlag#GLASS} 标志位。
+ * 万能牌（青金石之间）用独立记号 '*' 表示，解析后牌面代码为 {@link TileFlag#wild()}。
  * 纯静态工具，无状态。
  */
 public final class MahjongTileNotation {
@@ -33,6 +34,12 @@ public final class MahjongTileNotation {
 				if (!digits.isEmpty())
 					throw new IllegalArgumentException("牌谱数字缺失花色: " + notation);
 				codes.add(-1); // 未知牌占位
+				continue;
+			}
+			if (c == '*') { // 万能牌（青金石之间）：独立记法，需先结清数字段
+				if (!digits.isEmpty())
+					throw new IllegalArgumentException("牌谱数字缺失花色: " + notation);
+				codes.add(TileFlag.wild());
 				continue;
 			}
 			boolean glass = Character.isUpperCase(c);
@@ -60,7 +67,7 @@ public final class MahjongTileNotation {
 	}
 
 	/** 牌面代码列表 → 记法（按插入顺序、同花色连续段合并，如 "12345m123p456s11z"；-1 = 未知牌 → "?"）。
-	 *  透明牌段用大写花色（如 "13M45m"）。 */
+	 *  透明牌段用大写花色（如 "13M45m"）；万能牌 → "*"。 */
 	public static String format(List<Integer> codes) {
 		StringBuilder sb = new StringBuilder();
 		StringBuilder digits = new StringBuilder();
@@ -78,6 +85,16 @@ public final class MahjongTileNotation {
 				continue;
 			}
 			int code = TileFlag.base(raw);
+			if (code == TileFlag.WILD_BASE) { // 万能牌：先结清当前花色段，再写独立 "*"
+				if (digits.length() > 0) {
+					sb.append(digits).append(glassSuit(lastSuit, lastGlass));
+					digits.setLength(0);
+				}
+				lastSuit = 0;
+				lastGlass = false;
+				sb.append('*');
+				continue;
+			}
 			boolean glass = TileFlag.isGlass(raw);
 			char suit = code < 10 ? 'm' : code < 20 ? 'p' : code < 30 ? 's' : 'z';
 			int d = suit == 'z' ? code - 29 : code % 10;

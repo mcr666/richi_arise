@@ -104,6 +104,7 @@ public class MahjongHud {
 			case "kakan" -> Component.translatable("gui.riichi_arise.act.kakan").getString();
 			case "kita" -> Component.translatable("gui.riichi_arise.act.kita").getString(); // 拔北（三麻，无参选项）
 			case "pick" -> Component.translatable("gui.riichi_arise.act.pick").getString(); // 紫水晶之间：选备选牌
+			case "swap" -> Component.translatable("gui.riichi_arise.act.swap").getString(); // 青金石之间：确认换牌
 			default -> action;
 		};
 	}
@@ -127,6 +128,16 @@ public class MahjongHud {
 					if (!data.contains(":"))
 						yield new int[0];
 					yield new int[] { Integer.parseInt(data.substring(data.indexOf(':') + 1).trim()) };
+				}
+				case "swap" -> { // data = "牌code,牌code,牌code"（已选中的 3 张）
+					String trimmed = data.trim();
+					if (trimmed.isEmpty())
+						yield new int[0];
+					String[] parts = trimmed.split(",");
+					int[] tiles = new int[parts.length];
+					for (int i = 0; i < parts.length; i++)
+						tiles[i] = Integer.parseInt(parts[i].trim());
+					yield tiles;
 				}
 				default -> new int[0];
 			};
@@ -233,6 +244,9 @@ public class MahjongHud {
 	public static void onKey(InputEvent.Key event) {
 		if (event.getAction() != org.lwjgl.glfw.GLFW.GLFW_PRESS
 				|| Minecraft.getInstance().screen != null || buttons.isEmpty())
+			return;
+		// Tab 叠加层打开时数字键 1/2 用于切换对局偏好，不触发选项
+		if (Minecraft.getInstance().options.keyPlayerList.isDown())
 			return;
 		int key = event.getKey();
 		int idx;

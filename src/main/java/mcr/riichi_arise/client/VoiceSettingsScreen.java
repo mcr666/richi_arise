@@ -1,8 +1,6 @@
 package mcr.riichi_arise.client;
 
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -22,8 +20,8 @@ import mcr.riichi_arise.voice.VoiceClient;
  * <p>样式与大厅管理界面一致：灰色半透明列表行（悬停高亮、选中高亮、禁用暗灰）。</p>
  * <ul>
  * <li>仅可修改自己的语音（对他人可见）。</li>
- * <li>离线内置 6 名角色标注「内置」，点击直接选用；在线角色标注「在线」，<b>点击后先下载，
- * 下载完成（6 条语音就绪）才真正选用</b>，下载中显示「下载中…」且不可重复点击。</li>
+ * <li>角色列表来自已加载的资源包（{@code sounds/voice/<id>/}）：内置角色标注「内置」，
+ * 其余标注「资源包」；点击立即选用，不再联网下载。未装对应语音包的玩家听不到你的语音。</li>
  * <li>列表可滚动（滚轮 + ▲/▼）；顶部可关闭语音、返回。</li>
  * </ul>
  */
@@ -37,9 +35,8 @@ public class VoiceSettingsScreen extends Screen {
 	private static final int SLIDER_TRACK_W = 100;
 
 	private final BlockPos origin;
-	private final List<VoiceCharacters.Character> chars;
-	/** 正在下载的角色 id（下载中显示"下载中…"且不可再点） */
-	private final Set<String> downloading = new HashSet<>();
+	/** 资源包中可用的角色 id（打开界面时扫描一次） */
+	private final List<String> ids;
 	private String currentVoice;
 	private int scroll;
 	/** 角色音量滑块是否正在拖动 */
@@ -48,7 +45,7 @@ public class VoiceSettingsScreen extends Screen {
 	public VoiceSettingsScreen(BlockPos origin) {
 		super(Component.translatable("gui.riichi_arise.voice.title"));
 		this.origin = origin;
-		this.chars = VoiceCharacters.all();
+		this.ids = VoiceCache.voiceIds();
 	}
 
 	public static void open(BlockPos origin) {
@@ -64,7 +61,7 @@ public class VoiceSettingsScreen extends Screen {
 	}
 
 	private int maxScroll() {
-		return Math.max(0, chars.size() - VISIBLE);
+		return Math.max(0, ids.size() - VISIBLE);
 	}
 
 	/** 从最近 Sync 取自己当前的语音（空串 = 关闭） */
@@ -78,7 +75,6 @@ public class VoiceSettingsScreen extends Screen {
 	@Override
 	protected void init() {
 		this.currentVoice = ownVoice();
-		this.downloading.clear();
 	}
 
 	/** 视口内第 row 行（0 起）的角色行 y 坐标 */
@@ -147,33 +143,25 @@ public class VoiceSettingsScreen extends Screen {
 		drawVolumeSlider(graphics);
 		// 上翻
 		drawBtn(graphics, left, top + 58, PANEL_W, 14, "▲", mouseX, mouseY, scroll > 0);
-		// 角色列表行（灰色半透明，悬停高亮；选中高亮文字；下载中禁用暗灰）
+		// 角色列表行（灰色半透明，悬停高亮；选中高亮文字）
 		if (scroll > maxScroll())
 			scroll = maxScroll();
 		for (int i = 0; i < VISIBLE; i++) {
 			int idx = scroll + i;
-			if (idx >= chars.size())
+			if (idx >= ids.size())
 				break;
-			VoiceCharacters.Character c = chars.get(idx);
+			String id = ids.get(idx);
 			int y = rowY(i);
-			boolean dl = downloading.contains(c.id());
-			boolean ready = VoiceCache.isReady(c.id());
-			boolean selected = c.id().equals(currentVoice);
-			boolean enabled = !dl; // 下载中不可点
-			boolean hovered = enabled && mouseX >= left && mouseX < left + PANEL_W && mouseY >= y
+			boolean selected = id.equals(currentVoice);
+			boolean hovered = mouseX >= left && mouseX < left + PANEL_W && mouseY >= y
 					&& mouseY < y + ROW_H;
 			graphics.fill(left, y, left + PANEL_W, y + ROW_H, hovered ? 0x509090C0 : 0x30A0A0A0);
 			StringBuilder label = new StringBuilder(selected ? "✔ " : "");
-			label.append(c.displayName());
-			if (dl)
-				label.append(Component.translatable("gui.riichi_arise.voice.tag_downloading").getString());
-			else if (c.offline())
-				label.append(Component.translatable("gui.riichi_arise.voice.tag_offline").getString());
-			else if (ready)
-				label.append(Component.translatable("gui.riichi_arise.voice.tag_ready").getString());
-			else
-				label.append(Component.translatable("gui.riichi_arise.voice.tag_online").getString());
-			int color = dl ? 0x808080 : selected ? 0xFFCC66 : 0xFFFFFF;
+			label.append(VoiceCharacters.displayName(id));
+			label.append(Component.translatable(VoiceCharacters.isBuiltin(id)
+					? "gui.riichi_arise.voice.tag_offline"
+					: "gui.riichi_arise.voice.tag_pack").getString());
+			int color = selected ? 0xFFCC66 : 0xFFFFFF;
 			graphics.drawString(font, label.toString(), left + 8, y + 5, color, false);
 		}
 		// 下翻
@@ -229,23 +217,17 @@ public class VoiceSettingsScreen extends Screen {
 			scroll = Math.min(maxScroll(), scroll + VISIBLE);
 			return true;
 		}
-		// 角色行：点击 → 下载完成后选用（离线直接选用）
+		// 角色行：点击立即选用（语音由已加载资源包提供）
 		for (int i = 0; i < VISIBLE; i++) {
 			int idx = scroll + i;
-			if (idx >= chars.size())
+			if (idx >= ids.size())
 				break;
 			int y = rowY(i);
 			if (mouseY < y || mouseY >= y + ROW_H || mouseX < left || mouseX >= left + PANEL_W)
 				continue;
-			VoiceCharacters.Character c = chars.get(idx);
-			if (downloading.contains(c.id()))
-				return true; // 下载中忽略
-			downloading.add(c.id());
-			VoiceClient.selectVoice(c.id(), () -> Minecraft.getInstance().execute(() -> {
-				downloading.remove(c.id());
-				if (VoiceCache.isReady(c.id()))
-					currentVoice = c.id(); // 下载完成才真正选用
-			}));
+			String id = ids.get(idx);
+			VoiceClient.setOwnVoice(id);
+			currentVoice = id;
 			return true;
 		}
 		return super.mouseClicked(mouseX, mouseY, button);

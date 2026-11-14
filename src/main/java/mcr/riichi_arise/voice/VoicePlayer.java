@@ -65,7 +65,7 @@ public final class VoicePlayer {
 	/** 世界播报可听半径（与 MC 音源线性衰减一致：超出即不播） */
 	private static final double SOUND_RANGE = 16.0;
 
-	/** 播报某角色某事件的语音；无可用音频（文件缺失/未下载）时写日志并跳过 */
+	/** 播报某角色某事件的语音；资源包未提供该音频时写日志并跳过 */
 	public static void play(String charId, VoiceEvents ev) {
 		play(charId, ev, null, null);
 	}
@@ -86,7 +86,7 @@ public final class VoicePlayer {
 		if (in == null) {
 			// 听牌/未听属于可选语音（多数角色没有），缺失时不打扰日志
 			if (ev != VoiceEvents.TENPAI && ev != VoiceEvents.NOTEN)
-				LogUtils.getLogger().warn("[voice] 无可用语音文件: {} {}（离线内置缺文件或在线未下载成功）",
+				LogUtils.getLogger().warn("[voice] 无可用语音文件: {} {}（资源包未提供该音频）",
 						charId, ev.act());
 			return;
 		}
@@ -168,7 +168,7 @@ public final class VoicePlayer {
 			return;
 		InputStream in = VoiceCache.open(charId, ev);
 		if (in == null) {
-			LogUtils.getLogger().warn("[voice] 无可用语音文件: {} {}（离线内置缺文件或在线未下载成功）",
+			LogUtils.getLogger().warn("[voice] 无可用语音文件: {} {}（资源包未提供该音频）",
 					charId, ev.act());
 			return;
 		}
@@ -268,10 +268,13 @@ public final class VoicePlayer {
 
 	private static void warmupTask() {
 		try {
-			// 1) 用一段内置语音的首帧拿到真实采样格式（同时预热 jlayer 解码类与资源读取）
+			// 1) 用一段资源包语音的首帧拿到真实采样格式（同时预热 jlayer 解码类与资源读取）
 			AudioFormat fmt = null;
 			InputStream in = null;
-			for (String id : VoiceCharacters.OFFLINE_IDS) {
+			java.util.List<String> candidates = VoiceCache.voiceIds();
+			if (candidates.isEmpty())
+				candidates = VoiceCharacters.BUILTIN_IDS;
+			for (String id : candidates) {
 				in = VoiceCache.open(id, VoiceEvents.CHI);
 				if (in != null)
 					break;

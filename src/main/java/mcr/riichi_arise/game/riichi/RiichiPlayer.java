@@ -24,6 +24,11 @@ public class RiichiPlayer {
 	public final List<Fuuro> melds = new ArrayList<>();
 	/** 牌河（打出顺序） */
 	public final List<Integer> river = new ArrayList<>();
+	/**
+	 * 全部舍牌历史（含被吃/碰/明杠鸣走的牌）：牌河中被鸣走的牌会移出 {@link #river}，
+	 * 但振听判定必须仍然算作自己打出过，故单独记录，仅用于振听。
+	 */
+	public final List<Integer> discards = new ArrayList<>();
 	/** 立直状态 */
 	public boolean riichi;
 	/** 立直振听：立直后放过可荣和的牌（永久振听，自摸不受限） */
@@ -62,6 +67,9 @@ public class RiichiPlayer {
 		// 归一化排序键：红5万(0)→5、红5饼(10)→15、红5索(20)→25，否则红5饼/索会排到花色开头；
 		// 透明牌先去掉标志位再比较（同等牌面的透明/不透明牌相邻）
 		hand.sort(java.util.Comparator.comparingInt(c -> {
+			// 万能牌（青金石之间）固定排在手牌最左侧：不参与普通牌面排序
+			if (mcr.riichi_arise.game.TileFlag.isWild(c))
+				return Integer.MIN_VALUE;
 			int b = mcr.riichi_arise.game.TileFlag.base(c);
 			return b == 0 ? 5 : b == 10 ? 15 : b == 20 ? 25 : b;
 		}));

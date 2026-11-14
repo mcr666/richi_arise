@@ -13,12 +13,21 @@ public final class TileIcons {
 	}
 
 	private static final String[] Z = { "1z", "2z", "3z", "4z", "5z", "6z", "7z" };
-	/** 贴图原始尺寸 */
+	/** 普通牌面贴图原始尺寸 */
 	private static final int TEX_W = 48, TEX_H = 64;
+	/** 万能牌动态精灵图：竖排 4 帧，每帧 24×32（整图 24×128） */
+	private static final ResourceLocation WILD_TEX = ResourceLocation.fromNamespaceAndPath(
+			mcr.riichi_arise.MahjongItems.NAMESPACE, "textures/item/mahjong/wanengpai.png");
+	private static final int WILD_FRAMES = 4, WILD_FRAME_W = 24, WILD_FRAME_H = 32, WILD_TEX_H = 128;
+	/** 每帧持续毫秒（4 帧一轮 ≈ 0.8s 缓慢循环） */
+	private static final long WILD_FRAME_MS = 200L;
 
 	/** 牌面代码 → 贴图路径（不含 assets/ 前缀） */
 	public static ResourceLocation icon(int code) {
-		code = mcr.riichi_arise.game.TileFlag.base(code); // 透明牌标志不参与贴图选择
+		int b = mcr.riichi_arise.game.TileFlag.base(code); // 透明牌标志不参与贴图选择
+		if (b == mcr.riichi_arise.game.TileFlag.WILD_BASE) // 万能牌（青金石之间）：专用动态精灵图
+			return WILD_TEX;
+		code = b;
 		String name;
 		if (code < 10)
 			name = code + "m";
@@ -35,6 +44,13 @@ public final class TileIcons {
 	/** 等比绘制：宽 w，高 w*4/3（整张贴图缩放到该尺寸） */
 	public static void draw(net.minecraft.client.gui.GuiGraphics g, int code, int x, int y, int w) {
 		int h = w * TEX_H / TEX_W;
+		if (mcr.riichi_arise.game.TileFlag.base(code) == mcr.riichi_arise.game.TileFlag.WILD_BASE) {
+			// 万能牌：4 帧动态精灵图，按时间选帧后取该帧子矩形（24×32）等比放大绘制
+			int frame = (int) ((net.minecraft.Util.getMillis() / WILD_FRAME_MS) % WILD_FRAMES);
+			g.blit(WILD_TEX, x, y, w, h, 0.0F, frame * WILD_FRAME_H, WILD_FRAME_W, WILD_FRAME_H, WILD_FRAME_W,
+					WILD_TEX_H);
+			return;
+		}
 		// 全图采样：uWidth/vHeight = 整张贴图像素，缩放绘制到 w×h
 		g.blit(icon(code), x, y, w, h, 0.0F, 0.0F, TEX_W, TEX_H, TEX_W, TEX_H);
 	}

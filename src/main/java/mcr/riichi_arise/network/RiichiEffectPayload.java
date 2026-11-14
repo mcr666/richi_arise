@@ -46,7 +46,7 @@ public class RiichiEffectPayload {
 		}
 	}
 
-	/** C→S：设置自己的立直特效风格（0 = 关闭 / 1..3 = 各风格，个人设定；全桌可见） */
+	/** C→S：设置自己的立直特效风格（0 = 关闭 / 1 = 随机 / 2..7 各风格 / 8 = 默认，个人设定；全桌可见） */
 	public record SetMessage(int style) implements CustomPacketPayload {
 		public static final Type<SetMessage> TYPE = new Type<>(
 				ResourceLocation.fromNamespaceAndPath(RichiiAriseMod.MODID, "riichi_effect_set"));

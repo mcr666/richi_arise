@@ -68,6 +68,26 @@ public final class TableLayout {
 	/** 选牌抬升高度（格）＝立牌高（16px×s/16）的一半 */
 	public static final double SELECT_LIFT = TILE_SCALE / 2.0;
 
+	/**
+	 * 该张手牌是否需要抬起：右键选中的那张（selectedSeat/selectedIndex），
+	 * 或青金石之间换牌阶段已选中的三张（swapPicks，逗号分隔下标）——三张同时悬浮。
+	 */
+	private static boolean isLifted(RichiTableState st, int seat, int index) {
+		if (st.selectedSeat == seat && st.selectedIndex == index)
+			return true;
+		if (seat < 0 || seat >= st.swapPicks.length)
+			return false;
+		String picks = st.swapPicks[seat];
+		if (picks == null || picks.isEmpty())
+			return false;
+		for (String part : picks.split(",")) {
+			part = part.trim();
+			if (!part.isEmpty() && Integer.parseInt(part) == index)
+				return true;
+		}
+		return false;
+	}
+
 	//摆位类别（Placement.kind）
 	public static final String KIND_SEAT = "seat";
 	public static final String KIND_HAND = "hand";
@@ -190,29 +210,49 @@ public final class TableLayout {
 	/**
 	 * 牌河第 index 张所在排：内排 0 = 最靠玩家、RIVER_ROWS-1 = 最靠桌心，从内侧（靠桌心）往外排；
 	 * 大风盘：前 RIVER_ROWS*RIVER_COLS（=18）张排满内排后不再新增排，第 4 排起统一返回 RIVER_ROWS，一直往右延伸；
-	 * 小型风盘：前 2*RIVER_COLS（=12）张排满两排后不再换行，第三排（row = 0，最靠玩家）起就一直往右。
+	 * 小型风盘：前 2*RIVER_COLS（=12）张排满两排后进入第三排（row = 0，最靠玩家）补齐 6 列，
+	 * 再向右追加 4 张；之后往桌心挪一排继续追加 4 张（第二排 → 第一排），
+	 * 到第一排（最靠桌心）后沿该排继续向右。
 	 */
 	public static int riverRow(int index, boolean small) {
 		int rows = riverRowCount(small);
 		if (index < rows * RIVER_COLS)
 			return RIVER_ROWS - 1 - index / RIVER_COLS; // 内排：先内（靠桌心）后外（靠玩家）
-		return small ? 0 : RIVER_ROWS; // 排满后：小型就地第三排（最靠玩家一行）往右，大风盘另起溢出行
+		if (!small)
+			return RIVER_ROWS; // 大风盘排满后：另起溢出行，一直往右
+		int extra = index - rows * RIVER_COLS;
+		if (extra < RIVER_COLS + 4)
+			return 0; // 第三排（最靠玩家）：补齐 6 列 + 向右追加 4 张
+		int step = 1 + (extra - (RIVER_COLS + 4)) / 4; // 每往桌心挪一排，追加 4 张
+		return Math.min(step, RIVER_ROWS - 1); // 到第一排（最靠桌心）后沿该排继续向右
 	}
 
 	/**
 	 * 牌河第 index 张在本排中的列序（沿玩家视角自左向右，0 起）：内排 0..RIVER_COLS-1；
-	 * 溢出排前 RIVER_COLS 张与内排对齐（列 0..RIVER_COLS-1），之后自第 RIVER_COLS 列续增，一直往右（不再折排）。
+	 * 大风盘溢出排从第 0 列起续增，一直往右；
+	 * 小风盘：第三排先补齐 0..RIVER_COLS-1，再向右追加 4 张（列 RIVER_COLS..RIVER_COLS+3）；
+	 * 之后每往桌心挪一排，都与该排正常行的右端对齐（重新从列 RIVER_COLS 起）续接 4 张；
+	 * 第一排追加满 4 张后沿该排继续向右（列只增）。
 	 */
 	public static int riverCol(int index, boolean small) {
 		int rows = riverRowCount(small);
 		if (index < rows * RIVER_COLS)
 			return index % RIVER_COLS;
-		return index - rows * RIVER_COLS; // 溢出排：先补齐本排前 6 列，再继续往右
+		int extra = index - rows * RIVER_COLS;
+		if (!small)
+			return extra; // 大风盘溢出行：列持续右移
+		if (extra < RIVER_COLS)
+			return extra; // 第三排：先补齐本排前 6 列
+		int e = extra - RIVER_COLS; // 向右追加的序号（0 起）
+		if (e < 12)
+			return RIVER_COLS + e % 4; // 每排右端续接 4 张（第三排 → 第二排 → 第一排）
+		return RIVER_COLS + (e - 8); // 第一排追加满后沿该排继续向右
 	}
 
 	/**
 	 * 牌河第 index 张的桌面位置（内排每排 6 张、自最靠桌心一排起逐排向玩家（从内往外）、每排沿玩家视角自左向右排；
-	 * 大风盘 3 排共 18 张排满后另起第 4 排一直往右延伸，小型风盘 2 排共 12 张排满后就在第三排一直往右；结算粒子定位用）。
+	 * 大风盘 3 排共 18 张排满后另起第 4 排一直往右延伸；小型风盘 2 排共 12 张排满后在第三排补齐，
+	 * 之后向右追加 4 张并逐排向桌心挪排（每排与正常行右端对齐）；结算粒子定位用）。
 	 */
 	public static Vec3 riverTarget(Geom geom, int seat, int index) {
 		return geom.rows()[seat]
@@ -308,6 +348,20 @@ public final class TableLayout {
 			out.add(new Placement(KIND_SEAT, labelPos, labelPos, -1, 0, null, true, h, -1, h * step));
 		}
 		// 1) 手牌：四家同时发牌（第 k 张四家一起出：delay = (4 + k*4 + h)*step）；选中牌升高 SELECT_LIFT
+		//    修罗之战中盘自摸：公开的那张摸牌单独以正面朝上摆放（其余仍盖牌）
+		int revealSeat = -1, revealIdx = -1;
+		if (st.tsumoReveal != null && !st.tsumoReveal.isEmpty()) {
+			String[] parts = st.tsumoReveal.split(",");
+			if (parts.length >= 2) {
+				try {
+					revealSeat = Integer.parseInt(parts[0].trim());
+					revealIdx = Integer.parseInt(parts[1].trim());
+				} catch (NumberFormatException ignored) {
+					revealSeat = -1;
+					revealIdx = -1;
+				}
+			}
+		}
 		for (int h = 0; h < seats; h++) {
 			List<Integer> hand = handCodes.get(h);
 			int expose = st.handsExposed[h];
@@ -321,15 +375,17 @@ public final class TableLayout {
 				// 手切停留槽位里，槽位 == 手牌张数 = 切牌前刚摸那张所在的最右分离位
 				boolean drawnGap = slots != null ? slot == hand.size() : (hasDrawn && k == hand.size() - 1);
 				Vec3 tilePos = handTarget(geom, h, slot, drawnGap)
-						.add(0, st.selectedSeat == h && st.selectedIndex == k ? SELECT_LIFT : 0, 0);
+						.add(0, isLifted(st, h, k) ? SELECT_LIFT : 0, 0);
 				// 四张四张发：同一批的 4 张同时出现；批次间隔放大，使整桌发牌总时长与逐张发时一致
 				// （末批延迟仍为 4 + 3*16 + 座位号 = 原逐张发牌的最大延迟）
 				int delay = (4 + (k / 4) * 16 + h) * step;
 				if (expose != RichiTableState.HAND_STAND) {
 					// 推倒/盖牌：长轴指向桌心方向（与牌河同向，避免"多米诺"横躺），客户端先立后平
 					Vec3 flatAxis = outs[h].scale(-1);
+					boolean faceUp = expose == RichiTableState.HAND_FACE_UP
+							|| (h == revealSeat && k == revealIdx);
 					out.add(new Placement(KIND_HAND, flatEntityPos(tilePos, 0), tilePos, code,
-							flatYaw(flatAxis), flatAxis, expose == RichiTableState.HAND_FACE_UP, h, k, delay));
+							flatYaw(flatAxis), flatAxis, faceUp, h, k, delay));
 				} else if (flatGlassHands != null && h < flatGlassHands.length && flatGlassHands[h]
 						&& TileFlag.isGlass(code)) {
 					// 「透明牌平放」：雀士视角下其他家的透明牌平放面朝上（长轴仍指向桌心，与牌河同向），
@@ -392,9 +448,9 @@ public final class TableLayout {
 				// 组沿行（playerRight）各侧半宽（中心到外缘），供游标避让（相邻组/相邻家不重叠）
 				// 大风盘：声明牌不再沿行伸出，而是整体朝桌心平移半个牌宽——长边中心落在手牌行上，贴近但不超过手牌行，避免捅进邻家
 				double sideProtrude = geom.small() ? protrude : 0.0;
-				// 暗杠：4 张纵向并排，最外侧两张亮明、中间两张扣下（牌背朝外）
+				// 暗杠：4 张纵向并排、牌与牌紧密相靠（同手牌/吃碰的紧贴间距），最外侧两张亮明、中间两张扣下（牌背朝外）
 				if (ankan) {
-					double pitch = flatStep;
+					double pitch = TILE_GAP;
 					double centerOff = (meld.size() - 1) / 2.0 * pitch;
 					double half = centerOff + halfW;
 					double c = cursor - half;

@@ -97,10 +97,11 @@ public final class MahjongLobby {
 				}
 			}
 		case MahjongLobbyPayloads.ACT_SET_ROOM -> {
-				// 房间类型切换（等待/终局未清理）：extra = 0 铁之间 / 1 玻璃之间 / 2 紫水晶之间（开局时生效）
+				// 房间类型切换（等待/终局未清理）：extra = 0 铁之间 / 1 玻璃之间 / 2 紫水晶之间 / 3 钻石之间 / 4 青金石之间 / 5 混沌之间（开局时生效）
 				// 对局进行中切换：只提示不改配置，并照常下发原值（房间按钮回到当前实际类型）
 				if (canManage(sp) && (extra == RichiTableState.ROOM_TIE || extra == RichiTableState.ROOM_GLASS
-						|| extra == RichiTableState.ROOM_AMETHYST)) {
+						|| extra == RichiTableState.ROOM_AMETHYST || extra == RichiTableState.ROOM_DIAMOND
+						|| extra == RichiTableState.ROOM_LAZURITE || extra == RichiTableState.ROOM_CHAOS)) {
 					if (st.phase != RichiTableState.PHASE_PLAYING) {
 						st.roomType = extra;
 						saveSettings(sp, origin, st);
@@ -140,12 +141,22 @@ public final class MahjongLobby {
 							broadcastSync(sp.serverLevel(), origin, st);
 					} else {
 						int seat = seatIndexOf(st, sp);
-						if (seat >= 0 && !st.aiSeat[seat] && !st.endVotes[seat]) {
+						if (seat < 0) {
+							// 座位已被 AI 接管（断线/换维度/被踢）：原真人玩家重连后仍按开局快照找到席位投票
+							String uuid = sp.getUUID().toString();
+							for (int i = 0; i < 4; i++)
+								if (uuid.equals(st.humanPlayers[i])) {
+									seat = i;
+									break;
+								}
+						}
+						if (seat >= 0 && !st.endVotes[seat]) {
 							st.endVotes[seat] = true;
-							// 全员同意 = 所有**人类**座位均已投票（AI 座位不参与，此前误将 AI 席算入导致永不通过）
+							// 全员同意 = 开局时所有真人席位均已投票（AI 席不参与；
+							// 席位中途被 AI 接管不豁免，须原玩家本人回来投票，避免两人局一人投票即通过）
 							boolean all = true;
 							for (int i = 0; i < 4; i++)
-								if (!st.aiSeat[i] && !st.endVotes[i])
+								if (st.humanPlayers[i] != null && !st.endVotes[i])
 									all = false;
 							if (all) {
 								RiichiGame g = RichiTableManager.getGame(origin);
@@ -363,6 +374,7 @@ public final class MahjongLobby {
 				}
 			}
 			java.util.Arrays.fill(st.players, null);
+			java.util.Arrays.fill(st.humanPlayers, null); // 本局真人席位快照：投票结束按此要求全员投票
 			java.util.Arrays.fill(st.aiSeat, false);
 			java.util.Arrays.fill(st.aiSeatModes, ""); // 本局座位角色：按洗牌结果重新写入（不改预约设置 aiAvatarModes）
 			int n = Math.min(entries.size(), st.playerCount);
@@ -376,6 +388,9 @@ public final class MahjongLobby {
 				else
 					st.players[seat] = en.uuid();
 				st.aiSeat[seat] = en.ai();
+				// 真人席位快照（NPC/女仆与 AI 席不参与投票）
+				if (!en.ai())
+					st.humanPlayers[seat] = en.uuid();
 				// 角色形象跟着 AI 本人换座位（洗牌后若仍按原座位取角色，新座位会掉成默认角色、原座位角色凭空消失）
 				if (en.ai() && en.avatarMode() != null)
 					st.aiSeatModes[seat] = en.avatarMode();
@@ -753,7 +768,7 @@ public final class MahjongLobby {
 	public static void setVoice(ServerPlayer sp, String voiceId) {
 		if (voiceId == null)
 			voiceId = mcr.riichi_arise.network.VoicePayloads.NONE;
-		if (!voiceId.isEmpty() && !mcr.riichi_arise.voice.VoiceCharacters.exists(voiceId))
+		if (!voiceId.isEmpty() && !mcr.riichi_arise.voice.VoiceCharacters.isValidId(voiceId))
 			return; // 未知角色忽略
 		ServerLevel level = sp.serverLevel();
 		MahjongTableSavedData.get(level).setVoice(sp.getUUID().toString(), voiceId);
@@ -769,11 +784,11 @@ public final class MahjongLobby {
 	}
 
 	/**
-	 * 和牌特效（个人设定，0..7；0 = 关闭，1 = 随机，2..4 光环·星环·光柱，5..7 星陨·金阁·极光）：
+	 * 和牌特效（个人设定，0..8；0 = 关闭，1 = 随机，2..4 光环·星环·光柱，5..7 星陨·金阁·极光，8 = 默认）：
 	 * 仅可设置自己的；全局持久化并广播各桌 Sync，使他人也按其设置看到和牌特效。
 	 */
 	public static void setWinEffect(ServerPlayer sp, int style) {
-		if (style < 0 || style > 7)
+		if (style < 0 || style > 8)
 			return;
 		ServerLevel level = sp.serverLevel();
 		MahjongTableSavedData.get(level).setWinEffect(sp.getUUID().toString(), style);
@@ -785,11 +800,11 @@ public final class MahjongLobby {
 	}
 
 	/**
-	 * 立直特效（个人设定，0..7：0 = 关闭 / 1 = 随机 / 2..4 光环·星环·光柱 / 5..7 星陨·金阁·极光）：
+	 * 立直特效（个人设定，0..8：0 = 关闭 / 1 = 随机 / 2..4 光环·星环·光柱 / 5..7 星陨·金阁·极光 / 8 = 默认）：
 	 * 仅可设置自己的；全局持久化并广播各桌 Sync，立直时由服务端按声明者设置向全桌发送特效通知。
 	 */
 	public static void setRiichiEffect(ServerPlayer sp, int style) {
-		if (style < 0 || style > 7)
+		if (style < 0 || style > 8)
 			return;
 		ServerLevel level = sp.serverLevel();
 		MahjongTableSavedData.get(level).setRiichiEffect(sp.getUUID().toString(), style);
@@ -1007,8 +1022,8 @@ public final class MahjongLobby {
 		for (String uuid : st.queue)
 			queueNames.add(playerName(level, st, uuid));
 		int voteCount = 0;
-		for (boolean v : st.endVotes)
-			if (v)
+		for (int i = 0; i < 4; i++)
+			if (st.humanPlayers[i] != null && st.endVotes[i])
 				voteCount++;
 		// 各座位独立 AI 形象模式（空串 = 随机）
 		List<String> seatModes = new ArrayList<>(4);

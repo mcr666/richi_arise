@@ -190,14 +190,14 @@ public class RichiSettingsScreen extends Screen {
 		return Component.translatable(keys[RichiConfig.CANDIDATE_POSITION.get().ordinal()]).getString();
 	}
 
-	/** 和牌特效当前风格值（与立直特效共享 6 种样式 + 关闭 + 随机） */
+	/** 和牌特效当前风格值（与立直特效共享默认 + 6 种样式 + 关闭 + 随机） */
 	private int winEffectIndex() {
 		MahjongLobbyPayloads.LobbySync s = MahjongLobbyPayloads.CLIENT_SYNC.get(origin.asLong());
 		int v = s == null ? 2 : s.ownWinEffect(); // 缺省 = 光环
 		return Math.max(0, Math.min(TableTileEffect.STYLE_COUNT - 1, v));
 	}
 
-	/** 立直特效当前风格值（与和牌特效共用同一套 6 种样式 + 关闭 + 随机） */
+	/** 立直特效当前风格值（与和牌特效共用同一套 默认 + 6 种样式 + 关闭 + 随机） */
 	private int riichiEffectIndex() {
 		MahjongLobbyPayloads.LobbySync s = MahjongLobbyPayloads.CLIENT_SYNC.get(origin.asLong());
 		int v = s == null ? 2 : s.ownRiichiEffect(); // 缺省 = 光环
@@ -208,7 +208,7 @@ public class RichiSettingsScreen extends Screen {
 		return Component.translatable(TableTileEffect.STYLE_KEYS[winEffectIndex()]).getString();
 	}
 
-	/** 立直特效风格显示名（0=关闭、1=随机、2=光环、3=星环、4=光柱、5=星陨、6=金阁、7=极光）：取服务端同步的自己当前值 */
+	/** 立直特效风格显示名（0=关闭、1=随机、2=光环、3=星环、4=光柱、5=星陨、6=金阁、7=极光、8=默认）：取服务端同步的自己当前值 */
 	private String riichiEffectText() {
 		return Component.translatable(TableTileEffect.STYLE_KEYS[riichiEffectIndex()]).getString();
 	}
@@ -272,7 +272,7 @@ public class RichiSettingsScreen extends Screen {
 			case CLIENT_CANDIDATE_POS -> RichiConfig.CandidatePosition.values().length;
 			case VOICE_VOLUME -> 11;
 			case WIN_EFFECT, RIICHI_EFFECT -> TableTileEffect.STYLE_COUNT;
-			case PERSONAL_VOICE -> 1 + mcr.riichi_arise.voice.VoiceCharacters.all().size();
+			case PERSONAL_VOICE -> 1 + mcr.riichi_arise.voice.VoiceCache.voiceIds().size();
 			default -> 0;
 		};
 	}
@@ -338,16 +338,14 @@ public class RichiSettingsScreen extends Screen {
 				list.add(new SettingOption(Component.translatable("gui.riichi_arise.voice.none").getString(),
 						cur.isEmpty(),
 						() -> mcr.riichi_arise.voice.VoiceClient.setOwnVoice(mcr.riichi_arise.network.VoicePayloads.NONE)));
-				for (var c : mcr.riichi_arise.voice.VoiceCharacters.all()) {
-					StringBuilder label = new StringBuilder(c.displayName());
-					if (c.offline())
-						label.append(Component.translatable("gui.riichi_arise.voice.tag_offline").getString());
-					else if (mcr.riichi_arise.voice.VoiceCache.isReady(c.id()))
-						label.append(Component.translatable("gui.riichi_arise.voice.tag_ready").getString());
-					else
-						label.append(Component.translatable("gui.riichi_arise.voice.tag_online").getString());
-					list.add(new SettingOption(label.toString(), c.id().equals(cur),
-							() -> mcr.riichi_arise.voice.VoiceClient.selectVoice(c.id(), null)));
+				for (String id : mcr.riichi_arise.voice.VoiceCache.voiceIds()) {
+					StringBuilder label = new StringBuilder(
+							mcr.riichi_arise.voice.VoiceCharacters.displayName(id));
+					label.append(Component.translatable(mcr.riichi_arise.voice.VoiceCharacters.isBuiltin(id)
+							? "gui.riichi_arise.voice.tag_offline"
+							: "gui.riichi_arise.voice.tag_pack").getString());
+					list.add(new SettingOption(label.toString(), id.equals(cur),
+							() -> mcr.riichi_arise.voice.VoiceClient.setOwnVoice(id)));
 				}
 			}
 			case WORLD_TOGGLE -> {

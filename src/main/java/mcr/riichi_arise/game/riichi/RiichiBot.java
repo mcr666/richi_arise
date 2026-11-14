@@ -69,9 +69,14 @@ public final class RiichiBot {
 	/** 某家手牌的向听数（13/11/10 张等，按 count 折算副露） */
 	public static int shantenOf(List<Integer> handCodes) {
 		int[] t = new int[34];
-		for (int c : handCodes)
+		int n = 0;
+		for (int c : handCodes) {
+			if (mcr.riichi_arise.game.TileFlag.isWild(c))
+				continue; // 万能牌不计入牌种统计
 			t[TileEfficiency.codeToIndex(c)]++;
-		return TileEfficiency.shantenNormal(t, handCodes.size());
+			n++;
+		}
+		return TileEfficiency.shantenNormal(t, n);
 	}
 
 	/**
@@ -84,8 +89,13 @@ public final class RiichiBot {
 	 */
 	public static int chooseDiscard(RiichiPlayer p, int[] visible34, boolean[] dora34,
 			DoubleSupplier random, boolean declareRiichi, double[] danger34, double dangerWeight, int rank) {
-		if (p.riichi)
-			return p.hand.size() - 1; // 立直后摸切
+		if (p.riichi) {
+			// 立直后摸切：跳过万能牌（固定留手不可打出），取最靠右的普通牌
+			for (int i = p.hand.size() - 1; i >= 0; i--)
+				if (!mcr.riichi_arise.game.TileFlag.isWild(p.hand.get(i)))
+					return i;
+			return p.hand.size() - 1;
+		}
 		return TileEfficiency.chooseDiscard(p.hand, visible34, dora34, random, declareRiichi, danger34,
 				dangerWeight, rank);
 	}
@@ -112,8 +122,11 @@ public final class RiichiBot {
 
 		// 基线：不鸣牌的 13 张手牌分析
 		int[] tiles = new int[34];
-		for (int c : p.hand)
+		for (int c : p.hand) {
+			if (mcr.riichi_arise.game.TileFlag.isWild(c))
+				continue; // 万能牌不参与鸣牌
 			tiles[TileEfficiency.codeToIndex(c)]++;
+		}
 		int[] left = new int[34];
 		for (int i = 0; i < 34; i++)
 			left[i] = Math.max(0, 4 - visible34[i]);
@@ -176,17 +189,17 @@ public final class RiichiBot {
 			return null; // 已听牌：默听保立直/保打点，除非役牌碰（上方已处理）
 		int shantenGain = base.shanten - best.shanten;
 		double scoreGain = best.score - base.mixedScore;
-		// 门槛收紧：4.5 / 3.75 / 3.0（原 3.0 / 2.5 / 2.0），吃另 +1.0；
+		// 门槛收紧：6.0 / 5.25 / 4.5（2026-11 再调低副露权重，原 4.5 / 3.75 / 3.0），吃另 +1.5；
 		// 流派修正：野猪流 ×0.6（副露率高，几乎见好就鸣）；魂天流 ×1.25（副露率略低）；
 		// 门清流 ×3.0（副露权重低——只吃明显提速的鸣牌，并非完全不副露）
-		double threshold = 4.5 - Math.min(2, ownDora) * 0.75 + (best.pon ? 0.0 : 1.0);
+		double threshold = 6.0 - Math.min(2, ownDora) * 0.75 + (best.pon ? 0.0 : 1.5);
 		threshold *= flow == 1 ? 0.6 : flow == 4 ? 1.25 : flow == 2 ? 3.0 : 1.0;
 		if (scoreGain >= threshold)
 			return best; // 明显提速（吃碰带来大量进张面/有效牌）
 		if (shantenGain >= 2)
 			return best; // 大幅向听前进
-		// 中后盘 1 步换提速：门槛抬高（12 巡起，宝牌多 10 巡），且必须推进到听牌
-		if (shantenGain == 1 && best.shanten <= 1 && turns >= (ownDora >= 2 ? 10 : 12))
+		// 中后盘 1 步换提速：门槛抬高（14 巡起，宝牌多 12 巡），且必须推进到听牌
+		if (shantenGain == 1 && best.shanten <= 1 && turns >= (ownDora >= 2 ? 12 : 14))
 			return best;
 		return null;
 	}

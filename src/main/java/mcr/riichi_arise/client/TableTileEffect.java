@@ -8,34 +8,36 @@ import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.phys.Vec3;
 
+import mcr.riichi_arise.MahjongParticleTypes;
+
 /**
- * 牌桌共用特效定义：和牌特效与立直特效共享同一套 6 种样式
- * （光环 / 星环旋舞 / 光柱 / 星陨华彩 / 金阁爆华 / 极光回旋，0 = 关闭，1 = 随机）。
+ * 牌桌共用特效定义：和牌特效与立直特效共享同一套样式
+ * （默认 / 光环 / 星环旋舞 / 光柱 / 星陨华彩 / 金阁爆华 / 极光回旋，0 = 关闭，1 = 随机）。
  * <p>同一套样式定义由和牌与立直共用，仅由调用方传入各自的半径 / 高度 / 时长参数，
  * 从而沿用和牌特效与立直特效原有的范围约束。</p>
- * <p>只使用原版粒子与原版音效，粒子严格夹取在给定水平半径与高度内，粒子量保持不变。</p>
+ * <p>除「默认」还原项目最初的星形粒子环外，其余只使用原版粒子与原版音效；
+ * 粒子严格夹取在给定水平半径与高度内，且时间线不超过 20 tick。</p>
  */
 public final class TableTileEffect {
 	/**
-	 * 持久化取值（与界面顺序一致）：0 = 关闭；1 = 随机；2 = 光环；3 = 星环旋舞；4 = 光柱；
-	 * 5 = 星陨华彩；6 = 金阁爆华；7 = 极光回旋。
-	 * <p>旧存档由 MahjongTableSavedData 载入时一次性迁移到本套取值。</p>
+	 * 持久化取值：0 = 关闭；1 = 随机；2 = 光环；3 = 星环旋舞；4 = 光柱；
+	 * 5 = 星陨华彩；6 = 金阁爆华；7 = 极光回旋；8 = 默认（上升幻星环）。
 	 */
 	public static final int STYLE_OFF = 0, STYLE_RANDOM = 1, STYLE_HALO = 2, STYLE_STAR = 3, STYLE_PILLAR = 4,
-			STYLE_STARFALL = 5, STYLE_GOLDEN = 6, STYLE_AURORA = 7;
+			STYLE_STARFALL = 5, STYLE_GOLDEN = 6, STYLE_AURORA = 7, STYLE_DEFAULT = 8;
 
-	/** 具体样式值（不含关闭 / 随机）：随机档从这里等概率抽取 */
+	/** 具体样式值（不含关闭 / 随机 / 默认）：随机档从这里等概率抽取 */
 	public static final int[] ACTIVE_STYLES = { STYLE_HALO, STYLE_STAR, STYLE_PILLAR, STYLE_STARFALL, STYLE_GOLDEN,
 			STYLE_AURORA };
 
 	/**
-	 * 设置界面 / 右键列表的展示顺序（左键循环同此顺序），与持久化数值顺序一致：
-	 * 关闭 → 随机 → 光环 → 星环旋舞 → 光柱 → 星陨华彩 → 金阁爆华 → 极光回旋。
+	 * 设置界面 / 右键列表的展示顺序（左键循环同此顺序）：
+	 * 默认 → 关闭 → 随机 → 光环 → 星环旋舞 → 光柱 → 星陨华彩 → 金阁爆华 → 极光回旋。
 	 */
-	public static final int[] SETTING_STYLES = { STYLE_OFF, STYLE_RANDOM, STYLE_HALO, STYLE_STAR, STYLE_PILLAR,
-			STYLE_STARFALL, STYLE_GOLDEN, STYLE_AURORA };
+	public static final int[] SETTING_STYLES = { STYLE_DEFAULT, STYLE_OFF, STYLE_RANDOM, STYLE_HALO, STYLE_STAR,
+			STYLE_PILLAR, STYLE_STARFALL, STYLE_GOLDEN, STYLE_AURORA };
 
-	/** 设置界面 / 弹出列表的候选数量（关闭 + 随机 + 6 种样式） */
+	/** 设置界面 / 弹出列表的候选数量（默认 + 关闭 + 随机 + 6 种样式） */
 	public static final int STYLE_COUNT = SETTING_STYLES.length;
 
 	/** 风格显示名（按持久化值索引；设置界面 / 弹出列表共用） */
@@ -47,7 +49,8 @@ public final class TableTileEffect {
 			"gui.riichi_arise.settings.riichi_effect.pillar",
 			"gui.riichi_arise.settings.riichi_effect.starfall",
 			"gui.riichi_arise.settings.riichi_effect.golden",
-			"gui.riichi_arise.settings.riichi_effect.aurora" };
+			"gui.riichi_arise.settings.riichi_effect.aurora",
+			"gui.riichi_arise.settings.riichi_effect.default" };
 
 	private TableTileEffect() {
 	}
@@ -63,7 +66,7 @@ public final class TableTileEffect {
 		return style;
 	}
 
-	/** 按展示顺序取下一个设置值（左键循环用；未知值回到关闭） */
+	/** 按展示顺序取下一个设置值（左键循环用；未知值回到展示顺序首位「默认」） */
 	public static int nextSettingStyle(int current) {
 		for (int i = 0; i < SETTING_STYLES.length; i++) {
 			if (SETTING_STYLES[i] == current)
@@ -75,7 +78,7 @@ public final class TableTileEffect {
 	/** 按调用方给定的范围参数创建一个特效时间线实例（随机档先解析为具体样式） */
 	public static Animation create(ClientLevel level, Vec3 center, int style, double radius, double height,
 			int duration) {
-		return new Animation(level, center, Math.max(0, Math.min(STYLE_AURORA, resolve(style))), radius, height,
+		return new Animation(level, center, Math.max(0, Math.min(STYLE_DEFAULT, resolve(style))), radius, height,
 				duration);
 	}
 
@@ -105,12 +108,26 @@ public final class TableTileEffect {
 				case STYLE_STARFALL -> starfallBloom(t);
 				case STYLE_GOLDEN -> goldenBurst(t);
 				case STYLE_AURORA -> auroraSpiral(t);
+				case STYLE_DEFAULT -> defaultRing(t);
 				default -> halo(t);
 			}
 		}
 
 		private void sound(SoundEvent event, float volume, float pitch) {
 			level.playLocalSound(c.x, c.y, c.z, event, SoundSource.PLAYERS, volume, pitch, false);
+		}
+
+		/**
+		 * 8：默认——项目最初的和牌表现：贴牌面一圈星幻粒子（astral_burst），
+		 * 粒子自带旋转扩散与向上飘升；只在这一帧撒一次，由其自身寿命自然散尽。
+		 */
+		private void defaultRing(int t) {
+			if (t != 0)
+				return;
+			for (int i = 0; i < 12; i++) {
+				double a = Math.PI * 2 * i / 12;
+				spawn(MahjongParticleTypes.ASTRAL_BURST.get(), Math.cos(a) * 0.2, 0.1, Math.sin(a) * 0.2, 0, 0, 0);
+			}
 		}
 
 		/** 1：光环——一圈扩散光环 + 缓慢旋转的悬浮光点 */
@@ -199,7 +216,7 @@ public final class TableTileEffect {
 				sound(SoundEvents.FIREWORK_ROCKET_BLAST, 0.9f, 1.3f);
 				sound(SoundEvents.NOTE_BLOCK_CHIME.value(), 0.5f, 1.8f);
 				// 原版 FLASH 视觉尺寸会越出范围，中心改用短促星芒爆点
-				for (int i = 0; i < 10; i++) {
+				for (int i = 0; i < 10; i += 2) {
 					double a = Math.PI * 2 * i / 10;
 					double r = radius * 0.12;
 					spawn(i % 2 == 0 ? ParticleTypes.END_ROD : ParticleTypes.CRIT,
@@ -208,7 +225,7 @@ public final class TableTileEffect {
 				// 三圈不同相位的小花冠（半径都在上限以内）
 				for (int ringIdx = 0; ringIdx < 3; ringIdx++) {
 					double r = radius * (0.33 + ringIdx * 0.27);
-					int n = 8 + ringIdx * 4;
+					int n = 4 + ringIdx * 2;
 					for (int i = 0; i < n; i++) {
 						double a = Math.PI * 2 * i / n + ringIdx * 0.4;
 						spawn(i % 2 == 0 ? ParticleTypes.FIREWORK : ParticleTypes.END_ROD,
@@ -218,8 +235,8 @@ public final class TableTileEffect {
 				}
 			}
 			// 反向波纹：两圈彩点贴牌面向外扩，扩散到上限后停止
-			if (t % 2 == 0 && t <= 10) {
-				double r = Math.min(radius, 0.06 + t * 0.024);
+			if (t % 4 == 0 && t <= 20) {
+				double r = Math.min(radius, 0.06 + t * 0.012);
 				for (int i = 0; i < 10; i++) {
 					double a = Math.PI * 2 * i / 10 + t * 0.2;
 					spawn(ParticleTypes.ELECTRIC_SPARK, Math.cos(a) * r, 0.02, Math.sin(a) * r, 0, 0, 0);
@@ -227,7 +244,7 @@ public final class TableTileEffect {
 				}
 			}
 			// 收束的螺旋余烬：从外圈向中心聚拢并上升
-			if (t > 8 && t % 2 == 0) {
+			if (t > 8 && t % 4 == 0) {
 				double a = t * 0.9;
 				double span = Math.max(1, duration - 8);
 				double r = Math.max(0.02, radius * (1 - (t - 8) / span));
@@ -242,27 +259,29 @@ public final class TableTileEffect {
 			if (t == 0) {
 				sound(SoundEvents.FIREWORK_ROCKET_LAUNCH, 0.8f, 1.2f);
 				sound(SoundEvents.NOTE_BLOCK_BELL.value(), 0.7f, 1.6f);
-				for (int i = 0; i < 16; i++) {
+				for (int i = 0; i < 16; i += 2) {
 					double a = Math.PI * 2 * i / 16;
 					double r = Math.min(radius, 0.16);
 					spawn(ParticleTypes.FIREWORK, Math.cos(a) * r, 0.1, Math.sin(a) * r,
 							Math.cos(a) * 0.04, 0.06, Math.sin(a) * 0.04);
 				}
 			}
-			// 金色光柱：小半径螺旋上升
+			// 金色光柱：小半径螺旋上升（隔 tick 生成，密度减半）
 			double a = t * 0.8;
 			double y = Math.min(height, t * 0.015);
-			for (int k = 0; k < 3; k++) {
-				double aa = a + k * (Math.PI * 2 / 3);
-				double r = Math.min(radius, 0.05);
-				spawn(ParticleTypes.END_ROD, Math.cos(aa) * r, y, Math.sin(aa) * r, 0, 0.01, 0);
-				spawn(ParticleTypes.CRIT, Math.cos(aa) * Math.min(radius, 0.14), y * 0.7,
-						Math.sin(aa) * Math.min(radius, 0.14), 0, 0.01, 0);
+			if (t % 2 == 0) {
+				for (int k = 0; k < 3; k++) {
+					double aa = a + k * (Math.PI * 2 / 3);
+					double r = Math.min(radius, 0.05);
+					spawn(ParticleTypes.END_ROD, Math.cos(aa) * r, y, Math.sin(aa) * r, 0, 0.01, 0);
+					spawn(ParticleTypes.CRIT, Math.cos(aa) * Math.min(radius, 0.14), y * 0.7,
+							Math.sin(aa) * Math.min(radius, 0.14), 0, 0.01, 0);
+				}
 			}
 			// 金色花雨：两次小范围抛洒
 			if (t == 5 || t == 14) {
 				sound(SoundEvents.NOTE_BLOCK_CHIME.value(), 0.45f, 2.0f);
-				for (int i = 0; i < 14; i++) {
+				for (int i = 0; i < 14; i += 2) {
 					double aa = Math.PI * 2 * i / 14;
 					double r = Math.min(radius, 0.08 + (i % 3) * 0.07);
 					spawn(ParticleTypes.HAPPY_VILLAGER, Math.cos(aa) * r, 0.14, Math.sin(aa) * r, 0, 0.03, 0);
@@ -276,26 +295,28 @@ public final class TableTileEffect {
 			if (t == 0) {
 				sound(SoundEvents.AMETHYST_BLOCK_CHIME, 0.9f, 1.2f);
 				sound(SoundEvents.ENDER_DRAGON_FLAP, 0.3f, 1.6f);
-				for (int i = 0; i < 20; i++) {
+				for (int i = 0; i < 20; i += 2) {
 					double a = Math.PI * 2 * i / 20;
 					double r = radius * 0.33;
 					spawn(ParticleTypes.END_ROD, Math.cos(a) * r, 0.06, Math.sin(a) * r,
 							Math.cos(a) * 0.01, 0.04, Math.sin(a) * 0.01);
 				}
 			}
-			// 双向螺旋：呼吸式扩缩，始终在上限内
+			// 双向螺旋：呼吸式扩缩，始终在上限内（隔 tick 生成，密度减半）
 			double phase = Math.max(0.2, Math.sin(Math.PI * t / duration));
 			double r = 0.05 + radius * 0.85 * phase;
 			double y = Math.min(height, 0.06 + t * 0.012);
-			for (int k = 0; k < 2; k++) {
-				double a = t * 0.5 + k * Math.PI;
-				spawn(ParticleTypes.ENCHANT, Math.cos(a) * r, y, Math.sin(a) * r, 0, 0, 0);
-				spawn(ParticleTypes.FIREWORK, Math.cos(-a) * r * 0.7, y * 0.7, Math.sin(-a) * r * 0.7, 0, 0, 0);
+			if (t % 2 == 0) {
+				for (int k = 0; k < 2; k++) {
+					double a = t * 0.5 + k * Math.PI;
+					spawn(ParticleTypes.ENCHANT, Math.cos(a) * r, y, Math.sin(a) * r, 0, 0, 0);
+					spawn(ParticleTypes.FIREWORK, Math.cos(-a) * r * 0.7, y * 0.7, Math.sin(-a) * r * 0.7, 0, 0, 0);
+				}
 			}
-			// 每 10 tick 一圈灵魂火束
-			if (t == 10 || t == 20) {
+			// 每 8 tick 一圈灵魂火束
+			if (t == 8 || t == 16) {
 				sound(SoundEvents.SOUL_ESCAPE.value(), 0.5f, 1.5f);
-				for (int i = 0; i < 8; i++) {
+				for (int i = 0; i < 8; i += 2) {
 					double a = Math.PI * 2 * i / 8;
 					double rr = Math.min(radius, 0.22);
 					spawn(ParticleTypes.SOUL_FIRE_FLAME, Math.cos(a) * rr, 0.02, Math.sin(a) * rr, 0, 0.03, 0);

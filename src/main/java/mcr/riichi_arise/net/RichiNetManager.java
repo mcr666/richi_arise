@@ -700,6 +700,8 @@ public final class RichiNetManager {
 			List<Integer> codes = parseCodes(river);
 			p.river.clear();
 			p.river.addAll(codes);
+			p.discards.clear();
+			p.discards.addAll(codes); // 外部投影无"被鸣走"信息：振听按当前牌河兜底
 		}
 		String melds = RichiNetProtocol.str(msg, "melds");
 		if (melds != null) {

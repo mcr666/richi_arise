@@ -693,8 +693,11 @@ public final class TileEfficiency {
 			double[] danger34, double dangerWeight, int rank) {
 		int n = handCodes.size();
 		int[] tiles = new int[34];
-		for (int c : handCodes)
+		for (int c : handCodes) {
+			if (mcr.riichi_arise.game.TileFlag.isWild(c))
+				continue; // 万能牌不计入牌种统计
 			tiles[codeToIndex(c)]++;
+		}
 		int[] left = new int[34];
 		for (int i = 0; i < 34; i++)
 			left[i] = Math.max(0, 4 - visible34[i]);
@@ -721,6 +724,8 @@ public final class TileEfficiency {
 		java.util.Arrays.fill(prefDiscard, -1);
 		for (int hi = 0; hi < n; hi++) {
 			int cc = mcr.riichi_arise.game.TileFlag.base(handCodes.get(hi));
+			if (cc > 36)
+				continue; // 万能牌不参与舍牌优先序
 			int dd = codeToIndex(cc);
 			if (prefDiscard[dd] < 0)
 				prefDiscard[dd] = hi;
@@ -729,11 +734,14 @@ public final class TileEfficiency {
 				prefDiscard[dd] = hi; // 已存红五，用普通牌替换（保留红五宝牌）
 		}
 
-		int bestIndex = codeToIndex(handCodes.get(n - 1)), secondIndex = bestIndex;
+		int bestIndex = -1, secondIndex = -1;
 		double bestScore = Double.NEGATIVE_INFINITY, secondScore = Double.NEGATIVE_INFINITY;
 		boolean[] seen = new boolean[34];
 		for (int hi = 0; hi < n; hi++) {
-			int d = codeToIndex(handCodes.get(hi));
+			int cc = mcr.riichi_arise.game.TileFlag.base(handCodes.get(hi));
+			if (cc > 36)
+				continue; // 万能牌固定留手，不参与舍牌评估
+			int d = codeToIndex(cc);
 			if (seen[d])
 				continue; // 同种牌只评估一次
 			seen[d] = true;
@@ -771,7 +779,9 @@ public final class TileEfficiency {
 				secondIndex = d;
 			}
 		}
-		int pick = rank >= 1 ? secondIndex : bestIndex;
+		int pick = (rank >= 1 && secondIndex >= 0) ? secondIndex : bestIndex;
+		if (pick < 0)
+			return n - 1; // 无普通牌可打（理论不可达）：摸切保底
 		return prefDiscard[pick] >= 0 ? prefDiscard[pick] : pick;
 	}
 
@@ -811,8 +821,11 @@ public final class TileEfficiency {
 			int calledCode, boolean allowChi) {
 		List<MeldOption> out = new ArrayList<>();
 		int[] tiles = new int[34];
-		for (int c : handCodes)
+		for (int c : handCodes) {
+			if (mcr.riichi_arise.game.TileFlag.isWild(c))
+				continue; // 万能牌不参与鸣牌
 			tiles[codeToIndex(c)]++;
+		}
 		int called = codeToIndex(calledCode);
 		int[] left = new int[34];
 		for (int i = 0; i < 34; i++)

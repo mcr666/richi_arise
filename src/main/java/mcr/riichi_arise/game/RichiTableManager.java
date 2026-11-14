@@ -38,6 +38,23 @@ public static mcr.riichi_arise.game.riichi.RiichiGame getGame(BlockPos origin) {
 	return GAMES.get(origin);
 }
 
+/** 按真人玩家查找其参战中的桌（PHASE_PLAYING 且占用座位）；seatOut[0] 回填座位号，返回桌状态（无则 null） */
+public static RichiTableState findPlaying(net.minecraft.server.level.ServerPlayer sp, int[] seatOut) {
+	String uuid = sp.getUUID().toString();
+	for (var e : TABLES.entrySet()) {
+		RichiTableState st = e.getValue();
+		if (st.phase != RichiTableState.PHASE_PLAYING)
+			continue;
+		for (int s = 0; s < st.playerCount; s++) {
+			if (uuid.equals(st.players[s]) && !st.npcUuids.contains(uuid)) {
+				seatOut[0] = s;
+				return st;
+			}
+		}
+	}
+	return null;
+}
+
 public static void setGame(BlockPos origin, mcr.riichi_arise.game.riichi.RiichiGame game) {
 	if (game == null)
 		GAMES.remove(origin);

@@ -36,8 +36,20 @@ public class RichiTableState {
 	public int gameType = 0;
 	/** 对局人数（大厅切换）：4=四人麻雀 3=三人麻雀；三麻只使用座位 0/1/2（座位 3 留空不参与） */
 	public int playerCount = 4;
-	/** 房间类型（大厅切换）：0=铁之间（标准）1=玻璃之间（无红宝牌，每种牌随机 3 张透明牌）2=紫水晶之间（备选牌） */
-	public static final int ROOM_TIE = 0, ROOM_GLASS = 1, ROOM_AMETHYST = 2;
+	/**
+	 * 房间类型（大厅切换）：0=铁之间（标准）1=玻璃之间（无红宝牌，每种牌随机 3 张透明牌）
+	 * 2=紫水晶之间（备选牌）3=钻石之间（规则同铁之间，但发牌保底：向听≤2 或 宝牌≥2）
+	 * 4=青金石之间·万象修罗（修罗之战框架 + 万能牌：配牌 12 普通 + 1 万能，强制换牌，最多 3 人和牌等）
+	 * 5=混沌之间（同时启用玻璃之间的透明牌、紫水晶备选牌、钻石保底配牌、青金石修罗规则）
+	 */
+	public static final int ROOM_TIE = 0, ROOM_GLASS = 1, ROOM_AMETHYST = 2, ROOM_DIAMOND = 3, ROOM_LAZURITE = 4,
+			ROOM_CHAOS = 5;
+
+	/** 该房间类型是否启用玻璃之间的透明牌规则（玻璃之间本体 + 混沌之间） */
+	public static boolean isGlassRoom(int roomType) {
+		return roomType == ROOM_GLASS || roomType == ROOM_CHAOS;
+	}
+
 	public int roomType = ROOM_TIE;
 	/**
 	 * 本局实际使用的房间类型（开局时从 {@link #roomType} 固定）。
@@ -53,6 +65,16 @@ public class RichiTableState {
 	public String candidates = "";
 	/** 紫水晶之间：当前正在选备选牌的座位（-1 = 无）。仅用于客户端提示，选牌本身仍走选项 HUD */
 	public int candidatePickSeat = -1;
+	/**
+	 * 青金石之间（万象修罗）：配牌后强制换牌阶段是否进行中（true = 等待各家提交 3 张待换牌）。
+	 * 换牌完成后置 false。仅本房型使用，其余房型恒 false。
+	 */
+	public boolean swapPending = false;
+	/**
+	 * 青金石之间：换牌阶段各座位已选中的手牌下标（逗号分隔，如 "0,3,7"；空串 = 未选）。
+	 * 下标 = 座位；服务端累积至各家提交 3 张后执行随机配对交换，仅用于同步/高亮提示。
+	 */
+	public final String[] swapPicks = { "", "", "", "" };
 	/**
 	 * 各家拔北数（三麻，雀魂规则）：拔出的北风牌张数，每张和牌时 +1 翻。resetHand 清零。
 	 * <p>拔北<b>不算副露</b>：不计入 {@link #melds}、不破坏门清；渲染经整桌快照的独立 kita 字段同步
@@ -173,12 +195,21 @@ public class RichiTableState {
 	public final int[] handsExposed = new int[4];
 	/** 对局中"投票结束对局"：各人类座位是否已投票（全员同意 → 强制终局） */
 	public final boolean[] endVotes = new boolean[4];
+	/** 开局时真人座位的 uuid 快照（AI 席为 null）：投票结束需本表所有座位均已投票，
+	 *  座位中途被 AI 接管（断线/换维度/被踢）后原真人玩家重连仍按此快照投票，不因接管而豁免 */
+	public final String[] humanPlayers = new String[4];
+	/** 对局偏好（各座位）：自动和牌（可荣和/自摸立即宣布）——跨局保留 */
+	public final boolean[] autoWin = new boolean[4];
+	/** 对局偏好（各座位）：关闭鸣牌（不吃/碰/杠，荣和不受影响）——每局目开始自动复位为关 */
+	public final boolean[] noClaims = new boolean[4];
 	/** 各家最近一次打牌是否手切（1 = 手切，0 = 摸切/无）：隐藏手牌的牌背动画 key 错位用 */
 	public final int[] lastTedashi = new int[4];
 	/** 各家最近一次打出的牌在手牌中的位置，编码 seat&lt;&lt;8|index（-1 = 无）：客户端播放切牌飞出的起点 */
 	public final int[] lastDiscardPos = { -1, -1, -1, -1 };
 	/** 各家和牌特效风格（0..3，来自各自"个人设定"，随快照下发，全桌都按和牌者的设置渲染） */
 	public final int[] winEffects = new int[4];
+	/** 修罗之战中盘自摸：公开自摸的那张牌 "座位,手牌下标,牌码"（空 = 无）；渲染时该张正面朝上，其余仍盖牌 */
+	public String tsumoReveal = "";
 	/** 手牌展示常量 */
 	public static final int HAND_STAND = 0, HAND_FACE_UP = 1, HAND_FACE_DOWN = 2;
 	/** 已揭开的宝牌指示牌叠数（开局 1，杠后 +1；渲染翻开对应上张） */

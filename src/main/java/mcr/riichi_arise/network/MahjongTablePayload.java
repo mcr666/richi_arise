@@ -46,7 +46,7 @@ public class MahjongTablePayload {
 			int turnSeat, int round, int roundWind, int honba, int carriedSticks,
 			int selectedSeat, int selectedIndex, int drawnSeat, int phase, int playerCount,
 			String bannerText, String bannerI18n, int[] discardPos, int roomType, String candidates, int candidatePickSeat,
-			int[] winEffects) implements CustomPacketPayload {
+			int[] winEffects, boolean swapPending, String[] swapPicks, String tsumoReveal) implements CustomPacketPayload {
 
 		public static final Type<ViewMessage> TYPE = new Type<>(
 				ResourceLocation.fromNamespaceAndPath(RichiiAriseMod.MODID, "richi_table"));
@@ -65,7 +65,7 @@ public class MahjongTablePayload {
 			}
 		}
 
-		/** 除 selectedSeat/Index 外全部渲染相关字段一致（判定"只是选中变化"用） */
+		/** 除 selectedSeat/Index 外全部渲染相关字段一致（判定"只是选中变化"用；换牌已选 swapPicks 变化走整桌重建，抬升按绝对位置计算） */
 		public boolean sameExceptSelection(ViewMessage b) {
 			ViewMessage a = this;
 			if (a.dealAnim() != b.dealAnim() || a.revealedIndicators() != b.revealedIndicators()
@@ -73,7 +73,7 @@ public class MahjongTablePayload {
 					|| a.round() != b.round() || a.roundWind() != b.roundWind() || a.honba() != b.honba()
 					|| a.carriedSticks() != b.carriedSticks() || a.drawnSeat() != b.drawnSeat()
 					|| a.phase() != b.phase() || a.playerCount() != b.playerCount() || a.roomType() != b.roomType()
-					|| a.candidatePickSeat() != b.candidatePickSeat())
+					|| a.candidatePickSeat() != b.candidatePickSeat() || a.swapPending() != b.swapPending())
 				return false;
 			return Arrays.equals(a.hands(), b.hands()) && Arrays.equals(a.hidden(), b.hidden())
 					&& Arrays.equals(a.tedashi(), b.tedashi()) && Arrays.equals(a.glassMask(), b.glassMask())
@@ -85,6 +85,7 @@ public class MahjongTablePayload {
 					&& Arrays.equals(a.handsExposed(), b.handsExposed()) && Arrays.equals(a.points(), b.points())
 					&& Arrays.equals(a.discardPos(), b.discardPos()) && Arrays.equals(a.names(), b.names())
 					&& Arrays.equals(a.winEffects(), b.winEffects())
+					&& Arrays.equals(a.swapPicks(), b.swapPicks())
 					&& Arrays.equals(a.avatarIds(), b.avatarIds())
 					&& Arrays.equals(a.avatarForms(), b.avatarForms())
 					&& Arrays.equals(a.avatarNames(), b.avatarNames())
@@ -92,6 +93,7 @@ public class MahjongTablePayload {
 					&& orEmpty(a.doraWall()).equals(orEmpty(b.doraWall()))
 					&& orEmpty(a.candidates()).equals(orEmpty(b.candidates()))
 					&& orEmpty(a.bannerText()).equals(orEmpty(b.bannerText()))
+					&& orEmpty(a.tsumoReveal()).equals(orEmpty(b.tsumoReveal()))
 					&& orEmpty(a.bannerI18n()).equals(orEmpty(b.bannerI18n()));
 		}
 	}
@@ -150,7 +152,7 @@ public class MahjongTablePayload {
 				msg.turnSeat(), msg.round(), msg.roundWind(), msg.honba(), msg.carriedSticks(),
 				msg.selectedSeat(), msg.selectedIndex(), msg.drawnSeat(), msg.phase(), msg.playerCount(),
 				msg.bannerText(), msg.bannerI18n(), msg.discardPos(), msg.roomType(), msg.candidates(), msg.candidatePickSeat(),
-				msg.winEffects());
+				msg.winEffects(), msg.swapPending(), msg.swapPicks(), msg.tsumoReveal());
 	}
 
 	private static void evict() {
@@ -269,11 +271,15 @@ public class MahjongTablePayload {
 		buf.writeUtf(orEmpty(msg.bannerI18n()), 1024); // 横幅本地化键+参数（空 = 按 bannerText 原文渲染）
 		for (int i = 0; i < 4; i++)
 			buf.writeVarInt(msg.discardPos()[i]); // 各家最近打出的牌在原手牌中的位置（飞行起点）
-		buf.writeVarInt(msg.roomType()); // 对局类型（0=铁之间 / 1=玻璃之间 / 2=紫水晶之间）
+		buf.writeVarInt(msg.roomType()); // 对局类型（0=铁之间 / 1=玻璃之间 / 2=紫水晶之间 / 3=钻石之间 / 4=青金石之间 / 5=混沌之间）
 		buf.writeUtf(orEmpty(msg.candidates()), 32); // 紫水晶之间：公开备选牌区（牌谱记法，最多 3 张）
 		buf.writeVarInt(msg.candidatePickSeat()); // 紫水晶之间：正在选牌的座位（-1 = 无）
 		for (int i = 0; i < 4; i++)
 			buf.writeVarInt(msg.winEffects()[i]); // 各家和牌特效风格：全桌按和牌者自己的设置渲染
+		buf.writeBoolean(msg.swapPending()); // 青金石之间：配牌后强制换牌阶段是否进行中
+		for (int i = 0; i < 4; i++)
+			buf.writeUtf(orEmpty(msg.swapPicks()[i]), 32); // 各座位已选换牌手牌下标（逗号分隔，空 = 未选）
+		buf.writeUtf(orEmpty(msg.tsumoReveal()), 32); // 修罗之战中盘自摸：公开的摸牌 "座位,下标,牌码"（空 = 无）
 	}
 
 	private static ViewMessage read(RegistryFriendlyByteBuf buf) {
@@ -349,13 +355,18 @@ public class MahjongTablePayload {
 		int[] winEffects = new int[4];
 		for (int i = 0; i < 4; i++)
 			winEffects[i] = buf.readVarInt();
+		boolean swapPending = buf.readBoolean();
+		String[] swapPicks = new String[4];
+		for (int i = 0; i < 4; i++)
+			swapPicks[i] = buf.readUtf(32);
+		String tsumoReveal = buf.readUtf(32);
 		return new ViewMessage(origin, viewerSeat, openHand, dealAnim, hands, hidden, tedashi, glassMask, rivers,
 				melds, kita, kitaGlass,
 				riichiRiverIdx, riichiSticks, handsExposed, points, names,
 				avatarIds, avatarForms, avatarNames, avatarSkins, doraWall,
 				revealedIndicators, wallCount, turnSeat, round, roundWind, honba, carriedSticks,
 				selectedSeat, selectedIndex, drawnSeat, phase, playerCount, bannerText, bannerI18n, discardPos, roomType,
-				candidates, candidatePickSeat, winEffects);
+				candidates, candidatePickSeat, winEffects, swapPending, swapPicks, tsumoReveal);
 	}
 
 	public static void register() {

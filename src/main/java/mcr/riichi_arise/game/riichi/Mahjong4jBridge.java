@@ -29,6 +29,39 @@ public final class Mahjong4jBridge {
 	/** 北风牌面码（4z）：三麻拔北专用（与 RiichiGame.TILE_PEI / TableLayout.TILE_PEI 一致） */
 	private static final int TILE_PEI = 33;
 
+	/** 万能牌（青金石之间）可替代的牌种（内部代码）：1-9m / 1-9p / 1-9s / 1z-7z，排除赤宝牌 0/10/20 */
+	private static final int[] WILD_SUBSTITUTES = buildWildSubstitutes();
+
+	private static int[] buildWildSubstitutes() {
+		List<Integer> list = new ArrayList<>();
+		for (int suit = 0; suit < 3; suit++)
+			for (int d = 1; d <= 9; d++)
+				list.add(suit * 10 + d);
+		for (int z = 1; z <= 7; z++)
+			list.add(30 + z - 1); // 1z..7z = 30..36
+		int[] arr = new int[list.size()];
+		for (int i = 0; i < arr.length; i++)
+			arr[i] = list.get(i);
+		return arr;
+	}
+
+	/** 手牌中万能牌张数 */
+	private static int countWild(List<Integer> codes) {
+		int n = 0;
+		for (int c : codes)
+			if (mcr.riichi_arise.game.TileFlag.isWild(c))
+				n++;
+		return n;
+	}
+
+	/** 把全部万能牌替换为 sub（普通牌码）；无万能牌时原样返回 */
+	private static List<Integer> replaceAllWilds(List<Integer> codes, int sub) {
+		List<Integer> out = new ArrayList<>(codes.size());
+		for (int c : codes)
+			out.add(mcr.riichi_arise.game.TileFlag.isWild(c) ? sub : c);
+		return out;
+	}
+
 	/** 内部代码 → Mahjong4j Tile */
 	public static Tile toTile(int code) {
 		code = mcr.riichi_arise.game.TileFlag.base(code); // 透明牌标志位不参与判定
@@ -71,8 +104,18 @@ public final class Mahjong4jBridge {
 	}
 
 	/** 和牌形判定（不含役）：handCodes 必须含和牌张，共 14 张（副露后为 14-3×副露数）。
-	 *  注意：Mahjong4j 的 Hands 要求 comp 数组包含和牌张在内的全部牌（13+last 形式恒判不能和） */
+	 *  注意：Mahjong4j 的 Hands 要求 comp 数组包含和牌张在内的全部牌（13+last 形式恒判不能和）。
+	 *  <p>含万能牌（青金石之间）时枚举替代牌种（排除赤宝牌），任一可成和牌形即成立。</p> */
 	public static boolean isWinnableShape(List<Integer> handCodes, List<Fuuro> melds) {
+		if (countWild(handCodes) == 0)
+			return isWinnableShapeRaw(handCodes, melds);
+		for (int sub : WILD_SUBSTITUTES)
+			if (isWinnableShapeRaw(replaceAllWilds(handCodes, sub), melds))
+				return true;
+		return false;
+	}
+
+	private static boolean isWinnableShapeRaw(List<Integer> handCodes, List<Fuuro> melds) {
 		try {
 			int last = handCodes.get(handCodes.size() - 1);
 			int[] comp = toComp(handCodes);
@@ -190,6 +233,71 @@ public final class Mahjong4jBridge {
 	 * @param playerCount 参战人数（4=四麻 / 3=三麻）：自风按三角轮转，三麻不出现"北家"
 	 */
 	public static WinResult score(List<Integer> handWithWinTile, List<Fuuro> melds, int winnerSeat,
+			int dealerSeat, int roundWind, boolean tsumo, boolean riichi, boolean ippatsu,
+			Flags flags, List<Integer> doraIndicators, int kitaHan, int playerCount) {
+		if (countWild(handWithWinTile) == 0)
+			return scoreRaw(handWithWinTile, melds, winnerSeat, dealerSeat, roundWind, tsumo, riichi,
+					ippatsu, flags, doraIndicators, kitaHan, playerCount);
+		return scoreWild(handWithWinTile, melds, winnerSeat, dealerSeat, roundWind, tsumo, riichi, ippatsu,
+				flags, doraIndicators, kitaHan, playerCount);
+	}
+
+	/**
+	 * 万能牌（青金石之间）结算：把万能牌视为能带来最高打点的牌种（排除赤宝牌；选牌阶段不计里宝牌）。
+	 * <p>枚举替代牌种 → 逐一 {@link #scoreRaw} → 取打点最高（平局按 番 &gt; 符）；选定后用真实场况
+	 * （含里宝牌）重算。若选定替代牌种属表宝牌牌种，则额外 +1 番并追加伪役名 {@code WILD_DORA}
+	 * （真役满不加，因其宝牌本就不计）。</p>
+	 */
+	private static WinResult scoreWild(List<Integer> handWithWinTile, List<Fuuro> melds, int winnerSeat,
+			int dealerSeat, int roundWind, boolean tsumo, boolean riichi, boolean ippatsu,
+			Flags flags, List<Integer> doraIndicators, int kitaHan, int playerCount) {
+		// 选牌阶段不计里宝牌：清空里宝牌列表后再比较打点
+		Flags noUra = new Flags(flags.doubleRiichi(), flags.chankan(), flags.rinshan(), flags.haitei(),
+				flags.houtei(), List.of());
+		WinResult best = null;
+		int bestSub = -1;
+		for (int sub : WILD_SUBSTITUTES) {
+			WinResult r = scoreRaw(replaceAllWilds(handWithWinTile, sub), melds, winnerSeat, dealerSeat,
+					roundWind, tsumo, riichi, ippatsu, noUra, doraIndicators, kitaHan, playerCount);
+			if (!r.win())
+				continue;
+			if (best == null || betterThan(r, best)) {
+				best = r;
+				bestSub = sub;
+			}
+		}
+		if (best == null)
+			return new WinResult(false, false, 0, 0, List.of(), ScoreVal.ZERO);
+		// 用真实场况（含里宝牌）重算选定替代方案
+		WinResult real = scoreRaw(replaceAllWilds(handWithWinTile, bestSub), melds, winnerSeat, dealerSeat,
+				roundWind, tsumo, riichi, ippatsu, flags, doraIndicators, kitaHan, playerCount);
+		// 万能牌计为表宝牌牌种 → 额外 +1 番，并计入「宝牌」命中列表（与正常宝牌合并播报）
+		if (!real.trueYakuman() && doraIndicators.contains(bestSub))
+			return addWildDoraHan(real, winnerSeat == dealerSeat, bestSub);
+		return real;
+	}
+
+	/** 打点比较：先比荣和总点（通用打点基准），再比番、符 */
+	private static boolean betterThan(WinResult a, WinResult b) {
+		if (a.score().ron() != b.score().ron())
+			return a.score().ron() > b.score().ron();
+		if (a.han() != b.han())
+			return a.han() > b.han();
+		return a.fu() > b.fu();
+	}
+
+	/** 万能牌替代为表宝牌牌种时的额外 +1 番：重算点数，并把该牌种计入「宝牌」命中列表（与正常宝牌合并播报） */
+	private static WinResult addWildDoraHan(WinResult r, boolean isParent, int doraCode) {
+		int han = r.han() + 1;
+		List<Integer> doraHits = new ArrayList<>(r.doraHits());
+		doraHits.add(doraCode);
+		int k = han / 13;
+		ScoreVal s = k > 0 ? ScoreVal.yakuman(isParent, k)
+				: ScoreVal.of(Score.calculateScore(isParent, han, r.fu()));
+		return new WinResult(true, k > 0, han, r.fu(), r.yakuNames(), s, doraHits, r.uraHits(), r.redHits());
+	}
+
+	private static WinResult scoreRaw(List<Integer> handWithWinTile, List<Fuuro> melds, int winnerSeat,
 			int dealerSeat, int roundWind, boolean tsumo, boolean riichi, boolean ippatsu,
 			Flags flags, List<Integer> doraIndicators, int kitaHan, int playerCount) {
 		try {
@@ -404,12 +512,26 @@ public final class Mahjong4jBridge {
 				int c = mcr.riichi_arise.game.TileFlag.base(raw); // 透明牌标志不影响宝牌判定
 				if (c == 0 || c == 10 || c == 20) {
 					redHits.add(c);
-					continue;
+					// 红五按普通五参与表/里宝牌判定：指示牌为 4（宝牌 = 5）时红五同样计 1 张宝牌，
+					// 与番数计算（comp 把红五并入 5）保持一致
+					c = c / 10 * 10 + 5;
 				}
-				if (doraIndicators.contains(c))
+				// 多张指示牌指向同一种宝牌时按张数重复累计（如两张指示牌都是 4m → 每张 5m 计 2 张宝牌），
+				// 与上方番数累计（general.getDora() 逐张累加）保持一致
+				int doraMul = 0;
+				for (int d : doraIndicators)
+					if (mcr.riichi_arise.game.TileFlag.base(d) == c)
+						doraMul++;
+				for (int i = 0; i < doraMul; i++)
 					doraHits.add(c);
-				if (riichi && flags.uraDoras().contains(c))
-					uraHits.add(c);
+				if (riichi) {
+					int uraMul = 0;
+					for (int u : flags.uraDoras())
+						if (mcr.riichi_arise.game.TileFlag.base(u) == c)
+							uraMul++;
+					for (int i = 0; i < uraMul; i++)
+						uraHits.add(c);
+				}
 			}
 			// 红宝牌翻数：手牌+副露中的红五（0/10/20）每张 +1 翻
 			int red = redHits.size();
@@ -429,14 +551,24 @@ public final class Mahjong4jBridge {
 			// 因此这里把北同步写入 doraHits/uraHits，供结算列表与语音按张数聚合。
 			if (kitaHan > 0) {
 				han += kitaHan; // 抜きドラ
-				if (doraIndicators.contains(TILE_PEI)) {
-					han += kitaHan;
-					for (int i = 0; i < kitaHan; i++)
+				// 同种指示牌多张时按张数重复累计（与手牌宝牌同规则）
+				int peiMul = 0;
+				for (int d : doraIndicators)
+					if (mcr.riichi_arise.game.TileFlag.base(d) == TILE_PEI)
+						peiMul++;
+				if (peiMul > 0) {
+					han += kitaHan * peiMul;
+					for (int i = 0; i < kitaHan * peiMul; i++)
 						doraHits.add(TILE_PEI);
 				}
-				if (riichi && flags.uraDoras().contains(TILE_PEI)) {
-					han += kitaHan;
-					for (int i = 0; i < kitaHan; i++)
+				int uraPeiMul = 0;
+				if (riichi)
+					for (int u : flags.uraDoras())
+						if (mcr.riichi_arise.game.TileFlag.base(u) == TILE_PEI)
+							uraPeiMul++;
+				if (uraPeiMul > 0) {
+					han += kitaHan * uraPeiMul;
+					for (int i = 0; i < kitaHan * uraPeiMul; i++)
 						uraHits.add(TILE_PEI);
 				}
 			}

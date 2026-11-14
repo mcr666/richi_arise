@@ -87,9 +87,6 @@ public class MahjongLobbyPayloads {
 									message.thinkIdx(), message.aiSpeedIdx(), message.ownVoice(), seatVoices,
 									message.playerCount(), message.roomType(), message.ownWinEffect(),
 									message.ownRiichiEffect(), message.tobi(), message.kuikae()));
-					// 对局开始：确保入座玩家语音已下载到本地缓存（幂等，仅缺时下载）
-					if (message.phase() == mcr.riichi_arise.game.RichiTableState.PHASE_PLAYING)
-						mcr.riichi_arise.voice.VoiceClient.onGameStart(message.originPacked());
 				});
 			}
 		}
@@ -142,13 +139,9 @@ public class MahjongLobbyPayloads {
 			if (context.flow() == PacketFlow.CLIENTBOUND) {
 				context.enqueueWork(() -> {
 					BlockPos origin = BlockPos.of(message.originPacked());
-					// 该桌已被雀魂连接接管：右键风盘直接打开连接控制面板，不再打开大厅管理界面
-					var state = CLIENT_NET.get(message.originPacked());
-					if (state != null && state.takeover())
-						mcr.riichi_arise.client.RichiNetScreen.open(origin);
-					else if (net.minecraft.client.Minecraft.getInstance().screen == null)
-						net.minecraft.client.Minecraft.getInstance().setScreen(
-								new mcr.riichi_arise.client.MahjongLobbyScreen(origin));
+					// 屏幕逻辑收在客户端类（openFromNetwork）：专用服务端不加载 Screen，
+					// 接管桌改开连接控制面板、否则打开大厅管理界面
+					mcr.riichi_arise.client.MahjongLobbyScreen.openFromNetwork(origin);
 				});
 			}
 		}
@@ -200,8 +193,10 @@ public class MahjongLobbyPayloads {
 	/**
 	 * S→C：对局开始时的房间类型标题（原版 toast）。
 	 * headerKey = 顶行语言键（铁之间 / 玻璃之间）；bodyKey = 正文语言键；color = 正文颜色。
+	 * chaos = true 时改走屏幕中央的混沌之间演出（xxx混沌之间xxx，颜色循环后渐隐）。
 	 */
-	public record RoomTitlePayload(String headerKey, String bodyKey, int color) implements CustomPacketPayload {
+	public record RoomTitlePayload(String headerKey, String bodyKey, int color, boolean chaos)
+			implements CustomPacketPayload {
 		public static final Type<RoomTitlePayload> TYPE = new Type<>(
 				ResourceLocation.fromNamespaceAndPath(RichiiAriseMod.MODID, "richi_room_title"));
 
@@ -210,8 +205,10 @@ public class MahjongLobbyPayloads {
 					buf.writeUtf(msg.headerKey() == null ? "" : msg.headerKey(), 64);
 					buf.writeUtf(msg.bodyKey() == null ? "" : msg.bodyKey(), 64);
 					buf.writeInt(msg.color());
+					buf.writeBoolean(msg.chaos());
 				},
-				(RegistryFriendlyByteBuf buf) -> new RoomTitlePayload(buf.readUtf(64), buf.readUtf(64), buf.readInt()));
+				(RegistryFriendlyByteBuf buf) -> new RoomTitlePayload(buf.readUtf(64), buf.readUtf(64), buf.readInt(),
+						buf.readBoolean()));
 
 		@Override
 		public Type<RoomTitlePayload> type() {
@@ -220,9 +217,16 @@ public class MahjongLobbyPayloads {
 
 		public static void handleData(final RoomTitlePayload message, final IPayloadContext context) {
 			if (context.flow() == PacketFlow.CLIENTBOUND) {
-				context.enqueueWork(() -> mcr.riichi_arise.client.RoomTitleOverlay.show(
-						net.minecraft.network.chat.Component.translatable(message.headerKey()),
-						net.minecraft.network.chat.Component.translatable(message.bodyKey()), message.color()));
+				context.enqueueWork(() -> {
+					if (message.chaos()) {
+						mcr.riichi_arise.client.RoomTitleOverlay.showChaos(
+								net.minecraft.network.chat.Component.translatable(message.bodyKey()));
+					} else {
+						mcr.riichi_arise.client.RoomTitleOverlay.show(
+								net.minecraft.network.chat.Component.translatable(message.headerKey()),
+								net.minecraft.network.chat.Component.translatable(message.bodyKey()), message.color());
+					}
+				});
 			}
 		}
 	}

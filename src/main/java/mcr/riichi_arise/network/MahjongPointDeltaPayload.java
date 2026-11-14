@@ -27,7 +27,7 @@ public class MahjongPointDeltaPayload {
 	}
 
 	public record PointDeltaMessage(int mode, long originPacked, int playerCount, java.util.List<String> names,
-			java.util.List<Integer> before, java.util.List<Integer> after) implements CustomPacketPayload {
+			java.util.List<Integer> before, java.util.List<Integer> after, boolean fast) implements CustomPacketPayload {
 		public static final Type<PointDeltaMessage> TYPE = new Type<>(
 				ResourceLocation.fromNamespaceAndPath(RichiiAriseMod.MODID, "richi_point_delta"));
 
@@ -64,6 +64,7 @@ public class MahjongPointDeltaPayload {
 			buf.writeVarInt(msg.before().get(i));
 		for (int i = 0; i < 4; i++)
 			buf.writeVarInt(msg.after().get(i));
+		buf.writeBoolean(msg.fast());
 	}
 
 	private static PointDeltaMessage read(RegistryFriendlyByteBuf buf) {
@@ -79,17 +80,23 @@ public class MahjongPointDeltaPayload {
 		java.util.List<Integer> after = new java.util.ArrayList<>(4);
 		for (int i = 0; i < 4; i++)
 			after.add(buf.readVarInt());
-		return new PointDeltaMessage(mode, origin, playerCount, names, before, after);
+		return new PointDeltaMessage(mode, origin, playerCount, names, before, after, buf.readBoolean());
 	}
 
 	/** 服务端便捷方法：向单个玩家推送点数变化界面 */
 	public static void sendTo(net.minecraft.server.level.ServerPlayer player, long originPacked, int playerCount,
 			String[] names, int[] before, int[] after) {
+		sendTo(player, originPacked, playerCount, names, before, after, false);
+	}
+
+	/** 同上；fast=true 时客户端用精简时间轴（延迟小、自动确认 1s），用于修罗之战中盘和牌的快速结算 */
+	public static void sendTo(net.minecraft.server.level.ServerPlayer player, long originPacked, int playerCount,
+			String[] names, int[] before, int[] after, boolean fast) {
 		net.neoforged.neoforge.network.PacketDistributor.sendToPlayer(player,
 				new PointDeltaMessage(MODE_SHOW, originPacked, playerCount,
 						java.util.Arrays.asList(names),
 						java.util.List.of(before[0], before[1], before[2], before[3]),
-						java.util.List.of(after[0], after[1], after[2], after[3])));
+						java.util.List.of(after[0], after[1], after[2], after[3]), fast));
 	}
 
 	/** 服务端便捷方法：关闭某玩家已打开的点数变化界面 */
@@ -97,7 +104,7 @@ public class MahjongPointDeltaPayload {
 		net.neoforged.neoforge.network.PacketDistributor.sendToPlayer(player,
 				new PointDeltaMessage(MODE_CLOSE, 0, 4,
 						java.util.List.of("", "", "", ""),
-						java.util.List.of(0, 0, 0, 0), java.util.List.of(0, 0, 0, 0)));
+						java.util.List.of(0, 0, 0, 0), java.util.List.of(0, 0, 0, 0), false));
 	}
 
 	public static void register() {

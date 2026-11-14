@@ -145,7 +145,7 @@ public final class YakuVoices {
 	private static final String FAN_SENTINEL = "dora";
 
 	/**
-	 * 报番语音角色兜底：该角色没有报番音频时，借用资源包内有报番音频的默认角色（第一个可用的离线角色），
+	 * 报番语音角色兜底：该角色没有报番音频时，借用资源包内有报番音频的默认角色（第一个可用的内置角色），
 	 * 保证和牌仍能报出役种（音色不同），并写日志提示缺资源，便于后续补专属 {@code fan/*.mp3}。
 	 */
 	private static String resolveFanVoice(String voiceId, List<String> files) {
@@ -162,9 +162,9 @@ public final class YakuVoices {
 		return voiceId;
 	}
 
-	/** 除 exclude 外第一个有报番音频的离线角色（没有则返回空串）：仅用于整轮换音色的兜底 */
+	/** 除 exclude 外第一个有报番音频的内置角色（没有则返回空串）：仅用于整轮换音色的兜底 */
 	private static String fanVoiceOtherThan(String exclude) {
-		for (String id : VoiceCharacters.OFFLINE_IDS) {
+		for (String id : VoiceCharacters.BUILTIN_IDS) {
 			if (id.equals(exclude))
 				continue;
 			if (hasFanVoice(id))

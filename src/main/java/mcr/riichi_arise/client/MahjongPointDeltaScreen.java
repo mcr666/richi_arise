@@ -20,13 +20,11 @@ public class MahjongPointDeltaScreen extends Screen {
 	//   1s    点数变动家的点数开始快速浮动，1s 内（即 2s 时）变到最终点数
 	//   2s    点数落定 → 四家名字从变动前排名滑动到变动后点数排名（1~n 位）
 	//   3s    排序完成 → 开始 3s 自动确认倒计时，超时回传推进
-	private static final int POINTS_DELAY_TICKS = 20;       // 1s：点数开始浮动前
-	private static final int POINTS_DURATION_TICKS = 20;    // 1s（速度已调快一倍）：浮动到最终点数
-	private static final int REORDER_START = POINTS_DELAY_TICKS + POINTS_DURATION_TICKS; // 2s：点数落定，开始排序
-	private static final int REORDER_DURATION_TICKS = 20;   // 1s：名字按排名滑动
-	private static final int COUNTDOWN_START = REORDER_START + REORDER_DURATION_TICKS;   // 3s：排序完成，开始倒计时
-	private static final int COUNTDOWN_TICKS = 60;          // 3s：自动确认倒计时
-	private static final int AUTO_CONFIRM_TICKS = COUNTDOWN_START + COUNTDOWN_TICKS;     // 6s：动画+倒计时合计
+	// 精简版（fast，修罗之战中盘和牌）：整体时间轴压缩，自动确认 2.5s（共约 3.5s）
+	private static final int FAST_POINTS_DELAY_TICKS = 4;    // 0.2s：点数开始浮动前
+	private static final int FAST_POINTS_DURATION_TICKS = 8; // 0.4s：浮动到最终点数
+	private static final int FAST_REORDER_DURATION_TICKS = 8; // 0.4s：名字按排名滑动
+	private static final int FAST_COUNTDOWN_TICKS = 50;      // 2.5s：自动确认倒计时（留足看清本次收支的时间）
 
 	private MahjongPointDeltaPayload.PointDeltaMessage data;
 	private int age;
@@ -38,10 +36,29 @@ public class MahjongPointDeltaScreen extends Screen {
 	private static int waitTicks;
 	/** 本界面是否已发过 settle_confirm（避免重复发包） */
 	private boolean confirmSent;
+	/** 本次时间轴（普通结算 / 精简快速结算各一套，构造时确定） */
+	private final int pointsDelay, pointsDuration, reorderStart, reorderDuration, countdownStart, countdownTicks,
+			autoConfirm;
 
 	private MahjongPointDeltaScreen(MahjongPointDeltaPayload.PointDeltaMessage data) {
 		super(Component.translatable("gui.riichi_arise.settlement.title"));
 		this.data = data;
+		if (data.fast()) {
+			pointsDelay = FAST_POINTS_DELAY_TICKS;
+			pointsDuration = FAST_POINTS_DURATION_TICKS;
+			reorderStart = pointsDelay + pointsDuration;
+			reorderDuration = FAST_REORDER_DURATION_TICKS;
+			countdownStart = reorderStart + reorderDuration;
+			countdownTicks = FAST_COUNTDOWN_TICKS;
+		} else {
+			pointsDelay = 20;      // 1s：点数开始浮动前
+			pointsDuration = 20;   // 1s：浮动到最终点数
+			reorderStart = pointsDelay + pointsDuration;
+			reorderDuration = 20;  // 1s：名字按排名滑动
+			countdownStart = reorderStart + reorderDuration;
+			countdownTicks = 60;   // 3s：自动确认倒计时
+		}
+		autoConfirm = countdownStart + countdownTicks;
 	}
 
 	public static void open(MahjongPointDeltaPayload.PointDeltaMessage data) {
@@ -109,7 +126,7 @@ public class MahjongPointDeltaScreen extends Screen {
 	public void tick() {
 		if (waiting)
 			return;
-		if (++age >= AUTO_CONFIRM_TICKS)
+		if (++age >= autoConfirm)
 			confirm();
 	}
 
@@ -118,13 +135,16 @@ public class MahjongPointDeltaScreen extends Screen {
 	private void confirm() {
 		if (this.data == null)
 			return;
-		if (!isParticipant()) {
-			onClose();
-			return;
-		}
+		// 确认包不依赖参战者判定：判定只是"界面归属"的辅助，
+		// 一旦误判会让真正的参战者发不出确认，只能干等到服务端兜底倒计时
 		if (!confirmSent) {
 			confirmSent = true;
 			sendConfirm(this.data.originPacked());
+		}
+		if (!isParticipant()) {
+			// 观战者：确认不会推进服务端结算，直接关闭界面
+			onClose();
+			return;
 		}
 		waiting = true;
 		waitingForOthers = true;
@@ -175,9 +195,9 @@ public class MahjongPointDeltaScreen extends Screen {
 
 	/** 点数动画：1s 延迟后 1s 内从原点数快速浮动到最终点数（缓出：先快后落定） */
 	private int animatedPoints(int before, int after) {
-		if (age < POINTS_DELAY_TICKS)
+		if (age < pointsDelay)
 			return before;
-		double p = (age - POINTS_DELAY_TICKS) / (double) POINTS_DURATION_TICKS;
+		double p = (age - pointsDelay) / (double) pointsDuration;
 		p = Math.max(0.0, Math.min(1.0, p));
 		double e = 1 - Math.pow(1 - p, 3); // ease-out：快速起跳、末尾落定
 		return (int) Math.round(before + (after - before) * e);
@@ -237,8 +257,8 @@ public class MahjongPointDeltaScreen extends Screen {
 			int initialRow = indexOf(beforeOrder, seat);
 			int targetRow = indexOf(afterOrder, seat);
 			double rowF = initialRow;
-			if (age >= REORDER_START) {
-				double p = Math.min(1.0, (age - REORDER_START) / (double) REORDER_DURATION_TICKS);
+			if (age >= reorderStart) {
+				double p = Math.min(1.0, (age - reorderStart) / (double) reorderDuration);
 				double e = p * p * (3 - 2 * p); // smoothstep
 				rowF = initialRow + (targetRow - initialRow) * e;
 			}
@@ -253,8 +273,8 @@ public class MahjongPointDeltaScreen extends Screen {
 		// 3s 自动确认倒计时：名字排序完成后才开始（正在等待其他玩家时改为显示等待提示）
 		if (waitingForOthers) {
 			g.drawCenteredString(this.font, waitingText(), this.width / 2, y + n * rowH + 2, 0xFFAA55);
-		} else if (age >= COUNTDOWN_START) {
-			int remain = Math.max(0, (AUTO_CONFIRM_TICKS - age + 19) / 20);
+		} else if (age >= countdownStart) {
+			int remain = Math.max(0, (autoConfirm - age + 19) / 20);
 			String cd = Component.translatable("gui.riichi_arise.points.confirm_in", remain).getString();
 			g.drawCenteredString(this.font, cd, this.width / 2, y + n * rowH + 2, 0xFFAA55);
 		}

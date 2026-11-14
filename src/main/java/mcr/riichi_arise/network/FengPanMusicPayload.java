@@ -5,6 +5,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.ComponentSerialization;
 import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.PacketFlow;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
@@ -44,8 +45,8 @@ public class FengPanMusicPayload {
 		}
 
 		public static void handleData(final PlayRecord message, final IPayloadContext context) {
-			// 客户端专属处理（FengPanMusicClient 引用客户端类，服务端不加载）
-			context.enqueueWork(() -> mcr.riichi_arise.client.FengPanMusicClient.play(message));
+			if (context.flow() == PacketFlow.CLIENTBOUND)
+				context.enqueueWork(() -> mcr.riichi_arise.client.FengPanMusicClient.play(message));
 		}
 	}
 

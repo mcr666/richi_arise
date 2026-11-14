@@ -51,6 +51,8 @@ public class RiichiGame {
 	private final int totalHands;
 	/** 和牌/终局结算数据缓存（finishRound 前构造；多家荣和逐个推送：确认或超时后再弹下一家） */
 	private final List<MahjongSettlementPayload.Settlement> pendingSettlements = new ArrayList<>();
+	/** 与 pendingSettlements 一一对应的和牌座位（青金石之间跨多次和牌累积，终局统一展示时按此映射） */
+	private final List<Integer> pendingSettlementSeats = new ArrayList<>();
 	/** 待展示的结算队列（含和牌座位；逐个展示，前一家确认/超时后才推下一家，语音与界面同步不互相打断） */
 	private record SettlementShow(MahjongSettlementPayload.Settlement data, int seat) {
 	}
@@ -64,6 +66,8 @@ public class RiichiGame {
 	private int settlePhase;
 	/** 本局开始时点数快照（点数变化界面展示全场收支） */
 	private int[] pointsBeforeRound = new int[4];
+	/** 本次和牌前的点数快照（青金石中盘和牌的精简点数界面只显示"这一次和牌"的收支） */
+	private int[] pointsBeforeWin = new int[4];
 	/** 待结算界面全部关闭后播报的聊天行（和牌/流局满贯播报延后到点数变化界面结束） */
 	private String pendingChat = "";
 	/** 报番役种缓存（seat → 英文役名列表）：doMultiRon/doTsumo 填入，finishRound 发送报番包后清空 */
@@ -142,6 +146,20 @@ public class RiichiGame {
 	private final boolean glassMode;
 	/** 紫水晶之间：摸牌改为从始终公开的备选牌区中选牌（见 {@link #candidates}） */
 	private final boolean amethystMode;
+	/** 钻石之间：规则同铁之间，但每局发牌对每家保底——向听≤2 或 总宝牌数≥2，否则只重发该家 */
+	private final boolean diamondMode;
+	/**
+	 * 青金石之间（万象修罗）：修罗之战框架（配牌后强制换牌、最多 3 人和牌、立即结算、自摸损、无连庄等）
+	 * 叠加万能牌玩法（配牌每座位 12 普通 + 1 万能，万能牌固定留手仅在和牌时生效）。
+	 */
+	private final boolean lazuriteMode;
+	/**
+	 * 混沌之间：同时启用玻璃之间的透明牌、紫水晶之间的备选牌、钻石之间的保底配牌与青金石之间的修罗规则
+	 * （配牌 12 普通 + 1 万能、强制换牌、最多 3 人和牌、立即结算、无连庄等）。
+	 */
+	private final boolean chaosMode;
+	/** 钻石之间单家重发次数上限（概率上不可能触顶；触顶时采用最后一次结果并写日志，避免卡死 tick） */
+	private static final int MAX_DIAMOND_ATTEMPTS = 200;
 	/** 备选牌区（紫水晶之间）：庄家首切后从牌山翻出，最多 3 张；未选走的牌一直保留 */
 	private final List<Integer> candidates = new ArrayList<>();
 	/** 备选牌区是否已建立（庄家首切后置位；此前庄家首摸仍为正常摸牌） */
@@ -153,13 +171,41 @@ public class RiichiGame {
 	/** 本次选牌是否替代杠/拔北后的岭上摸牌（选中的牌计岭上开花） */
 	private boolean pickRinshan;
 
+	/** 青金石之间（修罗之战）：配牌后强制换牌阶段是否进行中 */
+	private boolean swapActive;
+	/** 青金石之间：换牌阶段各座位已选中的手牌下标（有序，最多 3；满 3 即提交） */
+	@SuppressWarnings("unchecked")
+	private final List<Integer>[] swapSel = new List[4];
+	/** 青金石之间：换牌阶段已提交 3 张的座位 */
+	private final boolean[] swapSubmitted = new boolean[4];
+	/** 青金石之间：换牌阶段提交截止时刻（tick；0 = 无） */
+	private long swapDeadline;
+	/** 换牌阶段时长（刻，= 15s；到点未提交者由 AI 兜底） */
+	private static final int SWAP_WINDOW_TICKS = 300;
+	/** 青金石之间：本局换牌方向（0=顺时针 1=逆时针 2=对换；三麻无对换，只有 0/1） */
+	private static final int SWAP_DIR_CW = 0, SWAP_DIR_CCW = 1, SWAP_DIR_ACROSS = 2;
+	private int swapDirection = SWAP_DIR_CW;
+
+	/** 青金石之间（修罗之战）：本局已和牌退出的座位（盖伏、不再摸打与响应） */
+	private final boolean[] finished = new boolean[4];
+	/** 青金石之间：本局累计和牌退出人数（≥3 或活跃≤1 → 本局终了） */
+	private int winCount;
+	/** 青金石之间：和牌立即结算展示完成后，续打应从该座位的下家开始（-1 = 不续打，正常收局） */
+	private int lazuriteResumeSeat = -1;
+	/** 青金石之间：中盘和牌的精简点数变化界面是否待确认/已弹出（确认后立即续打，不等倒计时） */
+	private boolean lazuriteDeltaPending;
+	private boolean lazuriteDeltaShown;
+
 	@SuppressWarnings("unchecked")
 	public RiichiGame(ServerLevel level, BlockPos origin, RichiTableState st) {
 		this.level = level;
 		this.origin = origin;
 		this.st = st;
-		this.glassMode = st.roomType == RichiTableState.ROOM_GLASS;
-		this.amethystMode = st.roomType == RichiTableState.ROOM_AMETHYST;
+		this.glassMode = st.roomType == RichiTableState.ROOM_GLASS || st.roomType == RichiTableState.ROOM_CHAOS;
+		this.chaosMode = st.roomType == RichiTableState.ROOM_CHAOS;
+		this.amethystMode = st.roomType == RichiTableState.ROOM_AMETHYST || chaosMode;
+		this.diamondMode = st.roomType == RichiTableState.ROOM_DIAMOND || chaosMode;
+		this.lazuriteMode = st.roomType == RichiTableState.ROOM_LAZURITE || chaosMode;
 		this.film = st.film; // 剧本牌局（临时）：null = 普通对局
 		this.totalHands = switch (st.gameType) {
 			case 1 -> st.playerCount; // 东风战（三麻 3 局 / 四麻 4 局）
@@ -179,6 +225,8 @@ public class RiichiGame {
 				pname = ai ? aiSeatName(seat) : nameOf(uuid);
 			ps[seat] = new RiichiPlayer(seat, uuid, pname, ai, st.points[seat]);
 		}
+		for (int i = 0; i < 4; i++)
+			swapSel[i] = new ArrayList<>();
 	}
 
 	/** AI 结算显示名：统一走 RiichiBot.seatDisplayName（与 Marker 名牌/管理界面形态名同源）。
@@ -251,18 +299,22 @@ public class RiichiGame {
 		pushRoomTitle();
 	}
 
-	/** 对局开始标题：铁之间（灰）/ 玻璃之间（浅蓝）/ 紫水晶之间（紫） */
+	/** 对局开始标题：铁之间（灰）/ 玻璃之间（浅蓝）/ 紫水晶之间（紫）/ 钻石之间（浅青白）/ 青金石之间（靛蓝）/ 混沌之间（屏幕中央彩色乱码演出） */
 	private static final String[] ROOM_TITLE_KEYS = { "title.riichi_arise.room_tie",
-			"title.riichi_arise.room_glass", "title.riichi_arise.room_amethyst" };
-	/** 标题行（原版 toast 顶行）：铁之间 / 玻璃之间 / 紫水晶之间 */
+			"title.riichi_arise.room_glass", "title.riichi_arise.room_amethyst", "title.riichi_arise.room_diamond",
+			"title.riichi_arise.room_lazurite", "title.riichi_arise.room_chaos" };
+	/** 标题行（原版 toast 顶行）：铁之间 / 玻璃之间 / 紫水晶之间 / 钻石之间 / 青金石之间 / 混沌之间 */
 	private static final String[] ROOM_TITLE_HEADER_KEYS = { "gui.riichi_arise.lobby.room_tie",
-			"gui.riichi_arise.lobby.room_glass", "gui.riichi_arise.lobby.room_amethyst" };
-	private static final int[] ROOM_TITLE_COLORS = { 0xFF9E9E9E, 0xFF9BD8FF, 0xFFC38BFF };
+			"gui.riichi_arise.lobby.room_glass", "gui.riichi_arise.lobby.room_amethyst",
+			"gui.riichi_arise.lobby.room_diamond", "gui.riichi_arise.lobby.room_lazurite",
+			"gui.riichi_arise.lobby.room_chaos" };
+	private static final int[] ROOM_TITLE_COLORS = { 0xFF9E9E9E, 0xFF9BD8FF, 0xFFC38BFF, 0xFF8FF4FF, 0xFF5A6BFF,
+			0xFFC46BFF };
 
 	private void pushRoomTitle() {
 		int room = Math.floorMod(st.roomType, ROOM_TITLE_KEYS.length);
 		var payload = new mcr.riichi_arise.network.MahjongLobbyPayloads.RoomTitlePayload(ROOM_TITLE_KEYS[room],
-				ROOM_TITLE_HEADER_KEYS[room], ROOM_TITLE_COLORS[room]);
+				ROOM_TITLE_HEADER_KEYS[room], ROOM_TITLE_COLORS[room], st.roomType == RichiTableState.ROOM_CHAOS);
 		for (int s = 0; s < pc(); s++) {
 			ServerPlayer p = st.playerOf(level, s);
 			if (p != null && !ps[s].ai)
@@ -289,6 +341,7 @@ public class RiichiGame {
 		for (RiichiPlayer p : ps) {
 			p.hand.clear();
 			p.river.clear();
+			p.discards.clear();
 			p.melds.clear();
 			p.riichi = false; // 立直不跨局（此前漏重置：下一局每巡被锁定自动摸切）
 			p.doubleRiichi = false;
@@ -297,6 +350,19 @@ public class RiichiGame {
 			p.firstDrawDone = false;
 			p.discardCount = 0;
 			p.kitaCount = 0; // 拔北数每局清零
+		}
+		java.util.Arrays.fill(st.noClaims, false); // 关闭鸣牌每局目开始自动复位（自动和牌跨局保留）
+		// 复位后把偏好当前值同步给在线真人（客户端 Tab 叠加层复选框据此显示）
+		for (int s = 0; s < pc(); s++) {
+			if (ps[s].ai)
+				continue;
+			try {
+				ServerPlayer sp = level.getServer().getPlayerList()
+						.getPlayer(java.util.UUID.fromString(ps[s].uuid));
+				if (sp != null)
+					mcr.riichi_arise.network.MahjongSettingsPayloads.sendGamePref(sp, st.autoWin[s], st.noClaims[s]);
+			} catch (IllegalArgumentException ignored) {
+			}
 		}
 		discardsThisHand = 0;
 		anyCall = false;
@@ -317,6 +383,19 @@ public class RiichiGame {
 		pickRinshan = false;
 		st.candidates = "";
 		st.candidatePickSeat = -1;
+		// 青金石之间（修罗之战）：换牌阶段复位（配牌后强制换牌由 beginSwapPhase 启动）
+		swapActive = false;
+		swapDeadline = 0;
+		st.tsumoReveal = ""; // 新一局：清除上一局公开的自摸牌
+		java.util.Arrays.fill(swapSubmitted, false);
+		st.swapPending = false;
+		java.util.Arrays.fill(st.swapPicks, "");
+		for (int i = 0; i < 4; i++)
+			swapSel[i].clear();
+		// 青金石之间（修罗之战）：本局和牌退出记录复位
+		java.util.Arrays.fill(finished, false);
+		winCount = 0;
+		lazuriteResumeSeat = -1;
 		java.util.Arrays.fill(ippatsu, false);
 		java.util.Arrays.fill(st.kita, 0);
 		java.util.Arrays.fill(st.kitaGlass, 0);
@@ -340,11 +419,29 @@ public class RiichiGame {
 		// 发牌：仅参战座位各 13 张（三麻发 3×13，座位 3 留空不参与）
 		for (int s = 0; s < pc(); s++) {
 			RiichiPlayer p = ps[s];
-			for (int i = 0; i < 13; i++) {
-				int code = wall.draw();
-				if (code < 0)
-					break;
-				p.hand.add(code);
+			if (chaosMode && film == null) {
+				// 混沌之间：钻石保底配牌取 13 张，再放回 1 张换成青金石万能牌（万能牌至少不弱于被换下的牌）
+				p.hand.addAll(drawChaosHand());
+			} else if (diamondMode && film == null) {
+				// 钻石之间：单家保底配牌（向听≤2 或 宝牌≥2）
+				p.hand.addAll(drawDiamondHand());
+			} else if (lazuriteMode) {
+				// 青金石之间（万象修罗）：12 张普通牌 + 1 张万能牌
+				// （万能牌固定留手——不可打出/副露/交换，仅在和牌时按最优替代牌种生效）
+				for (int i = 0; i < 12; i++) {
+					int code = wall.draw();
+					if (code < 0)
+						break;
+					p.hand.add(code);
+				}
+				p.hand.add(mcr.riichi_arise.game.TileFlag.wild());
+			} else {
+				for (int i = 0; i < 13; i++) {
+					int code = wall.draw();
+					if (code < 0)
+						break;
+					p.hand.add(code);
+				}
 			}
 			p.sortHand();
 		}
@@ -352,21 +449,353 @@ public class RiichiGame {
 		st.roundWind = handIndex / pc();
 		st.revealedIndicators = 1;
 		// S 行：开局快照（回放用，末段 = 王牌区岭上 4 张）
-		{
-			String[] hs = new String[4];
-			for (int i = 0; i < 4; i++)
-				hs[i] = MahjongTileNotation.format(ps[i].hand);
-			MahjongGameLog.handStart(level, origin, hs, MahjongTileNotation.format(wall.remainingCodes()),
-					MahjongTileNotation.format(wall.doraStackTiles()),
-					MahjongTileNotation.format(wall.rinshanStackTiles()));
-		}
+		// 青金石之间：换牌会改变手牌，快照延后到换牌完成后补写（见 executeSwap），避免回放看到换牌前手牌
+		if (!lazuriteMode)
+			logHandStart();
 		writeBack();
 		st.phase = RichiTableState.PHASE_PLAYING;
 		int dealTicks = FengPanBlock.startDealAnimation(level, origin, st);
 		// 局目/本场已由副标题栏显示，不再向动作栏发提示
 		// 座位切换（轮庄）只调换牌局中的东南西北，不再把玩家传送归位——世界位置保持不动
 		broadcastRoundStart();
-		schedule(dealTicks, this::beginFirstTurn);
+		schedule(dealTicks, lazuriteMode ? this::beginSwapPhase : this::beginFirstTurn);
+	}
+
+	/** 写开局快照 S 行（手牌 + 牌山；末段 = 王牌区岭上 4 张）。青金石之间在换牌完成后补写以反映换牌结果 */
+	private void logHandStart() {
+		String[] hs = new String[4];
+		for (int i = 0; i < 4; i++)
+			hs[i] = MahjongTileNotation.format(ps[i].hand);
+		MahjongGameLog.handStart(level, origin, hs, MahjongTileNotation.format(wall.remainingCodes()),
+				MahjongTileNotation.format(wall.doraStackTiles()),
+				MahjongTileNotation.format(wall.rinshanStackTiles()));
+	}
+
+	// ==================================================================
+	// 青金石之间（修罗之战）：配牌后强制换牌
+	// ==================================================================
+
+	/** 配牌后强制换牌阶段：各家选 3 张最没用的牌提交 → 四家选完合池随机洗匀 → 各发回 3 张（张数守恒）。
+	 *  换牌期间万能牌固定留手不可选；AI 自动提交，未提交者到点由 AI 兜底。 */
+	private void beginSwapPhase() {
+		if (st.mirrorAll) {
+			beginFirstTurn(); // 整桌投影：无本地换牌
+			return;
+		}
+		swapActive = true;
+		for (int s = 0; s < 4; s++)
+			swapSel[s].clear();
+		java.util.Arrays.fill(swapSubmitted, false);
+		// 换牌方向：顺时针 / 逆时针 / 对换（三麻没有"对家"座位，只有顺时针与逆时针）
+		swapDirection = pc() >= 4 ? level.random.nextInt(3) : level.random.nextInt(2);
+		st.swapPending = true;
+		java.util.Arrays.fill(st.swapPicks, "");
+		// 换牌阶段不进入摸打：清掉回合态，避免界面显示谁在行动
+		turn = -1;
+		waitingDiscard = false;
+		justDrew = false;
+		pendingRiichi = false;
+		st.drawnSeat = -1;
+		st.turnSeat = -1;
+		st.turnDeadline = 0;
+		setBanner(Component.translatable(swapDirBannerKey()).getString());
+		st.bannerI18n = swapDirBannerKey();
+		bannerUntil = level.getGameTime() + SWAP_WINDOW_TICKS;
+		swapDeadline = level.getGameTime() + SWAP_WINDOW_TICKS;
+		writeBack();
+		// 真人座位：动作栏提示换牌方向与"已选 0/3"，引导点击手牌选牌
+		for (int s = 0; s < pc(); s++) {
+			ServerPlayer hp = st.playerOf(level, s);
+			if (hp != null)
+				hp.displayClientMessage(swapHint(0), true);
+		}
+		for (int s = 0; s < pc(); s++)
+			if (ps[s].ai || st.externalUuids.contains(ps[s].uuid)) {
+				final int seat = s;
+				schedule((8 + level.random.nextInt(8)) * aiMul(), () -> aiPickSwap(seat));
+			}
+		schedule(SWAP_WINDOW_TICKS + 1, this::forceSwapEnd);
+	}
+
+	/** 换牌方向横幅语言键（换牌中（顺时针/逆时针/对换）） */
+	private String swapDirBannerKey() {
+		return switch (swapDirection) {
+			case SWAP_DIR_CCW -> "gui.riichi_arise.table.swapping_ccw";
+			case SWAP_DIR_ACROSS -> "gui.riichi_arise.table.swapping_across";
+			default -> "gui.riichi_arise.table.swapping_cw";
+		};
+	}
+
+	/** 换牌方向名语言键（动作栏提示用：顺时针/逆时针/对换） */
+	private String swapDirNameKey() {
+		return switch (swapDirection) {
+			case SWAP_DIR_CCW -> "gui.riichi_arise.swap.dir_ccw";
+			case SWAP_DIR_ACROSS -> "gui.riichi_arise.swap.dir_across";
+			default -> "gui.riichi_arise.swap.dir_cw";
+		};
+	}
+
+	/** 换牌动作栏提示（含方向 + 已选张数） */
+	private Component swapHint(int picked) {
+		return Component.translatable("gui.riichi_arise.table.swap_hint",
+				Component.translatable(swapDirNameKey()), picked);
+	}
+
+	/** 换牌选牌点击（onTileClick 转发）：切换某张手牌选中态（上限 3 张；选满 3 张推送确认选项）。万能牌不可选 */
+	public void swapSelect(int seat, int index) {
+		if (!swapActive || seat < 0 || seat > 3 || swapSubmitted[seat])
+			return;
+		RiichiPlayer p = ps[seat];
+		if (index < 0 || index >= p.hand.size())
+			return;
+		if (mcr.riichi_arise.game.TileFlag.isWild(p.hand.get(index))) {
+			ServerPlayer wmsg = st.playerOf(level, seat);
+			if (wmsg != null)
+				wmsg.displayClientMessage(Component.translatable("message.riichi_arise.wild_no_swap"), true);
+			return;
+		}
+		List<Integer> sel = swapSel[seat];
+		if (sel.contains(index))
+			sel.remove(Integer.valueOf(index));
+		else if (sel.size() < 3)
+			sel.add(index);
+		// 抬起最近选中的那张作为视觉反馈（换牌阶段无其他选中态）
+		st.selectedSeat = seat;
+		st.selectedIndex = sel.isEmpty() ? -1 : sel.get(sel.size() - 1);
+		writeBack();
+		// 选满 3 张 → 弹出"确认换牌"选项（副露式面板）；不足 3 张（含取消）清空选项
+		refreshSwapOptions(seat);
+	}
+
+	/** 换牌阶段：向真人座位推送确认选项（选满 3 张才出现）；不足 3 张或无该座位则清空 */
+	private void refreshSwapOptions(int seat) {
+		if (ps[seat].ai || st.externalUuids.contains(ps[seat].uuid))
+			return;
+		ServerPlayer p = st.playerOf(level, seat);
+		if (p == null)
+			return;
+		List<Integer> sel = swapSel[seat];
+		// 动作栏提示已选张数（叠加层已移除，改由手牌选中 + 选项面板反馈）
+		p.displayClientMessage(swapHint(sel.size()), true);
+		if (swapActive && !swapSubmitted[seat] && sel.size() == 3) {
+			StringBuilder codes = new StringBuilder();
+			for (int idx : sel) {
+				if (idx < 0 || idx >= ps[seat].hand.size())
+					continue;
+				if (codes.length() > 0)
+					codes.append(',');
+				codes.append(ps[seat].hand.get(idx));
+			}
+			mcr.riichi_arise.network.MahjongGamePayloads.sendOptions(p, origin, "swap:" + codes);
+			playOptionSound(p);
+		} else {
+			mcr.riichi_arise.network.MahjongGamePayloads.sendOptions(p, origin, "");
+		}
+	}
+
+	/** 换牌确认（选项面板"确认换牌"）：已选满 3 张则提交；四家齐则执行换牌 */
+	private void confirmSwap(int seat) {
+		if (!swapActive || seat < 0 || seat > 3 || swapSubmitted[seat])
+			return;
+		if (swapSel[seat].size() != 3)
+			return;
+		swapSubmitted[seat] = true;
+		ServerPlayer p = st.playerOf(level, seat);
+		if (p != null) {
+			mcr.riichi_arise.network.MahjongGamePayloads.sendOptions(p, origin, "");
+			p.displayClientMessage(Component.translatable("gui.riichi_arise.table.swap_done"), true);
+		}
+		st.selectedSeat = -1;
+		st.selectedIndex = -1;
+		writeBack();
+		if (allSwapSubmitted())
+			executeSwap();
+	}
+
+	/** AI 换牌提交（延迟任务）：补 3 张后标记提交，四家齐则执行换牌 */
+	private void aiPickSwap(int seat) {
+		if (!swapActive || swapSubmitted[seat])
+			return;
+		aiFillSwap(seat);
+		swapSubmitted[seat] = true;
+		writeBack();
+		if (allSwapSubmitted())
+			executeSwap();
+	}
+
+	/** 按"最没用"补 3 张：打掉后向听最小（越不伤形）+ 中张度最低（越孤张）优先；万能牌不选 */
+	private void aiFillSwap(int seat) {
+		RiichiPlayer p = ps[seat];
+		List<Integer> idxs = new ArrayList<>();
+		for (int i = 0; i < p.hand.size(); i++)
+			if (!mcr.riichi_arise.game.TileFlag.isWild(p.hand.get(i)))
+				idxs.add(i);
+		idxs.sort((a, b) -> {
+			int sa = shantenAfterRemove(p.hand, a);
+			int sb = shantenAfterRemove(p.hand, b);
+			if (sa != sb)
+				return sa - sb;
+			return centrality(p.hand.get(a)) - centrality(p.hand.get(b));
+		});
+		List<Integer> sel = swapSel[seat];
+		sel.clear();
+		for (int k = 0; k < 3 && k < idxs.size(); k++)
+			sel.add(idxs.get(k));
+	}
+
+	/** 打掉手牌第 removeIdx 张（普通牌）后剩余手牌的向听数（用于判断该张的用途，越大越有用） */
+	private static int shantenAfterRemove(List<Integer> hand, int removeIdx) {
+		int[] t = new int[34];
+		for (int i = 0; i < hand.size(); i++) {
+			if (i == removeIdx)
+				continue;
+			int c = hand.get(i);
+			if (mcr.riichi_arise.game.TileFlag.isWild(c))
+				continue;
+			t[TileEfficiency.codeToIndex(c)]++;
+		}
+		return TileEfficiency.shanten(t);
+	}
+
+	/** 是否四家均已提交换牌 */
+	private boolean allSwapSubmitted() {
+		for (int s = 0; s < pc(); s++)
+			if (!swapSubmitted[s])
+				return false;
+		return true;
+	}
+
+	/** 换牌超时兜底：未提交座位按 AI 策略补 3 张，然后执行换牌 */
+	private void forceSwapEnd() {
+		if (!swapActive)
+			return;
+		for (int s = 0; s < pc(); s++)
+			if (!swapSubmitted[s]) {
+				aiFillSwap(s);
+				swapSubmitted[s] = true;
+			}
+		executeSwap();
+	}
+
+	/** 执行换牌：各家删掉选中的 3 张 → 按本局方向（顺时针/逆时针/对换）整组直接交给目标家 → 各理牌 → 进入庄家首巡 */
+	private void executeSwap() {
+		if (!swapActive)
+			return;
+		swapActive = false;
+		// 先各家取下选中的三张（整组），再按方向一次性交给目标座位
+		List<List<Integer>> given = new ArrayList<>();
+		for (int s = 0; s < pc(); s++) {
+			if (!swapSubmitted[s])
+				aiFillSwap(s); // 兜底
+			List<Integer> sel = new ArrayList<>(swapSel[s]);
+			sel.sort(java.util.Comparator.reverseOrder()); // 逆序删除，避免下标位移
+			List<Integer> out = new ArrayList<>(3);
+			for (int idx : sel)
+				if (idx >= 0 && idx < ps[s].hand.size())
+					out.add(ps[s].hand.remove(idx));
+			given.add(out);
+		}
+		for (int s = 0; s < pc(); s++) {
+			int target = switch (swapDirection) {
+				case SWAP_DIR_CCW -> (s - 1 + pc()) % pc();
+				case SWAP_DIR_ACROSS -> (s + pc() / 2) % pc();
+				default -> (s + 1) % pc();
+			};
+			ps[target].hand.addAll(given.get(s)); // 三张一起给目标家
+		}
+		for (int s = 0; s < pc(); s++)
+			ps[s].sortHand();
+		// 换牌结束：清提示与选牌态，补写开局快照（回放据此还原换牌后手牌）
+		st.swapPending = false;
+		java.util.Arrays.fill(st.swapPicks, "");
+		st.selectedSeat = -1;
+		st.selectedIndex = -1;
+		for (int i = 0; i < 4; i++)
+			swapSel[i].clear();
+		// 清掉各真人座位的"确认换牌"选项面板
+		for (int s = 0; s < pc(); s++) {
+			ServerPlayer hp = st.playerOf(level, s);
+			if (hp != null)
+				mcr.riichi_arise.network.MahjongGamePayloads.sendOptions(hp, origin, "");
+		}
+		setBanner("");
+		logHandStart();
+		writeBack();
+		FengPanBlock.rerenderTable(level, origin); // 手牌牌面变化，重建交互代理
+		beginFirstTurn();
+	}
+
+	/**
+	 * 钻石之间：单家保底配牌——连抽 13 张，直到 向听≤2 或 总宝牌≥2；
+	 * 未通过的 13 张放回牌山非摸牌端（牌头）后重抽，牌山张数守恒。
+	 */
+	private List<Integer> drawDiamondHand() {
+		List<Integer> last = new ArrayList<>(13);
+		for (int attempt = 0; attempt < MAX_DIAMOND_ATTEMPTS; attempt++) {
+			List<Integer> hand = new ArrayList<>(13);
+			for (int i = 0; i < 13; i++) {
+				int c = wall.draw();
+				if (c < 0)
+					break;
+				hand.add(c);
+			}
+			last = hand;
+			if (hand.size() < 13 || diamondOk(hand))
+				return hand; // 牌山不足（异常）时放弃保底
+			wall.putBack(hand); // 放回非摸牌端，避免下次 draw() 立刻抽回同一批
+		}
+		mcr.riichi_arise.RichiiAriseMod.LOGGER.warn("钻石之间：保底配牌重发触顶（{} 次），采用最后一次结果", MAX_DIAMOND_ATTEMPTS);
+		return last;
+	}
+
+	/**
+	 * 混沌之间：钻石之间的保底配牌 + 青金石之间的万能牌。
+	 * <p>先按钻石保底取 13 张，再把其中 1 张放回牌山（优先非宝牌，避免破坏"宝牌≥2"的保底），
+	 * 换成 1 张万能牌；万能牌可替代任意牌，因此这次替换不会削弱保底条件。</p>
+	 */
+	private List<Integer> drawChaosHand() {
+		List<Integer> hand = new ArrayList<>(drawDiamondHand());
+		if (hand.size() >= 13) {
+			List<Integer> doras = wall.actualDoras();
+			int removeIdx = -1;
+			for (int i = hand.size() - 1; i >= 0; i--) {
+				int base = mcr.riichi_arise.game.TileFlag.base(hand.get(i));
+				boolean dora = doras.contains(base) || base == 0 || base == 10 || base == 20;
+				if (!dora) {
+					removeIdx = i;
+					break;
+				}
+			}
+			if (removeIdx < 0)
+				removeIdx = hand.size() - 1;
+			wall.putBack(List.of(hand.remove(removeIdx)));
+		}
+		hand.add(mcr.riichi_arise.game.TileFlag.wild());
+		return hand;
+	}
+
+	/** 钻石之间保底判定：向听≤2 或 表宝牌 + 赤宝牌 张数≥2 */
+	private boolean diamondOk(List<Integer> hand) {
+		int[] t = new int[34];
+		for (int c : hand)
+			t[TileEfficiency.codeToIndex(mcr.riichi_arise.game.TileFlag.base(c))]++;
+		if (TileEfficiency.shanten(t) <= 2)
+			return true;
+		return doraCount(hand) >= 2;
+	}
+
+	/** 总宝牌数 = 表宝牌张数 + 赤五张数（不含里宝牌，按张数计） */
+	private int doraCount(List<Integer> hand) {
+		List<Integer> doras = wall.actualDoras();
+		int n = 0;
+		for (int c : hand) {
+			int base = mcr.riichi_arise.game.TileFlag.base(c);
+			if (doras.contains(base))
+				n++; // 表宝牌
+			if (base == 0 || base == 10 || base == 20)
+				n++; // 赤五（红五万 / 红五筒 / 红五索）
+		}
+		return n;
 	}
 
 	/** 每局开始向参与玩家聊天播报局目/本场数及各自座位（自风字黄色），如：[東1局-1本场] 您的座位：西 */
@@ -513,6 +942,12 @@ public class RiichiGame {
 		st.turnLimit = RichiTableState.THINK_PRESETS[st.thinkIdx][0] * 20;
 		st.turnDeadline = level.getGameTime() + st.turnLimit;
 		st.candidatePickSeat = seat;
+		// 选牌中提示放到 boss 栏（备选牌叠加层不再绘制，避免与"备选牌"标题重叠）；
+		// 持续到本次选牌结束/超时（覆盖 setBanner 默认的 60 tick）
+		setBanner(ps[seat].name + " 选牌中");
+		st.bannerI18n = "gui.riichi_arise.table.candidate_picking"
+				+ mcr.riichi_arise.network.MahjongTablePayload.BANNER_I18N_SEP + ps[seat].name;
+		bannerUntil = level.getGameTime() + st.turnLimit;
 		writeBack();
 		clearAllOptions();
 		List<String> opts = new ArrayList<>();
@@ -559,6 +994,7 @@ public class RiichiGame {
 		pickSeat = -1;
 		pickRinshan = false;
 		st.candidatePickSeat = -1;
+		setBanner(""); // 选牌结束：清掉 boss 栏"选牌中"提示
 		st.candidates = MahjongTileNotation.format(candidates);
 		writeBack();
 		clearAllOptions();
@@ -636,8 +1072,11 @@ public class RiichiGame {
 				discard = test.size() - 1;
 			test.remove(discard);
 			int[] tiles = new int[34];
-			for (int c : test)
+			for (int c : test) {
+				if (mcr.riichi_arise.game.TileFlag.isWild(c))
+					continue; // 万能牌不计入牌种统计（青金石/混沌之间）
 				tiles[TileEfficiency.codeToIndex(c)]++;
+			}
 			TileEfficiency.Analysis13 a = TileEfficiency.analyze13(tiles, left);
 			eff = Math.round(a.mixedScore * 1000);
 			value = handValue(test, dora34);
@@ -650,6 +1089,8 @@ public class RiichiGame {
 		int v = 0;
 		for (int c : hand) {
 			int base = mcr.riichi_arise.game.TileFlag.base(c);
+			if (base > 36)
+				continue; // 万能牌不计入宝牌/赤五估价（青金石/混沌之间）
 			if (dora34[TileEfficiency.codeToIndex(base)])
 				v += 2;
 			if (base == 0 || base == 10 || base == 20)
@@ -694,6 +1135,8 @@ public class RiichiGame {
 	private static int countTerminalKinds(List<Integer> hand) {
 		java.util.Set<Integer> kinds = new java.util.HashSet<>();
 		for (int raw : hand) {
+			if (mcr.riichi_arise.game.TileFlag.isWild(raw))
+				continue; // 万能牌不算幺九字牌种类
 			int c = mcr.riichi_arise.game.TileFlag.base(raw);
 			int d = c < 30 ? c % 10 : c - 29;
 			if (c >= 30 || d == 1 || d == 9)
@@ -748,12 +1191,19 @@ public class RiichiGame {
 		}
 		// 自家选项（自摸/立直/杠）推给本人
 		sendSelfOptions(seat);
+		// 自动和牌：摸牌后可自摸（含天和/地和）立即宣布；晚 0.5s 与副露响应窗口错开
+		if (st.autoWin[seat] && !st.mirrorAll && justDrew
+				&& (canWinNow(seat, true) || firstTurnShapeWin(seat)))
+			schedule(10, () -> {
+				if (turn == seat && waitingDiscard && claimWindowEnd == 0)
+					doTsumo(seat);
+			});
 		// 立直后摸切（日麻规则：立直者打牌锁定）：无自摸/暗杠/拔北机会则自动打出刚摸的牌（AI 与人类一致）；
 		// 暗杠需岭上有余（紫水晶之间为牌山仍够补充），岭上耗尽时同样视为无机会；立直家摸到北时可选拔北（canKita），选跳过则摸切。
 		// 紫水晶之间同样适用：选牌本身已是手动选择，选完后立直家按普通模式自动摸切。
 		if (ps[seat].riichi && !st.mirrorAll && !(justDrew && canWinNow(seat, true))
 				&& (findAnkan(seat) < 0 || !kongAllowed()) && !canKita(seat)) {
-			int last = ps[seat].hand.size() - 1;
+			int last = autoDiscardIndex(seat); // 跳过万能牌（固定留手不可打出）
 			schedule((8 + level.random.nextInt(6)) * aiMul(), () -> playerDiscard(seat, last));
 			return;
 		}
@@ -858,6 +1308,13 @@ public class RiichiGame {
 		RiichiPlayer p = ps[seat];
 		if (index < 0 || index >= p.hand.size())
 			return;
+		// 万能牌（青金石之间）固定留手：不可作为出牌（只能在和牌时按最优牌种生效）
+		if (mcr.riichi_arise.game.TileFlag.isWild(p.hand.get(index))) {
+			ServerPlayer wmsg = st.playerOf(level, seat);
+			if (wmsg != null)
+				wmsg.displayClientMessage(Component.translatable("message.riichi_arise.wild_no_discard"), true);
+			return;
+		}
 		// 食替（可选）：吃/碰后当巡不能打出与所鸣相同的那张牌
 		int ban = kuikaeBan[seat];
 		if (st.kuikae && ban >= 0 && sameTile(p.hand.get(index), ban)) {
@@ -878,6 +1335,12 @@ public class RiichiGame {
 				ServerPlayer cp = st.playerOf(level, seat);
 				if (cp != null)
 					cp.displayClientMessage(Component.translatable("message.riichi_arise.riichi_invalid"), true);
+				// AI 不等待超时：立即改打一张合法牌，避免听牌切牌卡住
+				if (ps[seat].ai && !st.mirrorAll) {
+					int alt = autoDiscardIndex(seat);
+					if (alt >= 0)
+						playerDiscard(seat, alt);
+				}
 				return;
 			}
 		}
@@ -916,6 +1379,7 @@ public class RiichiGame {
 		boolean riichiDeclared = pendingRiichi; // 牌谱事件旗（置位在下方立直块消费）
 		p.sortHand();
 		p.river.add(code);
+		p.discards.add(code); // 振听判定用：牌河中被鸣走的牌也要留档
 		// 立直宣言牌被鸣后：下一张切牌改为横摆，补回立直标记
 		if (st.riichiPending[seat]) {
 			st.riichiPending[seat] = false;
@@ -1020,6 +1484,8 @@ public class RiichiGame {
 			claimOptions[seat] = null;
 			if (seat == discarder)
 				continue;
+			if (finished[seat])
+				continue; // 青金石：已和牌退出者不参与吃碰杠/荣和响应
 			List<String> opts = new ArrayList<>();
 			// 荣和：荣和别人打出的牌（地和只成立于自摸，荣和不另开分支）
 			if (!filmQuiet && canRon(seat)) {
@@ -1027,7 +1493,7 @@ public class RiichiGame {
 				if (ps[seat].ai)
 					scheduleAiRon(seat); // AI 停 0.5s 再宣布和牌
 			}
-			if (!ps[seat].riichi && film == null) {
+			if (!ps[seat].riichi && film == null && !st.noClaims[seat]) {
 				// 红五与普通五等价计数（如手里 1 红5 + 2 普通5 也可碰红5声明牌）
 				int equiv = 0;
 				for (int c : ps[seat].hand)
@@ -1056,6 +1522,9 @@ public class RiichiGame {
 			if (!opts.isEmpty()) {
 				claimOptions[seat] = opts;
 				if (!ps[seat].ai) {
+					// 自动和牌：可荣和立即宣布（复用 AI 延迟宣言节奏，窗口期保护一致）
+					if (st.autoWin[seat] && opts.contains("ron"))
+						scheduleAiRon(seat);
 					anyHumanOption = true;
 					// 外部程序（net 接入）：无 ServerPlayer，响应选项由 net 层推送
 					if (st.externalUuids.contains(ps[seat].uuid)) {
@@ -1289,7 +1758,35 @@ public class RiichiGame {
 
 	/** 无人鸣牌 → 下家回合（一发标记保留：立直一巡内有效，直到该家再次打牌才过期） */
 	private void advanceTurn() {
-		beginTurn((turn + 1) % pc()); // 三麻轮转跳过北家座位（0→1→2→0）
+		beginTurn(nextActiveSeat((turn + 1) % pc())); // 三麻轮转跳过北家座位（0→1→2→0）
+	}
+
+	/** 青金石之间（修罗之战）：跳过已和牌退出的座位，取下一个仍在局中的座位。
+	 *  非青金石时 finished 恒为 false（返回原座位），即等价于原逻辑。 */
+	private int nextActiveSeat(int from) {
+		int s = ((from % pc()) + pc()) % pc();
+		for (int i = 0; i < pc(); i++) {
+			if (!finished[s])
+				return s;
+			s = (s + 1) % pc();
+		}
+		return s; // 全员和牌退出的极端情形：返回原值，避免死循环（本局应已由终局条件收口）
+	}
+
+	/** 青金石之间：本局是否满足终了条件（已 3 人和牌 / 活跃座位 ≤1） */
+	private boolean lazuriteHandOver() {
+		// 击飞：任一家点数为负 → 本局立即结束（点数每家和牌即时变动，结算界面延后到本局正式结束统一展示）
+		if (st.tobi)
+			for (int i = 0; i < pc(); i++)
+				if (st.points[i] < 0)
+					return true;
+		if (winCount >= 3)
+			return true;
+		int active = 0;
+		for (int i = 0; i < pc(); i++)
+			if (!finished[i])
+				active++;
+		return active <= 1;
 	}
 
 	/** 本巡推进下家；pause=true（AI 刚立直宣言后打牌）时额外停 1s 再推进，便于看清宣言；副露的 1s 停顿在切牌前 */
@@ -1398,6 +1895,8 @@ public class RiichiGame {
 		setBanner(p.name + (type == Fuuro.Type.CHII ? "吃" : type == Fuuro.Type.PON ? "碰" : "杠"));
 		writeBack();
 		clearAllOptions();
+		if (type == Fuuro.Type.MINKAN && checkSpecRyuukyoku())
+			return; // 四槓散了：途中流局（不再岭上摸牌/播报鸣牌）
 		if (type == Fuuro.Type.MINKAN)
 			finishKong(seat); // 明杠：与暗杠/加杠一致，岭上摸牌 + 揭新宝
 		else
@@ -1441,33 +1940,43 @@ public class RiichiGame {
 	// 杠（暗杠/加杠，明杠走 doOpenMeld）
 	// ==================================================================
 
-	/** 同种牌判定（红五万 0 与五万 5 视为同牌；忽略透明标志） */
+	/** 同种牌判定（红五 0/10/20 与普通五 5/15/25 视为同牌；忽略透明/万能标志） */
 	private static boolean sameTile(int a, int b) {
-		int na = mcr.riichi_arise.game.TileFlag.base(a), nb = mcr.riichi_arise.game.TileFlag.base(b);
-		na = na == 0 ? 5 : na;
-		nb = nb == 0 ? 5 : nb;
-		return na == nb;
+		return normCode(a) == normCode(b);
 	}
 
-	/** 自动摸切用的末张下标：食替生效时跳过被禁止的牌，取最靠右的可用牌（避免超时/自动流程卡住） */
+	/**
+	 * 自动摸切用的末张下标：跳过万能牌（青金石之间固定留手，不可打出），
+	 * 食替生效时再跳过被禁止的牌，取最靠右的可用牌（避免超时/自动流程卡住）。
+	 */
 	private int autoDiscardIndex(int seat) {
-		int ban = kuikaeBan[seat];
-		if (st.kuikae && ban >= 0)
-			for (int i = ps[seat].hand.size() - 1; i >= 0; i--)
-				if (!sameTile(ps[seat].hand.get(i), ban))
-					return i;
-		return ps[seat].hand.size() - 1;
+		List<Integer> hand = ps[seat].hand;
+		int ban = st.kuikae ? kuikaeBan[seat] : -1;
+		int lastNormal = -1;
+		for (int i = hand.size() - 1; i >= 0; i--) {
+			int c = hand.get(i);
+			if (mcr.riichi_arise.game.TileFlag.isWild(c))
+				continue; // 万能牌固定留手，不可打出
+			if (lastNormal < 0)
+				lastNormal = i;
+			if (ban < 0 || !sameTile(c, ban))
+				return i;
+		}
+		return lastNormal; // 异常兜底：至少打出一张可用牌，避免卡住
 	}
 
 	/** 暗杠候选：手牌中某牌恰有 4 张，返回手牌中该张实际 code（带透明标志，便于按值移出） */
 	private int findAnkan(int seat) {
 		int[] count = new int[37];
-		for (int c : ps[seat].hand)
-			count[mcr.riichi_arise.game.TileFlag.base(c)]++;
+		for (int c : ps[seat].hand) {
+			if (mcr.riichi_arise.game.TileFlag.isWild(c))
+				continue; // 万能牌不可暗杠
+			count[normCode(c)]++; // 红五 0/10/20 并入普通五 5/15/25 计数
+		}
 		for (int c = 0; c < 37; c++)
 			if (count[c] == 4) {
 				for (int h : ps[seat].hand)
-					if (mcr.riichi_arise.game.TileFlag.base(h) == c)
+					if (normCode(h) == c)
 						return h; // 返回实际手牌 code（保留透明标志）
 			}
 		return -1;
@@ -1559,6 +2068,8 @@ public class RiichiGame {
 				return;
 			}
 		}
+		if (checkSpecRyuukyoku())
+			return; // 四槓散了：途中流局（不再岭上摸牌）
 		finishKong(seat);
 	}
 
@@ -1574,6 +2085,8 @@ public class RiichiGame {
 		pendingRons.clear();
 		chiCombos.clear();
 		for (int s : claimers) {
+			if (finished[s])
+				continue; // 青金石：已和牌退出者不可抢杠
 			claimOptions[s] = List.of("ron");
 			if (ps[s].ai) {
 				scheduleAiRon(s); // AI 抢杠同样停 0.5s 再宣布
@@ -1738,6 +2251,8 @@ public class RiichiGame {
 		pendingRons.clear();
 		chiCombos.clear();
 		for (int s : claimers) {
+			if (finished[s])
+				continue; // 青金石：已和牌退出者不可抢北
 			claimOptions[s] = List.of("ron");
 			if (ps[s].ai) {
 				scheduleAiRon(s); // AI 抢北同样停 0.5s 再宣布
@@ -1788,10 +2303,11 @@ public class RiichiGame {
 						Math.max(0, st.kita[claimDiscarder] - 1))
 				: FengPanBlock.riverTilePos(level, origin, claimDiscarder,
 						Math.max(0, ps[claimDiscarder].river.size() - 1));
-		winEffect(winners.get(0), effectPos);
+		winEffect(winners.get(0), effectPos, false);
 		var resultBySeat = new java.util.LinkedHashMap<Integer, Mahjong4jBridge.WinResult>();
 		String names = "", details = "", bannerDetails = "";
 		int total = 0;
+		pointsBeforeWin = st.points.clone(); // 本次荣和前的点数（中盘精简结算界面只显示这一次的收支）
 		for (int w : winners) {
 			RiichiPlayer p = ps[w];
 			List<Integer> full = new ArrayList<>(p.hand);
@@ -1832,6 +2348,7 @@ public class RiichiGame {
 					p.riichi ? csv(wall.uraIndicatorTiles()) : "", csv(wall.revealedDoras()),
 					buildYakuList(p, full, e.getValue()), e.getValue().han(), e.getValue().fu(), gain, e.getKey() == dealerSeat(),
 					seatNames(), st.points.clone(), pc()));
+			pendingSettlementSeats.add(e.getKey());
 			MahjongGameLog.win(level, origin, handIndex + 1, true, e.getKey(), claimDiscarder,
 					String.join("+", e.getValue().yakuNames().stream().map(YakuNames::zh).toList()),
 					e.getValue().han(), e.getValue().fu(),
@@ -1839,10 +2356,24 @@ public class RiichiGame {
 					MahjongTileNotation.format(p.hand), csvMelds(p));
 		}
 		String pay = Component.translatable("message.riichi_arise.pay", ps[claimDiscarder].name, total).getString();
+		// 青金石之间（修罗之战）：和牌者退出本局（盖伏）；未达终局条件 → 立即结算后续打
+		if (lazuriteMode) {
+			for (int w : resultBySeat.keySet()) {
+				finished[w] = true;
+				winCount++;
+			}
+			if (!lazuriteHandOver())
+				lazuriteResumeSeat = claimDiscarder;
+		}
 		finishRound("message.riichi_arise.win_ron", names, details, bannerDetails, pay,
 				resultBySeat.keySet().stream().mapToInt(Integer::intValue).toArray());
-		// 聊天播报延后：结算界面（含点数变化）全部关闭后再发
-		pendingChat = Component.translatable("message.riichi_arise.win_ron", names, details).getString() + " " + pay;
+		// 聊天播报延后：结算界面（含点数变化）全部关闭后再发；
+		// 修罗之战中盘和牌（本局续打）只播报和牌与点数，不播报具体牌型（牌型留到本局结束的统一结算展示）
+		if (lazuriteMode && lazuriteResumeSeat >= 0)
+			pendingChat = Component.translatable("message.riichi_arise.win_ron", names,
+					" " + Component.translatable("gui.riichi_arise.settlement.pts_only", total).getString()).getString();
+		else
+			pendingChat = Component.translatable("message.riichi_arise.win_ron", names, details).getString() + " " + pay;
 	}
 
 	/** 自摸计分 flags：双立直/岭上开花/海底捞月 + 里宝牌 */
@@ -1872,6 +2403,8 @@ public class RiichiGame {
 	}
 
 	private void doTsumo(int seat) {
+		if (finished[seat])
+			return; // 青金石：已和牌退出者不再自摸
 		swingIfNpc(seat);
 		if (!waitingDiscard || !justDrew)
 			return;
@@ -1889,35 +2422,37 @@ public class RiichiGame {
 						p.riichi, ippatsu[seat], tsumoFlags(p), wall.actualDoras(), p.kitaCount, pc()); // 拔北每张 +1 翻
 		if (!r.win())
 			return;
-		winEffect(seat, FengPanBlock.handTilePos(level, origin, seat, p.hand.size() - 1));
+		winEffect(seat, FengPanBlock.handTilePos(level, origin, seat, p.hand.size() - 1), true);
 		boolean parent = seat == dealerSeat();
 		int[] pays = new int[4];
 		if (parent) {
 			int each = r.score().getParentTsumo();
-			// 庄家自摸：其余参战家各付亲分（三麻=两家，雀魂自摸损；庄家可能不在 0 号位）
+			// 庄家自摸：其余参战家各付亲分（三麻=两家，雀魂自摸损；庄家可能不在 0 号位）；
+			// 青金石之间：已和牌退出者不再支付（自摸损）
 			for (int i = 0; i < pc(); i++)
-				if (i != seat)
+				if (i != seat && !finished[i])
 					pays[i] = each;
 		} else {
 			// 闲家自摸：庄家付亲分，其余闲家付子分（三麻仅两家支付 = 自摸损；含 0 号位庄家）
 			for (int i = 0; i < pc(); i++)
-				if (i != seat)
+				if (i != seat && !finished[i])
 					pays[i] = i == dealerSeat() ? r.score().getParent() : r.score().getChild();
 		}
 		int baseTotal = 0;
 		for (int i = 0; i < pc(); i++) {
-			if (i == seat)
+			if (i == seat || finished[i])
 				continue;
 			baseTotal += pays[i];
 		}
 		// 自摸本场费：其余参战家各付 100×本场数（不计入结算界面 gain，只计入实际转帐）
 		if (st.honba > 0)
 			for (int i = 0; i < pc(); i++)
-				if (i != seat)
+				if (i != seat && !finished[i])
 					pays[i] += 100 * st.honba;
 		int total = 0;
+		pointsBeforeWin = st.points.clone(); // 本次自摸前的点数（中盘精简结算界面只显示这一次的收支）
 		for (int i = 0; i < pc(); i++) {
-			if (i == seat)
+			if (i == seat || finished[i])
 				continue;
 			st.points[i] -= pays[i];
 			ps[i].points -= pays[i];
@@ -1941,14 +2476,30 @@ public class RiichiGame {
 				p.riichi ? csv(wall.uraIndicatorTiles()) : "", csv(wall.revealedDoras()),
 				buildYakuList(p, new ArrayList<>(p.hand), r), r.han(), r.fu(), baseTotal, seat == dealerSeat(), seatNames(),
 				st.points.clone(), pc()));
+		pendingSettlementSeats.add(seat);
 		MahjongGameLog.win(level, origin, handIndex + 1, false, seat, -1,
 				String.join("+", r.yakuNames().stream().map(YakuNames::zh).toList()),
 				r.han(), r.fu(), 0, MahjongTileNotation.format(p.hand), csvMelds(p));
 		pendingFan.put(seat, buildFanKeys(r, seat)); // 报番：自摸役种 + 宝牌计数
+		// 青金石之间（修罗之战）：和牌者退出本局（盖伏）；未达终局条件 → 立即结算后续打
+		if (lazuriteMode) {
+			finished[seat] = true;
+			winCount++;
+			if (!lazuriteHandOver())
+				lazuriteResumeSeat = seat;
+			// 中盘和牌：把自摸的那张牌公开（正面朝上），其余手牌仍盖着
+			if (lazuriteResumeSeat == seat && !p.hand.isEmpty())
+				st.tsumoReveal = seat + "," + (p.hand.size() - 1) + "," + p.hand.get(p.hand.size() - 1);
+		}
 		finishRound("message.riichi_arise.win_tsumo", p.name, describeResult(r, p.kitaCount),
 				shortDescribe(r, p.kitaCount), payInfo.toString().trim(), seat);
-		pendingChat = Component.translatable("message.riichi_arise.win_tsumo", p.name, describeResult(r, p.kitaCount))
-				.getString() + " " + payInfo.toString().trim();
+		// 修罗之战中盘和牌（本局续打）只播报和牌与点数，不播报具体牌型（牌型留到本局结束的统一结算展示）
+		if (lazuriteMode && lazuriteResumeSeat >= 0)
+			pendingChat = Component.translatable("message.riichi_arise.win_tsumo", p.name,
+					" " + Component.translatable("gui.riichi_arise.settlement.pts_only", total).getString()).getString();
+		else
+			pendingChat = Component.translatable("message.riichi_arise.win_tsumo", p.name, describeResult(r, p.kitaCount))
+					.getString() + " " + payInfo.toString().trim();
 	}
 
 	/** 和牌展示文案：役种（中文，与报番同序）+ 翻符（役满显示役名）；kitaCount = 该家拔北数 */
@@ -2018,52 +2569,14 @@ public class RiichiGame {
 				entries.add(YakuNames.zh(n));
 		if (r.trueYakuman())
 			return String.join(";", entries); // 真役满：只列役满役种，不追加宝牌/里宝牌/红宝牌
-		List<Integer> doras = wall.actualDoras();
-		List<Integer> uras = p.riichi ? wall.uraDoras() : List.of();
-		// 宝牌逐张按牌面聚合（如：宝牌·發×2、里宝牌·白×1、红宝牌·5万×1），不堆叠多条"宝牌"
-		List<Integer> reds = new ArrayList<>();
-		List<Integer> doraHits = new ArrayList<>();
-		List<Integer> uraHits = new ArrayList<>();
-		for (int raw : full) {
-			int c = mcr.riichi_arise.game.TileFlag.base(raw); // 透明标志不参与宝牌判定
-			if (c == 0 || c == 10 || c == 20) {
-				reds.add(c);
-				continue;
-			}
-			if (doras.contains(c))
-				doraHits.add(c);
-			if (uras.contains(c))
-				uraHits.add(c);
-		}
-		for (Fuuro f : p.melds)
-			for (int raw : f.tiles) {
-				int t = mcr.riichi_arise.game.TileFlag.base(raw);
-				if (t == 0 || t == 10 || t == 20) {
-					reds.add(t);
-					continue;
-				}
-				if (doras.contains(t))
-					doraHits.add(t);
-				if (uras.contains(t))
-					uraHits.add(t);
-			}
-		// 拔北的北仍按牌面参与表/里宝牌（抜きドラ之外另计，三种来源各自成立）：
-		// 指示牌为西 → 计入表宝牌；立直且里宝牌为北 → 计入里宝牌。
-		// 列表按牌面聚合，宝牌/里宝牌各只有一条，张数包含手牌/副露与拔出的北
-		if (p.kitaCount > 0) {
-			if (doras.contains(TILE_PEI))
-				for (int i = 0; i < p.kitaCount; i++)
-					doraHits.add(TILE_PEI);
-			if (p.riichi && uras.contains(TILE_PEI))
-				for (int i = 0; i < p.kitaCount; i++)
-					uraHits.add(TILE_PEI);
-		}
-		appendDora(entries, "宝牌", doraHits);
-		appendDora(entries, "红宝牌", reds);
+		// 宝牌/红宝牌/里宝牌统一取自结算结果（与报番语音同源）：
+		// 含红五并入普通五后命中指示牌的宝牌、万能牌替代为宝牌牌种的计番，以及拔北按北风参与的宝牌
+		appendDora(entries, "宝牌", r.doraHits());
+		appendDora(entries, "红宝牌", r.redHits());
 		// 拔北（三麻）：宝牌计数条目，排在表/红宝牌之后、里宝牌之前（与语音键顺序一致）
 		if (p.kitaCount > 0)
 			entries.add("拔北×" + p.kitaCount);
-		appendDora(entries, "里宝牌", uraHits);
+		appendDora(entries, "里宝牌", r.uraHits());
 		return String.join(";", entries);
 	}
 
@@ -2092,7 +2605,7 @@ public class RiichiGame {
 		};
 	}
 
-	/** 特效「随机」档的持久化取值（1）：与 0=关闭 / 2..7 具体样式区分 */
+	/** 特效「随机」档的持久化取值（1）：与 0=关闭 / 2..7 具体样式 / 8=默认 区分 */
 	private static final int EFFECT_STYLE_RANDOM = 1;
 	/** 6 种具体特效样式值（与客户端 TableTileEffect.ACTIVE_STYLES 一致） */
 	private static final int[] EFFECT_ACTIVE_STYLES = { 2, 3, 4, 5, 6, 7 };
@@ -2107,14 +2620,17 @@ public class RiichiGame {
 		return style;
 	}
 
-	/** 和牌特效：烟花发射音 + 通知客户端（按和牌者自己的"和牌特效"设置绘制，全桌可见） */
-	private void winEffect(int winnerSeat, Vec3 tilePos) {
+	/**
+	 * 和牌特效：烟花发射音 + 通知客户端（按和牌者自己的"和牌特效"设置绘制，全桌可见）。
+	 * <p>{@code tsumo} 为真时客户端会把特效延后到自摸砸牌动画落地之后，荣和则立即出现。</p>
+	 */
+	private void winEffect(int winnerSeat, Vec3 tilePos, boolean tsumo) {
 		level.playSound(null, tilePos.x, tilePos.y, tilePos.z,
 				SoundEvents.FIREWORK_ROCKET_LAUNCH, SoundSource.PLAYERS, 1.0f, 1.0f);
 		int style = winnerSeat >= 0 && winnerSeat < 4 ? st.winEffects[winnerSeat] : 2;
 		style = resolveEffectStyle(style);
 		var notice = new mcr.riichi_arise.network.WinEffectPayload.Notice(origin, winnerSeat, style,
-				tilePos.x, tilePos.y, tilePos.z);
+				tilePos.x, tilePos.y, tilePos.z, tsumo);
 		for (int s = 0; s < pc(); s++) {
 			ServerPlayer p = st.playerOf(level, s);
 			if (p != null && !ps[s].ai)
@@ -2141,6 +2657,36 @@ public class RiichiGame {
 		broadcast(Component.translatable("message.riichi_arise.kyuushu", ps[seat].name).getString());
 	}
 
+	/**
+	 * 四槓散了判定（青金石之间）：本桌累计已成立 4 个杠且并非同一家独杠 → 途中流局。
+	 * 同一家独杠 4 个（四槓子）不算。返回 true 表示已触发流局，调用方应立即返回。
+	 */
+	private boolean checkSpecRyuukyoku() {
+		if (!lazuriteMode)
+			return false;
+		int total = 0, playersWithKan = 0;
+		for (int s = 0; s < pc(); s++) {
+			int k = 0;
+			for (Fuuro f : ps[s].melds)
+				if (f.type == Fuuro.Type.MINKAN || f.type == Fuuro.Type.ANKAN || f.type == Fuuro.Type.KAKAN)
+					k++;
+			total += k;
+			if (k > 0)
+				playersWithKan++;
+		}
+		if (total < 4 || playersWithKan < 2)
+			return false;
+		doSpecRyuukyoku();
+		return true;
+	}
+
+	/** 四槓散了（途中流局）：不清算不听罚符、立直棒留存桌面；青金石无连庄 → 本场清零轮庄 */
+	private void doSpecRyuukyoku() {
+		// 与九种九牌一致：立直棒留在桌面（不清零、不并入供托），供托棒同样保留
+		finishRound("message.riichi_arise.spec_ryuukyoku", "", "", "", new int[0]);
+		broadcast(Component.translatable("message.riichi_arise.spec_ryuukyoku").getString());
+	}
+
 	/** 流局满贯（幺九字牌宣言失败）：满贯自摸向其余三家收款，立直棒归流满家 */
 	private void doNagashiMangan(java.util.List<Integer> winners) {
 		int sticks = totalRiichiSticks() + st.carriedSticks * 1000;
@@ -2164,8 +2710,8 @@ public class RiichiGame {
 			}
 			int total = 0;
 			for (int i = 0; i < pc(); i++) {
-				if (i == seat)
-					continue;
+				if (i == seat || finished[i])
+					continue; // 青金石：已和牌退出的座位不参与流满收款
 				st.points[i] -= pays[i];
 				ps[i].points -= pays[i];
 				total += pays[i];
@@ -2182,6 +2728,7 @@ public class RiichiGame {
 					MahjongSettlementPayload.MODE_HAND_WIN, origin.asLong(), p.name, "nagashi", "流局满贯",
 					csv(p.hand), csvMelds(p), -1, "", csv(wall.revealedDoras()), "流局满贯",
 					0, 0, total, seat == dealerSeat(), seatNames(), st.points.clone(), pc()));
+			pendingSettlementSeats.add(seat);
 		}
 		java.util.Arrays.fill(st.riichiSticks, 0);
 		st.carriedSticks = 0;
@@ -2195,6 +2742,8 @@ public class RiichiGame {
 		// 流局满贯：手牌与牌河全部为幺九字牌 → 按自摸满贯向其余参战家收款（多家成立各自结算）
 		java.util.List<Integer> nagashi = new ArrayList<>();
 		for (int seat = 0; seat < pc(); seat++) {
+			if (finished[seat])
+				continue; // 青金石：已和牌退出的座位不参与流局满贯判定
 			boolean all = !ps[seat].hand.isEmpty() && !ps[seat].river.isEmpty();
 			for (int raw : ps[seat].hand) {
 				int c = mcr.riichi_arise.game.TileFlag.base(raw);
@@ -2221,6 +2770,8 @@ public class RiichiGame {
 		java.util.List<Integer> tenpai = new ArrayList<>();
 		java.util.List<Integer> noten = new ArrayList<>();
 		for (int seat = 0; seat < pc(); seat++) {
+			if (finished[seat])
+				continue; // 青金石：已和牌退出的座位不清算听牌罚符
 			(Mahjong4jBridge.isTenpai(ps[seat].hand, ps[seat].melds) ? tenpai : noten).add(seat);
 		}
 		announceDrawVoices(tenpai); // 流局语音：本人只听自己的听牌/未听；观战者听最近一家
@@ -2244,6 +2795,8 @@ public class RiichiGame {
 		boolean[] logTenpai = new boolean[4];
 		String[] logWaits = new String[4];
 		for (int seat = 0; seat < pc(); seat++) {
+			if (finished[seat])
+				continue; // 青金石：已和牌退出的座位不参与流局播报/摊牌
 			String wait = tenpai.contains(seat) ? waitNotation(ps[seat].hand) : "";
 			broadcast(ps[seat].name + " "
 					+ Component.translatable(wait.isEmpty() ? "message.riichi_arise.noten" : "message.riichi_arise.tenpai_wait",
@@ -2255,14 +2808,17 @@ public class RiichiGame {
 		// 摊牌规则：听牌家推倒亮牌；全员立直时全部亮牌（含未听家）（三麻=两家立直，原四家立直自然不成立）
 		java.util.List<Integer> faceUp = new ArrayList<>(tenpai);
 		boolean allRiichi = true;
-		for (int s = 0; s < pc(); s++)
+		for (int s = 0; s < pc(); s++) {
+			if (finished[s])
+				continue; // 青金石：已和牌退出的座位不计入「全员立直」
 			if (!ps[s].riichi) {
 				allRiichi = false;
 				break;
 			}
+		}
 		if (allRiichi)
 			for (int s = 0; s < pc(); s++)
-				if (!faceUp.contains(s))
+				if (!finished[s] && !faceUp.contains(s))
 					faceUp.add(s);
 		// 荒牌流局：本局各家立直棒转为供托留存（下一局仍摆在王牌指示叠旁，直到有人和牌取走）
 		for (int n : st.riichiSticks)
@@ -2313,8 +2869,23 @@ public class RiichiGame {
 		pickSeat = -1;
 		st.drawnSeat = -1;
 		clearAllOptions();
+		boolean lazuriteContinue = lazuriteResumeSeat >= 0; // 青金石：和牌立即结算后本局续打
+		// 收局亮牌规则：和牌收局只亮和牌者；荒牌流局只亮听牌者（与流局满贯和牌者），未听牌者盖牌
 		for (int seat = 0; seat < pc(); seat++) {
-			if (contains(winnerSeats, seat) || contains(faceUpSeats, seat))
+			if (lazuriteMode && lazuriteContinue) {
+				// 修罗之战中盘和牌（本局还要续打）：不摊开手牌，和牌者直接盖牌，
+				// 牌型与结算留到本局正式结束后的统一结算界面展示；仍在场的活跃家保持立牌
+				st.handsExposed[seat] = contains(winnerSeats, seat) || finished[seat]
+						? RichiTableState.HAND_FACE_DOWN
+						: RichiTableState.HAND_STAND;
+			} else if (lazuriteMode) {
+				// 修罗之战本局终了：本局所有和牌者（含此前已和牌退出的）亮牌，其余按立牌保持/盖牌
+				if (contains(winnerSeats, seat) || contains(faceUpSeats, seat) || finished[seat])
+					st.handsExposed[seat] = RichiTableState.HAND_FACE_UP;
+				else
+					st.handsExposed[seat] = winnerSeats.length > 0 ? RichiTableState.HAND_STAND
+							: RichiTableState.HAND_FACE_DOWN;
+			} else if (contains(winnerSeats, seat) || contains(faceUpSeats, seat))
 				st.handsExposed[seat] = RichiTableState.HAND_FACE_UP;
 			else if (winnerSeats.length > 0)
 				st.handsExposed[seat] = RichiTableState.HAND_STAND;
@@ -2372,15 +2943,50 @@ public class RiichiGame {
 		// 连庄规则：庄家和牌或流局 → 本场+1、庄家连庄；庄家输牌 → 局数+1、本场清零
 		// 荒牌流局修正：庄家听牌才连庄，庄家未听牌 → 轮庄（推进局目）
 		roundAdvance = false;
-		for (int w : winnerSeats)
-			if (w != dealerSeat())
+		if (lazuriteMode) {
+			// 修罗之战：无连庄——局终后一律轮庄、本场清零；和牌立即结算续打时不推进局目
+			if (!lazuriteContinue) {
 				roundAdvance = true;
-		if (dealerFlowAdvance)
-			roundAdvance = true; // 荒牌流局且庄家未听牌 → 轮庄（局数+1、本场清零）
-		if (roundAdvance)
-			st.honba = 0;
-		else
-			st.honba++;
+				st.honba = 0;
+			}
+		} else {
+			if (winnerSeats.length > 0) {
+				// 多家荣和时只要庄家在和牌家之列即连庄（不能因"有闲家和牌"就轮庄）
+				boolean dealerWon = false;
+				for (int w : winnerSeats)
+					if (w == dealerSeat())
+						dealerWon = true;
+				roundAdvance = !dealerWon;
+			}
+			if (dealerFlowAdvance)
+				roundAdvance = true; // 荒牌流局且庄家未听牌 → 轮庄（局数+1、本场清零）
+			if (roundAdvance)
+				st.honba = 0;
+			else
+				st.honba++;
+		}
+		// 青金石之间（修罗之战）：每一次和牌（含本局最后一人）都先弹一次精简点数结算；
+		// 中盘和牌 → 直接续打；本局终了 → 再逐个展示本局各家和牌结算，之后不再弹累积点数界面
+		if (lazuriteMode && winnerSeats.length > 0) {
+			settleWaiting = true;
+			settlePhase = 2;
+			java.util.Arrays.fill(settleConfirmed, false);
+			lazuriteDeltaPending = true;
+			lazuriteDeltaShown = false;
+			cancelSettleTask();
+			// 0.5s 后弹精简点数变化界面（只含本次和牌的收支）
+			schedule(10, () -> {
+				if (ended)
+					return;
+				sendLazuritePointDelta(true);
+				lazuriteDeltaShown = true;
+			});
+			// 兜底：约 6.5s 后关闭界面并继续（客户端精简时间轴约 3.5s 自动确认；
+			// 全员确认会由 confirmSettle 立即推进，不必等满兜底）
+			settleTask = lazuriteContinue ? this::resumeLazuriteAfterDelta : this::startLazuriteFinalSettlements;
+			schedule(130, settleTask);
+			return;
+		}
 		java.util.Arrays.fill(settleConfirmed, false);
 		settleWaiting = true;
 		settlePhase = 1;
@@ -2388,7 +2994,7 @@ public class RiichiGame {
 		settlementQueue.clear();
 		for (int i = 0; i < pendingSettlements.size(); i++)
 			settlementQueue.add(new SettlementShow(pendingSettlements.get(i),
-					i < winnerSeats.length ? winnerSeats[i] : -1));
+					i < pendingSettlementSeats.size() ? pendingSettlementSeats.get(i) : -1));
 		if (settlementQueue.isEmpty()) {
 			// 无结算界面（荒牌流局 / 九种九牌）：3s 后直接进点数变化界面（不留和牌报番那么长的等待）
 			settleTask = this::showPointDelta;
@@ -2409,6 +3015,14 @@ public class RiichiGame {
 		return false;
 	}
 
+	/** 是否至少有一名"仍在场"的参战人类玩家（青金石：已和牌退出的座位不看结算界面，不参与确认） */
+	private boolean hasActiveHuman() {
+		for (int i = 0; i < pc(); i++)
+			if (!finished[i] && !ps[i].ai && !st.externalUuids.contains(ps[i].uuid) && st.playerOf(level, i) != null)
+				return true;
+		return false;
+	}
+
 	/**
 	 * 推送队列里的下一个结算界面（含该家的 act 语音与报番），并重置确认状态与兜底计时。
 	 * 多家荣和逐家展示（前一家确认/超时后才推下一家，语音与界面同步、不会互相打断），
@@ -2420,8 +3034,18 @@ public class RiichiGame {
 		cancelSettleTask();
 		SettlementShow next = settlementQueue.poll();
 		if (next == null) {
-			// 所有和牌家的结算界面都展示完毕：先关掉这些界面，再统一推送点数结算
+			// 所有和牌家的结算界面都展示完毕：先关掉这些界面
 			closeAllSettlements();
+			// 青金石之间（修罗之战）：中盘和牌立即结算，未达终局条件 → 关掉界面后本局续打
+			if (lazuriteResumeSeat >= 0) {
+				resumeLazuriteRound();
+				return;
+			}
+			// 青金石本局终了：每次和牌都已用精简点数界面展示过收支，这里不再弹累积点数界面
+			if (lazuriteMode) {
+				proceedNext();
+				return;
+			}
 			showPointDelta();
 			return;
 		}
@@ -2441,8 +3065,14 @@ public class RiichiGame {
 				: RichiTableState.SETTLE_ANNOUNCE_DELAY + 15
 						+ RichiTableState.SETTLE_ANNOUNCE_STEP * (n - 1) + 20;
 		int delay = announce + RichiTableState.SETTLE_TIER_OFFSET + RichiTableState.SETTLE_CONFIRM_TICKS;
-		if (hasRealClient())
-			delay += RichiTableState.SETTLE_FALLBACK_TICKS;
+		if (lazuriteMode && lazuriteResumeSeat < 0 && !hasActiveHuman())
+			// 青金石本局终了回放：已无仍在场的参战人类（和牌者都已退出，只剩 AI / 观战 / 已退家客户端）。
+			// 这些客户端的确认包会在各自倒计时到达时互相跳过界面（第三家的结算一闪而过），
+			// 改为固定节奏逐屏展示：报番结束（+1s）后再停留 4s
+			delay = announce + 20 + 80;
+		else if (hasRealClient())
+			// 青金石之间（本局终了会逐个回放本局各家和牌结算）：兜底缩短，确认后立即推进
+			delay += lazuriteMode ? 5 * 20 : RichiTableState.SETTLE_FALLBACK_TICKS;
 		settleTask = this::showNextSettlement;
 		schedule(delay, settleTask);
 	}
@@ -2474,7 +3104,9 @@ public class RiichiGame {
 		sendToSpectators(MahjongSettlementPayload::sendClose);
 	}
 
-	/** 结算阶段 1 结束 → 推送点数变化界面（阶段 2；客户端动画+3s 倒计时后自动确认） */
+	/** 结算阶段 1 结束 → 推送点数变化界面（阶段 2；客户端动画+倒计时后自动确认）。
+	 *  青金石之间（含三名和牌者全部和完的本局终了）统一用精简时间轴：延迟小、自动确认 1s，
+	 *  全员确认后立即续局/终局，不必等满正常结算的长倒计时。 */
 	private void showPointDelta() {
 		if (!settleWaiting || settlePhase != 1)
 			return;
@@ -2488,14 +3120,40 @@ public class RiichiGame {
 			ServerPlayer p = st.playerOf(level, seat);
 			if (p != null)
 				mcr.riichi_arise.network.MahjongPointDeltaPayload.sendTo(p, origin.asLong(), pc(), seatNames(),
-						pointsBeforeRound, st.points);
+						pointsBeforeRound, st.points, lazuriteMode);
 		}
 		sendToSpectators(p -> mcr.riichi_arise.network.MahjongPointDeltaPayload.sendTo(p, origin.asLong(), pc(),
-				seatNames(), pointsBeforeRound, st.points));
-		// 服务端权威兜底：客户端动画 + 3s 倒计时共 6s，超出后无论界面是否还开着都推进
+				seatNames(), pointsBeforeRound, st.points, lazuriteMode));
+		// 服务端权威兜底：客户端动画 + 倒计时共 6s（青金石精简版约 2s），超出后无论界面是否还开着都推进
 		// （按 ESC/切维度/掉线关掉界面都不会丢自动确认；正常流程仍由各人类的确认包提前推进）。
 		// 纯 AI 对局没有人类确认包，用同量级的短兜底（否则旁观者要等很久才进下一局）
-		schedule(hasRealClient() ? 8 * 20 : 7 * 20, settleTask);
+		int fallback = lazuriteMode ? 3 * 20 : (hasRealClient() ? 8 * 20 : 7 * 20);
+		schedule(fallback, settleTask);
+	}
+
+	/** 青金石中盘和牌：推送点数变化界面（fast = 精简时间轴：延迟小、自动确认 1s）。
+	 *  只展示本次和牌造成的收支（pointsBeforeWin → 当前点数），不含本局此前各次和牌的变化。 */
+	private void sendLazuritePointDelta(boolean fast) {
+		for (int seat = 0; seat < pc(); seat++) {
+			if (ps[seat].ai)
+				continue;
+			ServerPlayer p = st.playerOf(level, seat);
+			if (p != null)
+				mcr.riichi_arise.network.MahjongPointDeltaPayload.sendTo(p, origin.asLong(), pc(), seatNames(),
+						pointsBeforeWin, st.points, fast);
+		}
+		sendToSpectators(p -> mcr.riichi_arise.network.MahjongPointDeltaPayload.sendTo(p, origin.asLong(), pc(),
+				seatNames(), pointsBeforeWin, st.points, fast));
+	}
+
+	/** 关闭四家与观战者的点数变化界面 */
+	private void closeLazuritePointDelta() {
+		for (int seat = 0; seat < 4; seat++) {
+			ServerPlayer p = st.playerOf(level, seat);
+			if (p != null)
+				mcr.riichi_arise.network.MahjongPointDeltaPayload.sendClose(p);
+		}
+		sendToSpectators(mcr.riichi_arise.network.MahjongPointDeltaPayload::sendClose);
 	}
 
 	/** 结算确认后推进：连庄（局数不变、本场累加）或轮庄（局数+1）；终局不清桌，下一把开始前才清 */
@@ -2503,6 +3161,7 @@ public class RiichiGame {
 		settleWaiting = false;
 		settlePhase = 0;
 		pendingSettlements.clear();
+		pendingSettlementSeats.clear();
 		settlementQueue.clear();
 		pendingFan.clear();
 		settleTask = null;
@@ -2540,12 +3199,96 @@ public class RiichiGame {
 			nextHand();
 	}
 
-	/** 结算界面确认（C→S）：阶段 1 确认 → 进点数变化界面；阶段 2 确认 → 立即推进 */
+	/**
+	 * 青金石之间（修罗之战）：和牌立即结算展示完毕、未达终局条件 → 本局续打。
+	 * 从放铳者（荣和）/自摸者本人的下家继续摸牌，轮转时跳过已和牌退出的座位。
+	 */
+	private void resumeLazuriteRound() {
+		if (ended)
+			return; // 对局已终局（投票/破产）：不再续打
+		int resume = lazuriteResumeSeat;
+		lazuriteResumeSeat = -1;
+		settleWaiting = false;
+		settlePhase = 0;
+		lazuriteDeltaPending = false;
+		lazuriteDeltaShown = false;
+		// 注意：pendingSettlements / pendingSettlementSeats / pendingFan 不在此清空——
+		// 修罗之战的各家和牌结算要累积到本局正式结束后统一展示
+		settlementQueue.clear();
+		pendingRons.clear();
+		chiCombos.clear();
+		settleTask = null;
+		claimWindowEnd = 0;
+		claimShortEnd = 0;
+		claimDiscarder = -1;
+		claimTile = -1;
+		chankanWindow = false;
+		kitaWindow = false;
+		chankanKongSeat = -1;
+		kitaSeat = -1;
+		clearAllOptions();
+		setBanner("");
+		st.phase = RichiTableState.PHASE_PLAYING;
+		st.tsumoReveal = ""; // 本轮结束：取消自摸牌公开
+		// 和牌退出者保持盖伏，其余恢复立牌
+		for (int s = 0; s < pc(); s++)
+			st.handsExposed[s] = finished[s] ? RichiTableState.HAND_FACE_DOWN : RichiTableState.HAND_STAND;
+		if (!pendingChat.isEmpty()) {
+			broadcast(pendingChat);
+			pendingChat = "";
+		}
+		writeBack();
+		turn = resume;
+		advanceTurn();
+	}
+
+	/** 青金石中盘和牌：关闭精简点数变化界面并续打（确认或兜底时限到达时调用） */
+	private void resumeLazuriteAfterDelta() {
+		lazuriteDeltaPending = false;
+		lazuriteDeltaShown = false;
+		settleWaiting = false;
+		settlePhase = 0;
+		closeLazuritePointDelta();
+		resumeLazuriteRound();
+	}
+
+	/**
+	 * 青金石本局终了：精简点数界面结束后，逐个展示本局各家的和牌结算界面，
+	 * 全部确认后直接收局（不再弹累积的点数变化界面——每次和牌都已单独展示过）。
+	 */
+	private void startLazuriteFinalSettlements() {
+		lazuriteDeltaPending = false;
+		lazuriteDeltaShown = false;
+		closeLazuritePointDelta();
+		settleWaiting = true;
+		settlePhase = 1;
+		java.util.Arrays.fill(settleConfirmed, false);
+		cancelSettleTask();
+		settlementQueue.clear();
+		for (int i = 0; i < pendingSettlements.size(); i++)
+			settlementQueue.add(new SettlementShow(pendingSettlements.get(i),
+					i < pendingSettlementSeats.size() ? pendingSettlementSeats.get(i) : -1));
+		if (settlementQueue.isEmpty()) {
+			proceedNext();
+			return;
+		}
+		settleTask = this::showNextSettlement;
+		schedule(2 * 20, settleTask);
+	}
+
+	/** 结算确认（C→S）：阶段 1 确认 → 进点数变化界面；阶段 2 确认 → 立即推进 */
 	private void confirmSettle(int seat) {
 		if (!settleWaiting)
 			return;
+		// 青金石本局终了回放且已无仍在场参战人类：回放按固定节奏逐屏展示，
+		// 忽略已退家客户端自动发来的确认（否则会互相把后面的和牌结算瞬间跳过）
+		if (lazuriteMode && settlePhase == 1 && !hasActiveHuman())
+			return;
 		settleConfirmed[seat] = true;
 		for (int i = 0; i < pc(); i++) {
+			// 青金石之间：已和牌退出者不看结算界面、不阻塞续打
+			if (finished[i])
+				continue;
 			// AI 与外部程序接入座位没有结算界面、不会回确认，不计入等待
 			if (ps[i].ai || st.externalUuids.contains(ps[i].uuid))
 				continue;
@@ -2555,6 +3298,17 @@ public class RiichiGame {
 				continue;
 			if (!settleConfirmed[i])
 				return;
+		}
+		// 青金石和牌的精简点数变化界面：全员确认即刻推进（不等兜底倒计时）
+		if (lazuriteDeltaPending) {
+			if (!lazuriteDeltaShown)
+				return; // 界面还没弹出，忽略提前到达的确认
+			cancelSettleTask();
+			if (lazuriteResumeSeat >= 0)
+				resumeLazuriteAfterDelta(); // 中盘和牌 → 续打
+			else
+				startLazuriteFinalSettlements(); // 本局终了 → 逐个展示和牌结算
+			return;
 		}
 		cancelSettleTask();
 		if (settlePhase == 1)
@@ -2780,6 +3534,7 @@ public class RiichiGame {
 		// 镜面接入时 river 已整体投影（可能已含本次这张），避免重复追加
 		if (p.river.isEmpty() || p.river.get(p.river.size() - 1) != code || wasDrawn)
 			p.river.add(code);
+		p.discards.add(code); // 振听判定用：牌河中被鸣走的牌也要留档
 		if (st.riichiPending[seat]) {
 			st.riichiPending[seat] = false;
 			st.riichiRiverIdx[seat] = p.river.size() - 1;
@@ -2881,6 +3636,7 @@ public class RiichiGame {
 				}
 			}
 			case "skip" -> onSkip(seat);
+			case "swap" -> confirmSwap(seat); // 青金石之间：确认换牌（已在手牌中选满 3 张）
 			case "settle_confirm" -> confirmSettle(seat);
 			case "kyuushu" -> doKyuushu(seat);
 			case "ankan" -> {
@@ -2901,6 +3657,15 @@ public class RiichiGame {
 
 	/** 手牌点击（FengPanBlock.handleHandInteract 转发）：本家回合选中/打出；响应窗口期右键 = 无操作 */
 	public void onTileClick(Player player, int seat, int index) {
+		// 只能操作本家手牌：seat 由"最近牌位"推断，点到别家手牌一律忽略
+		// （否则别家回合时点其手牌会替其选牌/打出，立直待选时还会用别家的牌序打自己的牌）
+		if (st.playerOf(level, seat) != player)
+			return;
+		// 青金石之间：换牌阶段——点击自己手牌 = 选/取消选（上限 3 张；选满 3 张弹出确认选项）
+		if (swapActive) {
+			swapSelect(seat, index);
+			return;
+		}
 		// 立直待选：本家右键手牌 = 确定立直打出该张
 		if (pendingRiichi && seat == turn) {
 			playerDiscard(seat, index);
@@ -3119,6 +3884,8 @@ public class RiichiGame {
 			if (river != null) {
 				p.river.clear();
 				p.river.addAll(notationCodes(river));
+				p.discards.clear();
+				p.discards.addAll(p.river); // 整桌投影没有"被鸣走"的信息：振听按当前牌河兜底
 			}
 			String melds = optString(o, "melds");
 			if (melds != null) {
@@ -3250,11 +4017,15 @@ public class RiichiGame {
 	// ==================================================================
 
 	private boolean canRon(int seat) {
+		if (finished[seat])
+			return false; // 青金石：已和牌退出者不再参与响应
 		return canRonTile(seat, claimTile);
 	}
 
 	/** 是否可荣和指定牌（含地和/河底等荣和役判定；振听时不可荣和，自摸不受限） */
 	private boolean canRonTile(int seat, int tile) {
+		if (finished[seat])
+			return false; // 青金石：已和牌退出者不再参与响应
 		if (ps[seat].riichiFuriten || ps[seat].tempFuriten || riverFuriten(seat))
 			return false;
 		List<Integer> full = new ArrayList<>(ps[seat].hand);
@@ -3263,22 +4034,29 @@ public class RiichiGame {
 				ps[seat].riichi, ippatsu[seat], ronFlags(ps[seat]), wall.actualDoras(), pc()).win();
 	}
 
-	/** 临时振听（河内和牌张）：自己的牌河中存在当前听牌时，荣和全部振听（按牌面去重逐张试和） */
+	/** 临时振听（河内和牌张）：自己的舍牌中存在当前听牌时，荣和全部振听（按牌面去重逐张试和）。
+	 *  舍牌取「全部舍牌历史 + 当前牌河」：牌河中被吃/碰/明杠鸣走的牌已移出 {@code river}，
+	 *  但仍算自己打出过，必须参与振听判定。
+	 *  <p>振听只看<b>牌形</b>（补上该舍牌能否成和牌形），不看役：多面听时各张和牌张带来的役可能不同
+	 *  （如听 147，补 1 无役、补 7 有三色同顺），按役判定会漏掉「1 已在自己牌河」的振听。</p> */
 	private boolean riverFuriten(int seat) {
 		RiichiPlayer p = ps[seat];
-		for (int t : new java.util.TreeSet<>(p.river)) {
+		java.util.Set<Integer> allDiscards = new java.util.TreeSet<>(p.discards);
+		allDiscards.addAll(p.river);
+		for (int t : allDiscards) {
 			int code = mcr.riichi_arise.game.TileFlag.base(t);
 			code = code < 30 && code % 10 == 0 ? code + 5 : code; // 红五与普通五同判
 			List<Integer> full = new ArrayList<>(p.hand);
 			full.add(code);
-			if (Mahjong4jBridge.score(full, p.melds, seat, dealerSeat(), st.roundWind, false,
-					p.riichi, ippatsu[seat], ronFlags(p), wall.actualDoras(), pc()).win())
+			if (Mahjong4jBridge.isWinnableShape(full, p.melds))
 				return true;
 		}
 		return false;
 	}
 
 	private boolean canWinNow(int seat, boolean tsumo) {
+		if (finished[seat])
+			return false; // 青金石：已和牌退出者不再参与摸打
 		return Mahjong4jBridge.score(new ArrayList<>(ps[seat].hand), ps[seat].melds,
 				seat, dealerSeat(), st.roundWind, tsumo, ps[seat].riichi, ippatsu[seat],
 				tsumoFlags(ps[seat]), wall.actualDoras(), pc()).win();
@@ -3291,15 +4069,27 @@ public class RiichiGame {
 		// 尾巡：牌山只剩 4 张以下时不能立直（摸牌后剩余，含本次摸牌已扣除）
 		if (wall.remaining() <= 4)
 			return false;
-		// 立直宣言牌待定：打出任一张后仍听牌
+		// 立直宣言牌待定：打出任一张后仍听牌（万能牌固定留手，不可作为宣言牌）
 		for (int i = 0; i < p.hand.size(); i++) {
-			int removed = p.hand.remove(i);
-			boolean tenpai = Mahjong4jBridge.isTenpai(p.hand, p.melds);
-			p.hand.add(i, removed);
-			if (tenpai)
+			if (mcr.riichi_arise.game.TileFlag.isWild(p.hand.get(i)))
+				continue;
+			if (discardKeepsTenpai(seat, i))
 				return true;
 		}
 		return false;
+	}
+
+	/** 打出该下标的手牌后是否仍听牌（含万能牌替代判定；万能牌本身不可打出） */
+	private boolean discardKeepsTenpai(int seat, int index) {
+		RiichiPlayer p = ps[seat];
+		if (index < 0 || index >= p.hand.size())
+			return false;
+		if (mcr.riichi_arise.game.TileFlag.isWild(p.hand.get(index)))
+			return false;
+		int removed = p.hand.remove(index);
+		boolean ok = Mahjong4jBridge.isTenpai(p.hand, p.melds);
+		p.hand.add(index, removed);
+		return ok;
 	}
 
 	private static int countIn(List<Integer> hand, int code) {
@@ -3551,13 +4341,31 @@ public class RiichiGame {
 				}
 			}
 		}
-		// 食替：AI 也必须避开刚鸣的那张牌，换成任意其他可打出的牌
+		// 食替：AI 也必须避开刚鸣的那张牌，换成任意其他可打出的牌（万能牌固定留手，不可打出）
 		if (st.kuikae && kuikaeBan[seat] >= 0)
-			for (int alt = ps[seat].hand.size() - 1; alt >= 0; alt--)
-				if (!sameTile(ps[seat].hand.get(alt), kuikaeBan[seat])) {
+			for (int alt = ps[seat].hand.size() - 1; alt >= 0; alt--) {
+				int altCode = ps[seat].hand.get(alt);
+				if (mcr.riichi_arise.game.TileFlag.isWild(altCode))
+					continue; // 万能牌固定留手，不可打出
+				if (!sameTile(altCode, kuikaeBan[seat])) {
 					idx = alt;
 					break;
 				}
+			}
+		// 立直宣言校验（含万能牌）：所选牌打出后必须仍听牌，否则改选一张能保持听牌的牌；
+		// 一张都没有则放弃宣言直接切牌——避免 playerDiscard 内部校验失败后卡住不推进
+		if (pendingRiichi && !discardKeepsTenpai(seat, idx)) {
+			int alt = -1;
+			for (int i = ps[seat].hand.size() - 1; i >= 0; i--)
+				if (discardKeepsTenpai(seat, i)) {
+					alt = i;
+					break;
+				}
+			if (alt >= 0)
+				idx = alt;
+			else
+				pendingRiichi = false;
+		}
 		playerDiscard(seat, idx);
 	}
 
@@ -3600,16 +4408,22 @@ public class RiichiGame {
 		int[] visible = buildVisible34(seat);
 		for (int s = 0; s < 4; s++)
 			if (s != seat)
-				for (int c : ps[s].hand)
+				for (int c : ps[s].hand) {
+					if (mcr.riichi_arise.game.TileFlag.isWild(c))
+						continue; // 万能牌不计入牌种统计
 					visible[TileEfficiency.codeToIndex(c)]++;
+				}
 		return visible;
 	}
 
 	/** 全场可见牌 34 数组（自己手牌 + 各家牌河 + 各家副露；供 AI 推算剩余枚数） */
 	private int[] buildVisible34(int seat) {
 		int[] visible = new int[34];
-		for (int c : ps[seat].hand)
+		for (int c : ps[seat].hand) {
+			if (mcr.riichi_arise.game.TileFlag.isWild(c))
+				continue; // 万能牌不计入牌种统计
 			visible[TileEfficiency.codeToIndex(c)]++;
+		}
 		for (int s = 0; s < 4; s++) {
 			for (int c : ps[s].river)
 				visible[TileEfficiency.codeToIndex(c)]++;
@@ -3623,8 +4437,11 @@ public class RiichiGame {
 	/** 立直打点估算：对每种打牌选择的每个存活听牌按“立直荣和（点闲家）”试算，取最大支付（打点高时听张少也值得立直） */
 	private int estimateRiichiValue(int seat, int[] visible) {
 		int[] own = new int[34];
-		for (int c : ps[seat].hand)
+		for (int c : ps[seat].hand) {
+			if (mcr.riichi_arise.game.TileFlag.isWild(c))
+				continue; // 万能牌不计入牌种统计
 			own[TileEfficiency.codeToIndex(c)]++;
+		}
 		List<Integer> doraInd = new ArrayList<>();
 		for (int c : wall.revealedDoras())
 			doraInd.add(mcr.riichi_arise.game.TileFlag.base(c)); // 透明标志不影响宝牌匹配
@@ -3632,6 +4449,8 @@ public class RiichiGame {
 		List<Integer> hand = ps[seat].hand;
 		// 枚举每种打牌（14 张去掉任意一张 = 13 张基牌）——只试“打刚摸牌”会漏掉打别的牌才成立的听牌形
 		for (int d = 0; d < hand.size(); d++) {
+			if (mcr.riichi_arise.game.TileFlag.isWild(hand.get(d)))
+				continue; // 万能牌不可打出，跳过该"打牌选择"
 			int removed = hand.remove(d);
 			for (int i = 0; i < 34; i++) {
 				if (4 - (visible[i] - own[i]) <= 0)
@@ -3659,11 +4478,16 @@ public class RiichiGame {
 	 *  （剩余 4 - 场外可见数，自己手牌不计入场外；只试“打刚摸牌”会漏掉打别的牌才成立的听牌形 → waits=0 → 拖一巡才立） */
 	private int countWaits(int seat, int[] visible) {
 		int[] own = new int[34];
-		for (int c : ps[seat].hand)
+		for (int c : ps[seat].hand) {
+			if (mcr.riichi_arise.game.TileFlag.isWild(c))
+				continue; // 万能牌不计入牌种统计
 			own[TileEfficiency.codeToIndex(c)]++;
+		}
 		int best = 0;
 		List<Integer> hand = ps[seat].hand;
 		for (int d = 0; d < hand.size(); d++) {
+			if (mcr.riichi_arise.game.TileFlag.isWild(hand.get(d)))
+				continue; // 万能牌不可打出，跳过该"打牌选择"
 			int removed = hand.remove(d);
 			int waits = 0;
 			for (int i = 0; i < 34; i++) {
@@ -3778,6 +4602,17 @@ public class RiichiGame {
 		// 紫水晶之间：公开备选牌区 + 当前选牌座位
 		st.candidates = MahjongTileNotation.format(candidates);
 		st.candidatePickSeat = pickPending ? pickSeat : -1;
+		// 青金石之间：换牌阶段状态同步（各座位选中手牌下标；客户端据此高亮已选牌）
+		st.swapPending = swapActive;
+		for (int i = 0; i < 4; i++) {
+			StringBuilder sw = new StringBuilder();
+			for (int idx : swapSel[i]) {
+				if (sw.length() > 0)
+					sw.append(',');
+				sw.append(idx);
+			}
+			st.swapPicks[i] = sw.toString();
+		}
 		RichiTableSync.broadcast(level, origin);
 		mcr.riichi_arise.net.RichiNetManager.pushTableSnapshot(level, origin, st); // 内网订阅者快照同步
 	}

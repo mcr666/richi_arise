@@ -63,7 +63,9 @@ public final class YakuNames {
 			Map.entry("SUANKO_TANKI", "四暗刻单骑"),
 			Map.entry("KOKUSHIMUSO_13", "国士十三面"),
 			Map.entry("CHURENPOHTO_PURE", "纯正九莲宝灯"),
-			Map.entry("RED_DORA", "红宝牌"));
+			Map.entry("RED_DORA", "红宝牌"),
+			// 青金石之间（万象修罗）：万能牌替代为表宝牌牌种时的额外 +1 番
+			Map.entry("WILD_DORA", "万能宝牌"));
 
 	public static String zh(String name) {
 		return ZH.getOrDefault(name, name);
