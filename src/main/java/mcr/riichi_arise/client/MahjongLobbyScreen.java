@@ -59,6 +59,7 @@ public class MahjongLobbyScreen extends Screen {
 		int oldSpeed = this.sync != null ? this.sync.aiSpeedIdx() : -1;
 		boolean oldOpen = this.sync != null && this.sync.openHand();
 		int oldRoom = this.sync != null ? this.sync.roomType() : -1;
+		int oldMask = this.sync != null ? this.sync.chaosMask() : -1;
 		boolean oldInQueue = this.sync != null && !this.sync.queueNames().isEmpty()
 				&& this.minecraft != null && this.minecraft.player != null
 				&& this.sync.queueNames().contains(this.minecraft.player.getGameProfile().getName());
@@ -72,7 +73,8 @@ public class MahjongLobbyScreen extends Screen {
 				|| (this.sync != null && this.sync.aiSpeedIdx() != oldSpeed)
 				|| (this.sync != null && newInQueue != oldInQueue)
 				|| (this.sync != null && this.sync.openHand() != oldOpen)
-				|| (this.sync != null && this.sync.roomType() != oldRoom))
+				|| (this.sync != null && this.sync.roomType() != oldRoom)
+				|| (this.sync != null && this.sync.chaosMask() != oldMask))
 			rebuildButtons();
 	}
 
@@ -125,6 +127,22 @@ public class MahjongLobbyScreen extends Screen {
 			java.util.function.Supplier<String> value, Runnable action, java.util.List<SettingOption> options) {
 		int w = settingsW();
 		this.settingRows.add(new SettingRow(settingsX(), y, w, ROW_H - 2, label, value, action, options));
+	}
+
+	/** 混沌之间：一行开关，点击/右键切换该「之间」规则是否纳入（开局时生效）；停靠屏幕最左侧，不挤右列设置 */
+	private void addChaosRow(int y, String labelKey, int bit) {
+		int mask = this.sync.chaosMask();
+		boolean on = (mask & bit) != 0;
+		String onKey = "gui.riichi_arise.lobby.rule_enabled";
+		String offKey = "gui.riichi_arise.lobby.rule_disabled";
+		// 停靠屏幕最左边缘：竖排窄列（与右列设置流分离，避免行数溢出屏幕）
+		this.settingRows.add(new SettingRow(4, y, 110, ROW_H - 2,
+				() -> Component.translatable(labelKey).getString(),
+				() -> Component.translatable(on ? onKey : offKey).getString(),
+				() -> send(MahjongLobbyPayloads.ACT_SET_CHAOS_MASK, mask ^ bit),
+				optionList((i) -> Component.translatable(i == 1 ? onKey : offKey).getString(), on ? 1 : 0,
+						(i) -> () -> send(MahjongLobbyPayloads.ACT_SET_CHAOS_MASK,
+								i == 1 ? (mask | bit) : (mask & ~bit)), 2)));
 	}
 
 	/** 右键候选项构造器：label(i) 生成显示名；action(i) 生成选中后的操作 */
@@ -222,20 +240,22 @@ public class MahjongLobbyScreen extends Screen {
 			String[] thinkPresets = { "5+20", "10+30", "60+0", "3+5" };
 			String[] roomKeys = { "gui.riichi_arise.lobby.room_tie", "gui.riichi_arise.lobby.room_diamond",
 					"gui.riichi_arise.lobby.room_amethyst", "gui.riichi_arise.lobby.room_glass",
-					"gui.riichi_arise.lobby.room_lazurite", "gui.riichi_arise.lobby.room_chaos" };
+					"gui.riichi_arise.lobby.room_lazurite", "gui.riichi_arise.lobby.room_chaos",
+					"gui.riichi_arise.lobby.room_dualblade" };
 			// 房间按钮显示顺序 → 实际 roomType 编码（编码保持不变，避免存档/协议含义变化）
 			int[] roomOrder = { mcr.riichi_arise.game.RichiTableState.ROOM_TIE,
 					mcr.riichi_arise.game.RichiTableState.ROOM_DIAMOND,
 					mcr.riichi_arise.game.RichiTableState.ROOM_AMETHYST,
 					mcr.riichi_arise.game.RichiTableState.ROOM_GLASS,
 					mcr.riichi_arise.game.RichiTableState.ROOM_LAZURITE,
-					mcr.riichi_arise.game.RichiTableState.ROOM_CHAOS };
+					mcr.riichi_arise.game.RichiTableState.ROOM_CHAOS,
+					mcr.riichi_arise.game.RichiTableState.ROOM_DUALBLADE };
 			String[] speedKeys = { "gui.riichi_arise.lobby.speed_fast", "gui.riichi_arise.lobby.speed_mid", "gui.riichi_arise.lobby.speed_slow" };
 			int row = 0;
 			// 当前房间在显示顺序中的下标（找不到时退回第一项）
 			int roomIdx = -1;
 			for (int i = 0; i < roomOrder.length; i++)
-				if (roomOrder[i] == Math.floorMod(this.sync.roomType(), 6)) {
+				if (roomOrder[i] == Math.floorMod(this.sync.roomType(), roomOrder.length)) {
 					roomIdx = i;
 					break;
 				}
@@ -247,9 +267,41 @@ public class MahjongLobbyScreen extends Screen {
 			addSettingRow(top + row++ * ROW_H,
 					() -> Component.translatable("gui.riichi_arise.lobby.label_room").getString(),
 					() -> Component.translatable(roomKeys[curRoom]).getString(),
-					() -> send(MahjongLobbyPayloads.ACT_SET_ROOM, roomOrder[(curRoom + 1) % 6]),
+					() -> send(MahjongLobbyPayloads.ACT_SET_ROOM, roomOrder[(curRoom + 1) % roomOrder.length]),
 					optionList((i) -> Component.translatable(roomKeys[i]).getString(), curRoom,
-							(i) -> () -> send(MahjongLobbyPayloads.ACT_SET_ROOM, roomOrder[i]), 6));
+							(i) -> () -> send(MahjongLobbyPayloads.ACT_SET_ROOM, roomOrder[i]), roomOrder.length));
+			// 仅混沌之间：逐个开关要把哪些「之间」的规则纳入本房型（开局时生效）；停靠屏幕最左侧竖排
+			if (roomOrder[curRoom] == mcr.riichi_arise.game.RichiTableState.ROOM_CHAOS) {
+				int cy = 12;
+				addChaosRow(cy, "gui.riichi_arise.lobby.chaos_glass",
+						mcr.riichi_arise.game.RichiTableState.CHAOS_GLASS);
+				cy += ROW_H;
+				addChaosRow(cy, "gui.riichi_arise.lobby.chaos_amethyst",
+						mcr.riichi_arise.game.RichiTableState.CHAOS_AMETHYST);
+				cy += ROW_H;
+				addChaosRow(cy, "gui.riichi_arise.lobby.chaos_diamond",
+						mcr.riichi_arise.game.RichiTableState.CHAOS_DIAMOND);
+				cy += ROW_H;
+				addChaosRow(cy, "gui.riichi_arise.lobby.chaos_lazurite",
+						mcr.riichi_arise.game.RichiTableState.CHAOS_LAZURITE);
+				cy += ROW_H;
+				addChaosRow(cy, "gui.riichi_arise.lobby.chaos_dualblade",
+						mcr.riichi_arise.game.RichiTableState.CHAOS_DUALBLADE);
+			}
+			// 换牌开关：仅青金石之间（或混沌之间纳入青金石规则）显示——每局开始时选三张牌互换的环节（默认开）
+			boolean lazuriteRoom = roomOrder[curRoom] == mcr.riichi_arise.game.RichiTableState.ROOM_LAZURITE
+					|| (roomOrder[curRoom] == mcr.riichi_arise.game.RichiTableState.ROOM_CHAOS
+							&& (this.sync.chaosMask() & mcr.riichi_arise.game.RichiTableState.CHAOS_LAZURITE) != 0);
+			if (lazuriteRoom) {
+				addSettingRow(top + row++ * ROW_H,
+						() -> Component.translatable("gui.riichi_arise.lobby.label_swap").getString(),
+						() -> Component.translatable(this.sync.swap() ? "gui.riichi_arise.lobby.rule_enabled"
+								: "gui.riichi_arise.lobby.rule_disabled").getString(),
+						() -> send(MahjongLobbyPayloads.ACT_SET_SWAP, this.sync.swap() ? 0 : 1),
+						optionList((i) -> Component.translatable(i == 1 ? "gui.riichi_arise.lobby.rule_enabled"
+								: "gui.riichi_arise.lobby.rule_disabled").getString(), this.sync.swap() ? 1 : 0,
+								(i) -> () -> send(MahjongLobbyPayloads.ACT_SET_SWAP, i), 2));
+			}
 			// 对局人数：四人 / 三人（队列人数超过目标人数时服务端拒绝）
 			addSettingRow(top + row++ * ROW_H,
 					() -> Component.translatable("gui.riichi_arise.lobby.label_players").getString(),
@@ -428,7 +480,7 @@ public class MahjongLobbyScreen extends Screen {
 			else
 				// 终局：管理员显示在右侧设置列表下方；非管理员显示在右半区顶部
 				graphics.drawCenteredString(font, phase, settingsX() + settingsW() / 2,
-						this.settingRows.isEmpty() ? top + 4 : top + 8 * ROW_H + 6, 0xFFAA55);
+						this.settingRows.isEmpty() ? top + 4 : top + this.settingRows.size() * ROW_H + 6, 0xFFAA55);
 		}
 
 		// 座位 AI 类型快速选择列表（最后绘制，盖住队列/按钮；右键座位弹出，显示顺序见 pickerOrder）

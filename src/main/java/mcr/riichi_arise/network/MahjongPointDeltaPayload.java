@@ -45,10 +45,15 @@ public class MahjongPointDeltaPayload {
 					if (message.mode() == MODE_CLOSE) {
 						prepared = null;
 						mcr.riichi_arise.client.MahjongPointDeltaScreen.closeIfOpen();
+						mcr.riichi_arise.client.MahjongPointDeltaOverlay.close(); // 万象修罗左侧叠加层
 						return;
 					}
 					prepared = message;
-					mcr.riichi_arise.client.MahjongPointDeltaScreen.open(message);
+					// 万象修罗（fast）点数结算：走屏幕左侧叠加层，不弹出 GUI 界面
+					if (message.fast())
+						mcr.riichi_arise.client.MahjongPointDeltaOverlay.open(message);
+					else
+						mcr.riichi_arise.client.MahjongPointDeltaScreen.open(message);
 				});
 			}
 		}

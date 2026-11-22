@@ -47,6 +47,24 @@ public final class VoiceCache {
 	}
 
 	/**
+	 * 该角色是否有报番语音（已加载资源包中存在任意 {@code sounds/voice/<id>/fan/*.mp3}）。
+	 * <p>不能拿某个固定文件名（如 {@code fan/dora.mp3}）当哨兵：雀魂 DB 下载的角色大多没有
+	 * dora.mp3，会被误判成"整轮缺报番音频"而错误借用其他角色的音色。</p>
+	 */
+	public static boolean hasFanVoice(String id) {
+		if (!VoiceCharacters.isValidId(id))
+			return false;
+		try {
+			String prefix = id + "|fan/";
+			for (String key : index().keySet())
+				if (key.startsWith(prefix))
+					return true;
+		} catch (Throwable ignored) {
+		}
+		return false;
+	}
+
+	/**
 	 * 是否已装入报番语音资源包：任一角色带 {@code fan/*.mp3} 即视为已安装。
 	 * 未安装时结算报番会回退固定节奏，客户端据此在进游戏时提示玩家。
 	 */
@@ -61,7 +79,21 @@ public final class VoiceCache {
 		}
 	}
 
-	/** 索引所属的资源管理器（F3+T 重载后实例变化 → 自动重建索引） */
+	/**
+	 * 清空索引，下次访问时重新扫描。资源包重载（F3+T / 启用新包）由客户端重载监听器调用。
+	 * <p>不能用资源管理器实例是否变化来判断重载：{@code Minecraft} 的
+	 * {@code ReloadableResourceManager} 在 reload 时复用同一实例，不主动清空会一直用旧索引，
+	 * 新装的资源包角色不会出现在语音列表里。</p>
+	 */
+	public static void invalidate() {
+		synchronized (VoiceCache.class) {
+			indexOwner = null;
+			voiceIndex = Map.of();
+			actIds = List.of();
+		}
+	}
+
+	/** 索引所属的资源管理器；{@code null} 表示需要重建（重载监听器会主动清空，见 invalidate） */
 	private static Object indexOwner;
 	/** 「角色id|相对路径（不含 .mp3）」→ 语音定位符 */
 	private static Map<String, ResourceLocation> voiceIndex = Map.of();

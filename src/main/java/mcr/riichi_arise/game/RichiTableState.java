@@ -40,17 +40,26 @@ public class RichiTableState {
 	 * 房间类型（大厅切换）：0=铁之间（标准）1=玻璃之间（无红宝牌，每种牌随机 3 张透明牌）
 	 * 2=紫水晶之间（备选牌）3=钻石之间（规则同铁之间，但发牌保底：向听≤2 或 宝牌≥2）
 	 * 4=青金石之间·万象修罗（修罗之战框架 + 万能牌：配牌 12 普通 + 1 万能，强制换牌，最多 3 人和牌等）
-	 * 5=混沌之间（同时启用玻璃之间的透明牌、紫水晶备选牌、钻石保底配牌、青金石修罗规则）
+	 * 5=混沌之间（按 {@link #chaosMask} 选择纳入玻璃之间的透明牌、紫水晶备选牌、钻石保底配牌、青金石修罗规则）
+	 * 6=宝牌双刃（开局翻 3 张指示牌、开杠最多加到 5 张；宝牌每张 +2 番、影牌（指示牌自身）每张 -1 番，
+	 * 立直时里指示牌同样产生宝牌/影牌；一番缚，影牌扣减后总番最低 1 番，影牌不影响役满）
 	 */
 	public static final int ROOM_TIE = 0, ROOM_GLASS = 1, ROOM_AMETHYST = 2, ROOM_DIAMOND = 3, ROOM_LAZURITE = 4,
-			ROOM_CHAOS = 5;
+			ROOM_CHAOS = 5, ROOM_DUALBLADE = 6;
 
-	/** 该房间类型是否启用玻璃之间的透明牌规则（玻璃之间本体 + 混沌之间） */
-	public static boolean isGlassRoom(int roomType) {
-		return roomType == ROOM_GLASS || roomType == ROOM_CHAOS;
-	}
+	/** 混沌之间纳入规则位：1=透明之间（玻璃）2=占星之战 4=钻石之间 8=青金石之间 16=宝牌双刃 */
+	public static final int CHAOS_GLASS = 1, CHAOS_AMETHYST = 2, CHAOS_DIAMOND = 4, CHAOS_LAZURITE = 8,
+			CHAOS_DUALBLADE = 16, CHAOS_ALL = 31;
 
 	public int roomType = ROOM_TIE;
+	/** 混沌之间：下一局纳入哪些「之间」的规则（位见 {@link #CHAOS_GLASS} 等，默认全开） */
+	public int chaosMask = CHAOS_ALL;
+	/**
+	 * 本局固定下来的混沌纳入位（开局时从 {@link #chaosMask} 快照）。
+	 * <p>与 {@link #gameRoomType} 同理：终局残影必须按产生它的那一局渲染，
+	 * 否则终局后改设置会让隐藏手牌的透明位按新配置重算。</p>
+	 */
+	public int gameChaosMask = CHAOS_ALL;
 	/**
 	 * 本局实际使用的房间类型（开局时从 {@link #roomType} 固定）。
 	 * <p>{@link #roomType} 是"下一局"的大厅配置，终局后仍可修改；而终局保留的桌面残影必须按
@@ -99,6 +108,8 @@ public class RichiTableState {
 	public static final int SETTLE_ANNOUNCE_DELAY = 20;
 	/** 无报番语音时每条役种的显现间隔（0.5s） */
 	public static final int SETTLE_ANNOUNCE_STEP = 10;
+	/** 有报番语音时单条语音的保守时长估算（2s）：服务端兜底与客户端报番时间轴共用 */
+	public static final int SETTLE_VOICE_TICKS = 40;
 	/** 报番结束 → 番符/点数/段位依次显现的三段延迟合计（15 tick = 三段各 5 tick） */
 	public static final int SETTLE_TIER_OFFSET = 15; // 番数符数/点数/段位三段各间隔 5 tick
 	/** 段位显现后的确认倒计时（5s）：归零时客户端自动回 settle_confirm */
@@ -133,6 +144,8 @@ public class RichiTableState {
 	public boolean tobi = true;
 	/** 食替（默认关）：开时吃/碰后当巡不能打出与所鸣相同的那张牌 */
 	public boolean kuikae = false;
+	/** 换牌（默认开）：青金石之间（含混沌纳入青金石规则）每局开始时选三张牌互换的环节；关 = 跳过换牌直接开打 */
+	public boolean swap = true;
 	/** 当前回合截止时刻（游戏刻，0 = 无计时）；超时自动摸切 */
 	public long turnDeadline;
 	/** 当前回合限时长（刻）：短考 5s（每回合重置）；进入长考后 = 长考银行剩余 */

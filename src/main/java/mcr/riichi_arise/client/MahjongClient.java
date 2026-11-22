@@ -84,6 +84,10 @@ public class MahjongClient {
 		event.registerAboveAll(net.minecraft.resources.ResourceLocation.fromNamespaceAndPath(
 				mcr.riichi_arise.RichiiAriseMod.MODID, "amethyst_candidates"),
 				(guiGraphics, partialTick) -> AmethystCandidateOverlay.render(guiGraphics));
+		// 万象修罗中局点数结算：屏幕左侧停靠的叠加层（1s 自动确认）
+		event.registerAboveAll(net.minecraft.resources.ResourceLocation.fromNamespaceAndPath(
+				mcr.riichi_arise.RichiiAriseMod.MODID, "lazurite_point_delta"),
+				(guiGraphics, partialTick) -> MahjongPointDeltaOverlay.render(guiGraphics));
 	}
 
 	/**
@@ -130,6 +134,7 @@ public class MahjongClient {
 		MahjongTableClient.tick(); // 牌桌发牌/倒牌动画调度（逐 tick 驱动）
 		MahjongSettlementScreen.tickDeferredOpen(); // 和牌语音播完后再弹结算界面
 		MahjongPointDeltaScreen.tickWaiting(); // 点数变化界面"等待其他玩家"省略号动画与确认重发
+		MahjongPointDeltaOverlay.tick();       // 万象修罗左侧叠加层：动画计时与 1s 自动确认
 		Minecraft minecraft = Minecraft.getInstance();
 		LocalPlayer player = minecraft.player;
 		ClientLevel level = minecraft.level;

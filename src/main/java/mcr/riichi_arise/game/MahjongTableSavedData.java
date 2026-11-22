@@ -41,7 +41,7 @@ public final class MahjongTableSavedData extends SavedData {
 
 	/** 一张风盘的可持久化设置（RichiTableState 中对应字段的快照） */
 	public record Entry(int gameType, int playerCount, int thinkIdx, int aiSpeedIdx, boolean openHand,
-			int roomType, boolean tobi, boolean kuikae, boolean[] reservedAI, String[] avatarModes) {
+			int roomType, boolean tobi, boolean kuikae, boolean swap, boolean[] reservedAI, String[] avatarModes, int chaosMask) {
 	}
 
 	public MahjongTableSavedData() {
@@ -66,7 +66,7 @@ public final class MahjongTableSavedData extends SavedData {
 			modes[i] = m == null ? "" : m;
 		}
 		tables.put(key(origin), new Entry(st.gameType, st.playerCount, st.thinkIdx, st.aiSpeedIdx, st.openHand,
-				st.roomType, st.tobi, st.kuikae, reserved, modes));
+				st.roomType, st.tobi, st.kuikae, st.swap, reserved, modes, st.chaosMask));
 		setDirty();
 	}
 
@@ -83,9 +83,12 @@ public final class MahjongTableSavedData extends SavedData {
 		st.roomType = (e.roomType() == RichiTableState.ROOM_GLASS || e.roomType() == RichiTableState.ROOM_AMETHYST
 				|| e.roomType() == RichiTableState.ROOM_DIAMOND
 				|| e.roomType() == RichiTableState.ROOM_LAZURITE
-				|| e.roomType() == RichiTableState.ROOM_CHAOS) ? e.roomType() : RichiTableState.ROOM_TIE;
+				|| e.roomType() == RichiTableState.ROOM_CHAOS
+				|| e.roomType() == RichiTableState.ROOM_DUALBLADE) ? e.roomType() : RichiTableState.ROOM_TIE;
 		st.tobi = e.tobi();
 		st.kuikae = e.kuikae();
+		st.swap = e.swap();
+		st.chaosMask = e.chaosMask() & RichiTableState.CHAOS_ALL;
 		for (int i = 0; i < 4; i++) {
 			st.reservedAI[i] = e.reservedAI()[i];
 			st.aiAvatarModes[i] = e.avatarModes()[i];
@@ -184,7 +187,9 @@ public final class MahjongTableSavedData extends SavedData {
 			data.tables.put(k, new Entry(t.getInt("g"), t.contains("p") ? t.getInt("p") : 4, t.getInt("t"), t.getInt("s"), t.getBoolean("o"),
 					t.contains("rt") ? t.getInt("rt") : 0,
 					t.contains("tb") ? t.getBoolean("tb") : true, t.contains("kk") && t.getBoolean("kk"),
-					reserved, modes));
+					!t.contains("sw") || t.getBoolean("sw"),
+					reserved, modes,
+					t.contains("cm") ? (t.getInt("cm") & RichiTableState.CHAOS_ALL) : RichiTableState.CHAOS_ALL));
 		}
 		return data;
 	}
@@ -202,6 +207,8 @@ public final class MahjongTableSavedData extends SavedData {
 			t.putInt("rt", en.roomType());
 			t.putBoolean("tb", en.tobi());
 			t.putBoolean("kk", en.kuikae());
+			t.putBoolean("sw", en.swap());
+			t.putInt("cm", en.chaosMask());
 			int mask = 0;
 			ListTag list = new ListTag();
 			for (int i = 0; i < 4; i++) {

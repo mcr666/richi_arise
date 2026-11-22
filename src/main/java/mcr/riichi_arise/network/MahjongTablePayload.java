@@ -46,7 +46,8 @@ public class MahjongTablePayload {
 			int turnSeat, int round, int roundWind, int honba, int carriedSticks,
 			int selectedSeat, int selectedIndex, int drawnSeat, int phase, int playerCount,
 			String bannerText, String bannerI18n, int[] discardPos, int roomType, String candidates, int candidatePickSeat,
-			int[] winEffects, boolean swapPending, String[] swapPicks, String tsumoReveal) implements CustomPacketPayload {
+			int[] winEffects, boolean swapPending, String[] swapPicks, String tsumoReveal,
+			int chaosMask) implements CustomPacketPayload {
 
 		public static final Type<ViewMessage> TYPE = new Type<>(
 				ResourceLocation.fromNamespaceAndPath(RichiiAriseMod.MODID, "richi_table"));
@@ -152,7 +153,7 @@ public class MahjongTablePayload {
 				msg.turnSeat(), msg.round(), msg.roundWind(), msg.honba(), msg.carriedSticks(),
 				msg.selectedSeat(), msg.selectedIndex(), msg.drawnSeat(), msg.phase(), msg.playerCount(),
 				msg.bannerText(), msg.bannerI18n(), msg.discardPos(), msg.roomType(), msg.candidates(), msg.candidatePickSeat(),
-				msg.winEffects(), msg.swapPending(), msg.swapPicks(), msg.tsumoReveal());
+				msg.winEffects(), msg.swapPending(), msg.swapPicks(), msg.tsumoReveal(), msg.chaosMask());
 	}
 
 	private static void evict() {
@@ -280,6 +281,7 @@ public class MahjongTablePayload {
 		for (int i = 0; i < 4; i++)
 			buf.writeUtf(orEmpty(msg.swapPicks()[i]), 32); // 各座位已选换牌手牌下标（逗号分隔，空 = 未选）
 		buf.writeUtf(orEmpty(msg.tsumoReveal()), 32); // 修罗之战中盘自摸：公开的摸牌 "座位,下标,牌码"（空 = 无）
+		buf.writeVarInt(msg.chaosMask()); // 混沌之间本局纳入位（1 透明 / 2 紫水晶 / 4 钻石 / 8 青金石）
 	}
 
 	private static ViewMessage read(RegistryFriendlyByteBuf buf) {
@@ -360,13 +362,14 @@ public class MahjongTablePayload {
 		for (int i = 0; i < 4; i++)
 			swapPicks[i] = buf.readUtf(32);
 		String tsumoReveal = buf.readUtf(32);
+		int chaosMask = buf.readVarInt();
 		return new ViewMessage(origin, viewerSeat, openHand, dealAnim, hands, hidden, tedashi, glassMask, rivers,
 				melds, kita, kitaGlass,
 				riichiRiverIdx, riichiSticks, handsExposed, points, names,
 				avatarIds, avatarForms, avatarNames, avatarSkins, doraWall,
 				revealedIndicators, wallCount, turnSeat, round, roundWind, honba, carriedSticks,
 				selectedSeat, selectedIndex, drawnSeat, phase, playerCount, bannerText, bannerI18n, discardPos, roomType,
-				candidates, candidatePickSeat, winEffects, swapPending, swapPicks, tsumoReveal);
+				candidates, candidatePickSeat, winEffects, swapPending, swapPicks, tsumoReveal, chaosMask);
 	}
 
 	public static void register() {

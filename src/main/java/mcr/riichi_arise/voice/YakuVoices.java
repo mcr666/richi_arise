@@ -83,9 +83,20 @@ public final class YakuVoices {
 			Map.entry("CHURENPOHTO_PURE", "chuurenpure"));
 
 	/**
+	 * 风牌 → 连风音频：场风与自风为同一方位（如东场东家的东）时，
+	 * 役种列表里同名风牌出现第二次，改报「连东/连南/连西/连北」。
+	 */
+	private static final Map<String, String> WIND_REN = Map.of(
+			"ton", "rendong",
+			"nan", "rennan",
+			"shaa", "renxi",
+			"pei", "renbei");
+
+	/**
 	 * 把某角色某次和牌的报番键列表追加进报番队列（客户端调用）。
 	 * <ul>
-	 * <li>役种英文名（自风/场风带方位后缀）：有对应音频的按序播报，并进入界面显现映射；</li>
+	 * <li>役种英文名（自风/场风带方位后缀）：有对应音频的按序播报，并进入界面显现映射；
+	 * 连风役牌（场风与自风同方位）第二次出现的同名风牌改报「连东/连南/连西/连北」；</li>
 	 * <li>宝牌计数键 {@code DORA/URA/RED/KITA + 数量}（表/里/红/拔北通用按数量报）：作为附加播报排在役种之后，
 	 * 结算列表末尾的宝牌条目随对应语音逐条显现（{@link FanAnnouncer#startedExtras()}）；
 	 * 服务端顺序为表 → 红 → 拔北（三麻）→ 里</li>
@@ -104,6 +115,8 @@ public final class YakuVoices {
 		List<String> fanKeys = new ArrayList<>();
 		List<String> zh = new ArrayList<>();
 		List<String> extraKeys = new ArrayList<>();
+		// 已播报过的风牌：连风役牌（场风=自风）第二次出现时改报连东/连南/连西/连北
+		java.util.Set<String> seenWinds = new java.util.HashSet<>();
 		for (String key : keys) {
 			if (key == null || key.isEmpty())
 				continue;
@@ -119,9 +132,18 @@ public final class YakuVoices {
 			String file = FAN.get(key);
 			if (file == null)
 				continue;
-			fanKeys.add(file);
 			// 界面映射用不带方位后缀的基础役名（自风牌/场风牌，与结算列表条目一致）
-			zh.add(mcr.riichi_arise.game.riichi.YakuNames.zh(basicName(key)));
+			String zhName = mcr.riichi_arise.game.riichi.YakuNames.zh(basicName(key));
+			// 连风役牌（场风与自风同方位）：第二次出现的同名风牌照常报「东」，
+			// 紧接着追加「连东/连南/连西/连北」，即连风紧跟自风之后
+			String ren = WIND_REN.get(file);
+			boolean renAfter = ren != null && !seenWinds.add(file);
+			fanKeys.add(file);
+			zh.add(zhName);
+			if (renAfter && fanKeys.size() < MAX_FAN) {
+				fanKeys.add(ren);
+				zh.add(zhName); // 连风不新增结算列表条目：随自风牌同一条目显现
+			}
 		}
 		if (fanKeys.isEmpty() && extraKeys.isEmpty()) {
 			// 本轮没有任何报番音频：清掉上一轮遗留状态后回退固定节奏。
@@ -141,8 +163,10 @@ public final class YakuVoices {
 		FanAnnouncer.begin(zh, files, extraKeys.size(), id, source);
 	}
 
-	/** 报番音频探测哨兵：资源包里的内置角色都带 {@code fan/dora.mp3}，用它判断该角色是否整轮缺报番音频 */
-	private static final String FAN_SENTINEL = "dora";
+	/** 该角色是否有报番音频（资源包内任意 {@code fan/*.mp3}） */
+	private static boolean hasFanVoice(String id) {
+		return VoiceCache.hasFanVoice(id);
+	}
 
 	/**
 	 * 报番语音角色兜底：该角色没有报番音频时，借用资源包内有报番音频的默认角色（第一个可用的内置角色），
@@ -171,15 +195,6 @@ public final class YakuVoices {
 				return id;
 		}
 		return "";
-	}
-
-	/** 该角色是否有报番音频（探测资源包内 fan/dora.mp3） */
-	private static boolean hasFanVoice(String id) {
-		try (java.io.InputStream in = VoiceCache.openFan(id, FAN_SENTINEL)) {
-			return in != null;
-		} catch (Exception e) {
-			return false;
-		}
 	}
 
 	/**

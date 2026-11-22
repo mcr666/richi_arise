@@ -83,9 +83,14 @@ public final class VoicePlayer {
 		if (source != null && worldGain(source) <= 0.01)
 			return;
 		InputStream in = VoiceCache.open(charId, ev);
+		if (in == null && ev == VoiceEvents.DRICH) {
+			// 资源包未提供两立直宣言：回退普通立直语音
+			ev = VoiceEvents.RICH;
+			in = VoiceCache.open(charId, ev);
+		}
 		if (in == null) {
-			// 听牌/未听属于可选语音（多数角色没有），缺失时不打扰日志
-			if (ev != VoiceEvents.TENPAI && ev != VoiceEvents.NOTEN)
+			// 听牌/未听、两立直宣言属于可选语音（多数角色没有），缺失时不打扰日志
+			if (!isOptional(ev))
 				LogUtils.getLogger().warn("[voice] 无可用语音文件: {} {}（资源包未提供该音频）",
 						charId, ev.act());
 			return;
@@ -98,6 +103,11 @@ public final class VoicePlayer {
 			PENDING.notifyAll();
 		}
 		startWorker();
+	}
+
+	/** 可选语音（缺失静默跳过、不写日志）：流局听牌/未听与两立直宣言 */
+	private static boolean isOptional(VoiceEvents ev) {
+		return ev == VoiceEvents.TENPAI || ev == VoiceEvents.NOTEN || ev == VoiceEvents.DRICH;
 	}
 
 	/**

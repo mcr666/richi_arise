@@ -176,7 +176,7 @@ public class MahjongSettlementScreen extends Screen {
 	}
 
 	/** 单条报番语音的保守时长（刻，2s）：役名与宝牌语音长短差异大，按上限留足，避免提前判"报番结束" */
-	private static final int SETTLE_VOICE_TICKS = 40;
+	private static final int SETTLE_VOICE_TICKS = RichiTableState.SETTLE_VOICE_TICKS;
 	/** 报番语音收尾余量（刻）：最后一条播完到判定结束的缓冲 */
 	private static final int SETTLE_VOICE_TAIL = 20;
 
@@ -449,11 +449,17 @@ public class MahjongSettlementScreen extends Screen {
 						}
 						// 宝牌/红宝牌/里宝牌条目排在列表末尾，随对应宝牌语音逐条显现；
 						// 否则要等全部播报结束才一起出现，看起来像"宝牌都念完了字才出来"
-						int extraTotal = Math.min(mcr.riichi_arise.voice.FanAnnouncer.extrasTotal(), yakus.size());
+						// 影牌（宝牌双刃）没有对应语音且排在最后：不参与这段映射，否则映射基准会整体后移一位，
+						// 导致第一条宝牌语音刚响就把宝牌/红宝牌/里宝牌/影牌一次性全弹出来（音画不同步）；
+						// 影牌等最后一条宝牌语音播完（报番结束）才显现，与它的语音节奏对齐
+						int voicedTail = yakus.size();
+						if (voicedTail > 0 && yakus.get(voicedTail - 1).startsWith("影牌"))
+							voicedTail--;
+						int extraTotal = Math.min(mcr.riichi_arise.voice.FanAnnouncer.extrasTotal(), voicedTail);
 						int extraStarted = mcr.riichi_arise.voice.FanAnnouncer.startedExtras();
 						if (extraTotal > 0 && extraStarted > 0)
 							limit = Math.max(limit,
-									Math.min(yakus.size() - 1, yakus.size() - extraTotal + extraStarted - 1));
+									Math.min(voicedTail - 1, voicedTail - extraTotal + extraStarted - 1));
 					}
 				} else {
 					for (int i = 0; i < shown; i++)
@@ -462,8 +468,8 @@ public class MahjongSettlementScreen extends Screen {
 							limit = i;
 				}
 				// 列优先且每列固定 4 个：col = i/4, row = i%4（播报顺序与排布一致）
-				// 役满：役种逐字彩色渐变（顺序色相），便于与普通役区分
-				boolean yakumanHand = tierRank() == 4;
+				// 役满：役种逐字彩色渐变（顺序色相），便于与普通役区分；累计役满（符≠0）不变色
+				boolean yakumanHand = tierRank() == 4 && this.data.fu() == 0;
 				for (int i = 0; i < shown; i++) {
 					if (i > limit)
 						break;
@@ -471,8 +477,11 @@ public class MahjongSettlementScreen extends Screen {
 					int row = i % 4;
 					if (yakumanHand)
 						drawRainbow(g, yakus.get(i), left + pad + col * COL_W, y + row * 13, i * 4);
-					else
-						g.drawString(this.font, yakus.get(i), left + pad + col * COL_W, y + row * 13, 0x7FFF7F, true);
+					else {
+						// 宝牌双刃：影牌条目红色显示（负番）
+						int color = yakus.get(i).startsWith("影牌") ? 0xFF5555 : 0x7FFF7F;
+						g.drawString(this.font, yakus.get(i), left + pad + col * COL_W, y + row * 13, color, true);
+					}
 				}
 				if (shown < yakus.size() && limit >= shown - 1)
 					g.drawString(this.font, "+" + (yakus.size() - shown), left + pad, y + yakuRows * 13, 0xAAAAAA, true);

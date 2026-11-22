@@ -49,7 +49,7 @@ public final class RichiTableSync {
 					origin.asLong(), -1, false, 0, empty4, zeros, zeros, zeros, empty4, empty4, zeros, new int[4],
 					zeros, zeros, zeros, zeros, empty4, zeros, empty4, empty4, empty4,
 					"", 0, 0, -1, 0, 0, 0, 0, -1, -1, -1, 0, 4, "", "", new int[4], RichiTableState.ROOM_TIE,
-					"", -1, new int[4], false, empty4, ""));
+					"", -1, new int[4], false, empty4, "", 0));
 		}
 	}
 
@@ -140,7 +140,8 @@ public final class RichiTableSync {
 				Arrays.copyOf(st.lastDiscardPos, 4), renderRoom,
 				st.candidates == null ? "" : st.candidates, st.candidatePickSeat,
 				Arrays.copyOf(st.winEffects, 4),
-				st.swapPending, Arrays.copyOf(st.swapPicks, 4), st.tsumoReveal == null ? "" : st.tsumoReveal);
+				st.swapPending, Arrays.copyOf(st.swapPicks, 4), st.tsumoReveal == null ? "" : st.tsumoReveal,
+				st.gameChaosMask);
 		// 形象去重：整局不重发的内容只留索引
 		msg = MahjongTablePayload.dedupe(msg, p.getUUID());
 		// 整包与该观看者上次收到的完全相同（如同桌其他座位变化但对他不可见）：不发
@@ -197,8 +198,15 @@ public final class RichiTableSync {
 	 * 左侧玻璃区凭空多出一张、而真实摸入的那张反而变成不透明。因此保持原有透明牌（前 g-1 张）
 	 * 的最左排列不变，把摸入的那张标在真实末位（bit n-1），使摸牌不改变已有手牌观感。</p>
 	 */
+	/** 本局是否启用玻璃之间的透明牌同步（玻璃本体，或混沌之间且本局纳入了透明规则；用 gameChaosMask 避免终局后改设置算错残影） */
+	private static boolean glassEnabled(RichiTableState st, int renderRoom) {
+		return renderRoom == RichiTableState.ROOM_GLASS
+				|| (renderRoom == RichiTableState.ROOM_CHAOS
+						&& (st.gameChaosMask & RichiTableState.CHAOS_GLASS) != 0);
+	}
+
 	private static int glassLeftMask(RichiTableState st, int seat, int renderRoom) {
-		if (!RichiTableState.isGlassRoom(renderRoom))
+		if (!glassEnabled(st, renderRoom))
 			return 0;
 		List<Integer> hand = st.handCodes(seat);
 		int n = hand.size();
@@ -240,7 +248,7 @@ public final class RichiTableSync {
 	 * 客户端结合 glassMask 把这些透明牌排到手牌最左端，其余手牌位保持未知（普通牌背）。
 	 */
 	private static String glassOnly(RichiTableState st, int seat, int renderRoom) {
-		if (!RichiTableState.isGlassRoom(renderRoom))
+		if (!glassEnabled(st, renderRoom))
 			return "";
 		if (glassCache[seat] == null) {
 			glassCache[seat] = st.glassHands[seat] == null ? "" : st.glassHands[seat];

@@ -465,32 +465,26 @@ public final class TableLayout {
 					}
 					continue;
 				}
-				// 明杠 / 加杠：4 张按实际占宽排布（横放牌长轴沿副露行，占 TILE_LONG），相邻牌不重叠。
-				// 明杠：1 张横放（被杠的那张，位置仍表示来源：上家最左/对家中段/下家最右）；
-				// 加杠：碰的 3 张 + 补的第 4 张，两张横牌并排放在声明端。
+				// 明杠 / 加杠：横放牌长轴沿副露行（占 TILE_LONG），相邻牌不重叠。
+				// 明杠：4 张平排，1 张横放（被杠的那张，位置仍表示来源：上家最左/对家中段/下家最右）；
+				// 加杠：碰的 3 张照常排（1 横 + 2 竖），补的第 4 张横牌叠在声明牌朝桌心一侧，摆成粗 L 形
 				if (meld.size() == 4) {
-					boolean[] horizontal = new boolean[4];
-					int[] index = new int[4];
-					boolean[] assigned = new boolean[4];
-					int claimSlot = rel == 3 ? 0 : rel == 1 ? 3 : 1; // 上家最左、下家最右、对家中段
+					int slots = kakan ? 3 : 4;
+					boolean[] horizontal = new boolean[slots];
+					int[] index = new int[slots];
+					boolean[] assigned = new boolean[slots];
+					int claimSlot = rel == 3 ? 0 : rel == 1 ? slots - 1 : 1; // 上家最左、下家最右、对家中段
 					horizontal[claimSlot] = true;
 					index[claimSlot] = -3; // 副露声明牌（客户端从牌河飞来）
 					assigned[claimSlot] = true;
-					if (kakan) {
-						// 紧挨声明牌并排（下家声明牌在最右，补牌放其左侧；其余放右侧）
-						int addedSlot = rel == 1 ? claimSlot - 1 : claimSlot + 1;
-						horizontal[addedSlot] = true;
-						index[addedSlot] = -2; // 加杠新增牌（客户端从手牌飞来）
-						assigned[addedSlot] = true;
-					}
 					int own = 0;
-					for (int j = 0; j < 4; j++)
+					for (int j = 0; j < slots; j++)
 						if (!assigned[j])
 							index[j] = own++;
 					Vec3 flatLong = rel == 1 ? playerRight : playerLeft; // 横放长轴沿副露行，真正"横着"
 					double innerGap = 0.0015; // 组内相邻牌小缝，避免共面闪烁
-					double total = innerGap * 3.0;
-					for (int j = 0; j < 4; j++)
+					double total = innerGap * (slots - 1);
+					for (int j = 0; j < slots; j++)
 						total += horizontal[j] ? TILE_LONG : TILE_WIDTH;
 					double half = total / 2.0;
 					double c = cursor - half;
@@ -498,15 +492,28 @@ public final class TableLayout {
 					Vec3 groupCenter = meldRow.add(playerRight.scale(c));
 					Vec3 flatOffset = facingCenter.scale(-(geom.small() ? protrude : halfW));
 					double acc = -half;
-					for (int j = 0; j < 4; j++) {
+					double claimU = 0; // 声明牌在组内的行位（加杠第 4 张与它对齐）
+					for (int j = 0; j < slots; j++) {
 						double width = horizontal[j] ? TILE_LONG : TILE_WIDTH;
-						Vec3 target = groupCenter.add(playerRight.scale(acc + width / 2.0));
+						double u = acc + width / 2.0;
 						acc += width + innerGap;
+						if (j == claimSlot)
+							claimU = u;
+						Vec3 target = groupCenter.add(playerRight.scale(u));
 						if (horizontal[j])
 							target = target.add(flatOffset);
 						out.add(new Placement(KIND_MELD, flatEntityPos(target, 0), target, meld.get(j),
 								flatYaw(horizontal[j] ? flatLong : facingCenter),
 								horizontal[j] ? flatLong : facingCenter, true, h, index[j],
+								dealIndex++ * step));
+					}
+					if (kakan) {
+						// 加杠第 4 张：与声明牌同一行位（不沿行续排），朝桌心方向偏一个牌宽叠在它前面，
+						// 两张横牌紧贴成粗 L 形
+						Vec3 added = groupCenter.add(playerRight.scale(claimU)).add(flatOffset)
+								.add(facingCenter.scale(TILE_WIDTH + innerGap));
+						out.add(new Placement(KIND_MELD, flatEntityPos(added, 0), added,
+								meld.get(meld.size() - 1), flatYaw(flatLong), flatLong, true, h, -2,
 								dealIndex++ * step));
 					}
 					continue;

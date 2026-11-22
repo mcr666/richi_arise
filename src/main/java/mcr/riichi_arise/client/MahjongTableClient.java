@@ -628,7 +628,8 @@ public final class MahjongTableClient {
 		MahjongTablePayload.ViewMessage own = participatingView();
 		if (own != null)
 			return (own.roomType() == RichiTableState.ROOM_AMETHYST
-					|| own.roomType() == RichiTableState.ROOM_CHAOS)
+					|| (own.roomType() == RichiTableState.ROOM_CHAOS
+							&& (own.chaosMask() & RichiTableState.CHAOS_AMETHYST) != 0))
 					&& own.phase() == RichiTableState.PHASE_PLAYING ? own : null;
 		// 旁观者：跟随"显示对局信息"开关
 		if (!RichiConfig.SPECTATOR_SHOW_TABLE.get())
@@ -636,7 +637,8 @@ public final class MahjongTableClient {
 		for (TableRender t : TABLES.values())
 			if (t.last != null && t.last.viewerSeat() < 0
 					&& (t.last.roomType() == RichiTableState.ROOM_AMETHYST
-							|| t.last.roomType() == RichiTableState.ROOM_CHAOS)
+							|| (t.last.roomType() == RichiTableState.ROOM_CHAOS
+									&& (t.last.chaosMask() & RichiTableState.CHAOS_AMETHYST) != 0))
 					&& t.last.phase() == RichiTableState.PHASE_PLAYING)
 				return t.last;
 		return null;
@@ -801,7 +803,8 @@ public final class MahjongTableClient {
 		if (!synthetic)
 			table.last = msg;
 		table.lazurite = msg.roomType() == RichiTableState.ROOM_LAZURITE
-				|| msg.roomType() == RichiTableState.ROOM_CHAOS;
+				|| (msg.roomType() == RichiTableState.ROOM_CHAOS
+						&& (msg.chaosMask() & RichiTableState.CHAOS_LAZURITE) != 0);
 		BlockPos origin = BlockPos.of(key);
 		if (!(level.getBlockState(origin).getBlock() instanceof FengPanBlock)) {
 			discardAll(level, table); // 区块未加载/桌子不存在：先清场，等下一包

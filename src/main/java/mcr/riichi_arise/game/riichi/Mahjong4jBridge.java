@@ -181,9 +181,14 @@ public final class Mahjong4jBridge {
 	 *  宝牌条目只在真役满时省略；累计役满照常列/报（靠 {@link #trueYakuman()} 判定） */
 	public record WinResult(boolean win, boolean yakuman, int han, int fu,
 			List<String> yakuNames, ScoreVal score, List<Integer> doraHits, List<Integer> uraHits,
-			List<Integer> redHits) {
+			List<Integer> redHits, List<Integer> shadowHits) {
 		public WinResult(boolean win, boolean yakuman, int han, int fu, List<String> yakuNames, ScoreVal score) {
-			this(win, yakuman, han, fu, yakuNames, score, List.of(), List.of(), List.of());
+			this(win, yakuman, han, fu, yakuNames, score, List.of(), List.of(), List.of(), List.of());
+		}
+
+		public WinResult(boolean win, boolean yakuman, int han, int fu, List<String> yakuNames, ScoreVal score,
+				List<Integer> doraHits, List<Integer> uraHits, List<Integer> redHits) {
+			this(win, yakuman, han, fu, yakuNames, score, doraHits, uraHits, redHits, List.of());
 		}
 
 		/** 真役满（役满役种 / 天地和）：宝牌、拔北、里宝牌不列不计、不播报 */
@@ -205,10 +210,20 @@ public final class Mahjong4jBridge {
 	 * @param tsumo           是否自摸
 	 * @param doraIndicators  已揭开宝牌指示牌
 	 */
-	/** 场况附加标记（双立直/抢杠/岭上/海底/河底/里宝牌） */
+	/** 场况附加标记（双立直/抢杠/岭上/海底/河底/里宝牌）。
+	 *  宝牌双刃（dualBlade）：宝牌每张 +2 翻（界面/语音条目按翻倍后的番数计）；
+	 *  shadowIndicators 为表指示牌原牌，命中手牌+副露时每张 -1 翻（影牌；里指示牌不算影牌）。 */
 	public record Flags(boolean doubleRiichi, boolean chankan, boolean rinshan,
-			boolean haitei, boolean houtei, List<Integer> uraDoras) {
-		public static final Flags NONE = new Flags(false, false, false, false, false, List.of());
+			boolean haitei, boolean houtei, List<Integer> uraDoras,
+			boolean dualBlade, List<Integer> shadowIndicators, List<Integer> uraShadowIndicators) {
+		public static final Flags NONE = new Flags(false, false, false, false, false, List.of(),
+				false, List.of(), List.of());
+
+		/** 兼容构造：非宝牌双刃对局（无影牌） */
+		public Flags(boolean doubleRiichi, boolean chankan, boolean rinshan,
+				boolean haitei, boolean houtei, List<Integer> uraDoras) {
+			this(doubleRiichi, chankan, rinshan, haitei, houtei, uraDoras, false, List.of(), List.of());
+		}
 	}
 
 	/**
@@ -488,10 +503,12 @@ public final class Mahjong4jBridge {
 			}
 			if (han <= 0)
 				return new WinResult(false, false, 0, 0, names, ScoreVal.ZERO);
-			// 宝牌（含红宝牌简化：红五不算宝）
+			// 宝牌（含红宝牌简化：红五不算宝）；宝牌双刃：宝牌每张 +2 翻
 			int[] fullComp = doraCompForHan;
+			int doraHan = 0;
 			for (Tile doraTile : general.getDora())
-				han += fullComp[doraTile.ordinal()];
+				doraHan += fullComp[doraTile.ordinal()];
+			han += flags.dualBlade() ? doraHan * 2 : doraHan;
 			// 符数取整：Mahjong4j 的 getFu() 可能返回未取整值（如 22/24），非法符会导致计分异常被吞
 			int rawFu = Math.max(player.getFu(), 20);
 			if (pinfuRevoked)
@@ -508,6 +525,7 @@ public final class Mahjong4jBridge {
 				for (int t : f.tiles)
 					allCodes.add(t);
 			List<Integer> doraHits = new ArrayList<>(), uraHits = new ArrayList<>(), redHits = new ArrayList<>();
+			List<Integer> shadowHits = new ArrayList<>();
 			for (int raw : allCodes) {
 				int c = mcr.riichi_arise.game.TileFlag.base(raw); // 透明牌标志不影响宝牌判定
 				if (c == 0 || c == 10 || c == 20) {
@@ -522,28 +540,42 @@ public final class Mahjong4jBridge {
 				for (int d : doraIndicators)
 					if (mcr.riichi_arise.game.TileFlag.base(d) == c)
 						doraMul++;
-				for (int i = 0; i < doraMul; i++)
+				// 宝牌双刃：条目数 = 翻倍后的番数（宝牌每张 +2 翻，界面/语音按番数报）
+				for (int i = 0; i < doraMul * (flags.dualBlade() ? 2 : 1); i++)
 					doraHits.add(c);
 				if (riichi) {
 					int uraMul = 0;
 					for (int u : flags.uraDoras())
 						if (mcr.riichi_arise.game.TileFlag.base(u) == c)
 							uraMul++;
-					for (int i = 0; i < uraMul; i++)
+					// 宝牌双刃：条目数同样按翻倍后的番数（里宝牌每张 +2 翻，界面/语音与番数一致）
+					for (int i = 0; i < uraMul * (flags.dualBlade() ? 2 : 1); i++)
 						uraHits.add(c);
 				}
+				// 宝牌双刃：影牌 = 表指示牌自身，命中手牌+副露每张 -1 翻（里指示牌不算影牌）
+				if (flags.dualBlade()) {
+					int shadowMul = 0;
+					for (int s : flags.shadowIndicators())
+						if (mcr.riichi_arise.game.TileFlag.base(s) == c)
+							shadowMul++;
+					for (int i = 0; i < shadowMul; i++)
+						shadowHits.add(c);
+				}
 			}
+			// 宝牌双刃：影牌扣减（最低降至 1 番在下方统一钳制）
+			if (flags.dualBlade() && !shadowHits.isEmpty())
+				han -= shadowHits.size();
 			// 红宝牌翻数：手牌+副露中的红五（0/10/20）每张 +1 翻
 			int red = redHits.size();
 			if (red > 0)
 				han += red;
-			// 里宝牌：立直和牌时按里指示牌计
+			// 里宝牌：立直和牌时按里指示牌计（宝牌双刃：每张同样 +2 翻）
 			if (riichi && !flags.uraDoras().isEmpty()) {
 				int ura = 0;
 				for (Tile ind : toTiles(flags.uraDoras()))
 					ura += fullComp[ind.ordinal()];
 				if (ura > 0)
-					han += ura;
+					han += flags.dualBlade() ? ura * 2 : ura;
 			}
 			// 拔北（三麻）：拔出的北风每张 +1 翻抜きドラ；同时它仍按牌面参与表/里宝牌判定，
 			// 三种来源各自成立、互不吞并（指示牌为西 → 表宝牌再 +1；立直且里宝牌为北 → 里宝牌再 +1）。
@@ -581,15 +613,18 @@ public final class Mahjong4jBridge {
 				han++;
 				names.add("HOUTEI");
 			}
+			// 宝牌双刃：影牌扣减后总番最低降至 1 番（影牌不影响役满牌型——真役满在上方已提前返回）
+			if (flags.dualBlade() && han < 1)
+				han = 1;
 			// 累计役满（雀魂规则）：一般役累计翻数每满 13 翻按 1 个役满计（26 翻 = 双倍役满）；
 			// mahjong4j 的 calculateScore 对 han≥13 一律只给单倍役满。
 			// 保留真实 han/fu（fu 非 0）以区别真役满：宝牌/拔北照常列出与播报
 			int k = han / 13;
 			if (k > 0)
 				return new WinResult(true, true, han, fu, names,
-						ScoreVal.yakuman(isParent, k), doraHits, uraHits, redHits);
+						ScoreVal.yakuman(isParent, k), doraHits, uraHits, redHits, shadowHits);
 			ScoreVal s = ScoreVal.of(Score.calculateScore(isParent, han, fu));
-			return new WinResult(true, false, han, fu, names, s, doraHits, uraHits, redHits);
+			return new WinResult(true, false, han, fu, names, s, doraHits, uraHits, redHits, shadowHits);
 		} catch (Exception e) {
 			return new WinResult(false, false, 0, 0, List.of(), ScoreVal.ZERO);
 		}

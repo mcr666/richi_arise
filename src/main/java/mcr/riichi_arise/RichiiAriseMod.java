@@ -44,6 +44,8 @@ public class RichiiAriseMod {
 		if (net.neoforged.fml.loading.FMLEnvironment.dist.isClient()) {
 			modContainer.registerExtensionPoint(net.neoforged.neoforge.client.gui.IConfigScreenFactory.class,
 					net.neoforged.neoforge.client.gui.ConfigurationScreen::new);
+			// 资源包重载后清空语音索引（F3+T 不会替换 ResourceManager 实例，需主动失效）
+			modEventBus.addListener(mcr.riichi_arise.client.VoicePackReloadHandler::onRegisterReloadListeners);
 		}
 		// End of user code block mod constructor
 		// 触发游戏规则静态注册（引用静态字段才会执行 <clinit>；class.getName() 仅加载类不初始化）

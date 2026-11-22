@@ -16,7 +16,7 @@ public class RiichiWall {
 	private final List<Integer> doraStacks = new ArrayList<>(10);
 	/** 岭上牌 4 张（王牌区另一端，杠后补牌专用，普通摸牌不可触及） */
 	private final List<Integer> rinshanTiles = new ArrayList<>(4);
-	/** 已揭开的指示牌叠数（开局 1，每次杠 +1） */
+	/** 已揭开的指示牌叠数（默认 1；宝牌双刃开局 3，杠后 +1，上限 5） */
 	private int revealedIndicators = 1;
 	/** 三麻将牌集：无 2m~8m（万子仅 1/9）与红五万，共 108 张（雀魂三麻） */
 	private final boolean sanma;
@@ -41,8 +41,16 @@ public class RiichiWall {
 	 * 每种牌随机留 1 张不透明、其余 3 张打上 {@link mcr.riichi_arise.game.TileFlag#GLASS} 标志。
 	 */
 	public RiichiWall(int playerCount, boolean glassMode) {
+		this(playerCount, glassMode, 1);
+	}
+
+	/**
+	 * 按对局人数构建牌山，并指定开局揭开的指示牌叠数（宝牌双刃 = 3，其余 = 1）。
+	 */
+	public RiichiWall(int playerCount, boolean glassMode, int initialIndicators) {
 		this.sanma = playerCount == 3;
 		this.glassMode = glassMode;
+		this.revealedIndicators = Math.max(1, Math.min(5, initialIndicators));
 		boolean redFive = !glassMode;
 		if (sanma) {
 			for (int d : new int[] { 1, 9 })

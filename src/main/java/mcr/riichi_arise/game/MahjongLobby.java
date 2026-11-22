@@ -97,13 +97,26 @@ public final class MahjongLobby {
 				}
 			}
 		case MahjongLobbyPayloads.ACT_SET_ROOM -> {
-				// 房间类型切换（等待/终局未清理）：extra = 0 铁之间 / 1 玻璃之间 / 2 紫水晶之间 / 3 钻石之间 / 4 青金石之间 / 5 混沌之间（开局时生效）
+				// 房间类型切换（等待/终局未清理）：extra = 0 铁之间 / 1 玻璃之间 / 2 紫水晶之间 / 3 钻石之间 / 4 青金石之间 / 5 混沌之间 / 6 宝牌双刃（开局时生效）
 				// 对局进行中切换：只提示不改配置，并照常下发原值（房间按钮回到当前实际类型）
 				if (canManage(sp) && (extra == RichiTableState.ROOM_TIE || extra == RichiTableState.ROOM_GLASS
 						|| extra == RichiTableState.ROOM_AMETHYST || extra == RichiTableState.ROOM_DIAMOND
-						|| extra == RichiTableState.ROOM_LAZURITE || extra == RichiTableState.ROOM_CHAOS)) {
+						|| extra == RichiTableState.ROOM_LAZURITE || extra == RichiTableState.ROOM_CHAOS
+						|| extra == RichiTableState.ROOM_DUALBLADE)) {
 					if (st.phase != RichiTableState.PHASE_PLAYING) {
 						st.roomType = extra;
+						saveSettings(sp, origin, st);
+					} else {
+						sp.displayClientMessage(Component.translatable("message.riichi_arise.room_locked"), true);
+					}
+					broadcastSync(sp.serverLevel(), origin, st);
+				}
+			}
+		case MahjongLobbyPayloads.ACT_SET_CHAOS_MASK -> {
+				// 混沌之间纳入规则：extra = 1 透明 / 2 紫水晶 / 4 钻石 / 8 青金石（位或，开局时生效）
+				if (canManage(sp)) {
+					if (st.phase != RichiTableState.PHASE_PLAYING) {
+						st.chaosMask = extra & RichiTableState.CHAOS_ALL;
 						saveSettings(sp, origin, st);
 					} else {
 						sp.displayClientMessage(Component.translatable("message.riichi_arise.room_locked"), true);
@@ -204,6 +217,14 @@ public final class MahjongLobby {
 				// 食替：吃/碰后当巡不能打出所鸣的同一张牌（默认关）
 				if (canManage(sp) && st.phase != RichiTableState.PHASE_PLAYING) {
 					st.kuikae = extra == 1;
+					saveSettings(sp, origin, st);
+					broadcastSync(sp.serverLevel(), origin, st);
+				}
+			}
+			case MahjongLobbyPayloads.ACT_SET_SWAP -> {
+				// 换牌开关：青金石之间每局开始时选三张牌互换的环节（默认开）
+				if (canManage(sp) && st.phase != RichiTableState.PHASE_PLAYING) {
+					st.swap = extra == 1;
 					saveSettings(sp, origin, st);
 					broadcastSync(sp.serverLevel(), origin, st);
 				}
@@ -424,6 +445,7 @@ public final class MahjongLobby {
 			st.longBank[i] = RichiTableState.THINK_PRESETS[st.thinkIdx][1] * 20;
 		// 锁定本局房间类型：此后大厅 roomType 只影响下一局，终局残影始终按本局类型渲染
 		st.gameRoomType = st.roomType;
+		st.gameChaosMask = st.chaosMask;
 		RiichiGame game = new RiichiGame(level, origin, st);
 		RichiTableManager.setGame(origin, game);
 		clearQueueDisplay(level, origin);
@@ -1045,10 +1067,10 @@ public final class MahjongLobby {
 				voice = mcr.riichi_arise.game.riichi.AiCharacters.voice(mode);
 			}
 			seatVoices[seat] = voice;
-			// 和牌特效风格：人类 = 个人设定（全局持久化），AI/空座 = 2（默认光环）
+			// 和牌特效风格：人类 = 个人设定（全局持久化），AI/空座 = 8（默认特效）
 			st.winEffects[seat] = st.players[seat] != null && !st.aiSeat[seat]
 					? sd.getWinEffect(st.players[seat], 2)
-					: 2;
+					: 8;
 		}
 		for (ServerPlayer p : nearby) {
 			String ownVoice = sd.getVoice(p.getUUID().toString());
@@ -1059,7 +1081,7 @@ public final class MahjongLobby {
 						java.util.Arrays.asList(seatNames), aiMask, queueNames, canManage(p), st.gameType,
 						voteCount, st.openHand, seatModes, st.thinkIdx, st.aiSpeedIdx,
 						ownVoice == null ? "" : ownVoice, java.util.Arrays.asList(seatVoices), st.playerCount,
-						st.roomType, ownWinEffect, ownRiichiEffect, st.tobi, st.kuikae));
+						st.roomType, ownWinEffect, ownRiichiEffect, st.tobi, st.kuikae, st.swap, st.chaosMask));
 		}
 		// 悬浮提示随状态同步：等待期显示（空队列给加入提示），其它阶段清除
 		if (st.phase == RichiTableState.PHASE_WAITING)

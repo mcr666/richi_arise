@@ -20,7 +20,9 @@ public enum VoiceEvents {
 	BEI(6, "act_babei"),
 	/** 流局听牌 / 未听牌：可选提供音频（缺失时静默跳过，不写日志） */
 	TENPAI(7, "act_tenpai"),
-	NOTEN(8, "act_noten");
+	NOTEN(8, "act_noten"),
+	/** 两立直宣言（第一巡立直）：可选提供音频（缺失时静默跳过，回退普通立直语音） */
+	DRICH(9, "act_drich");
 
 	private final int code;
 	private final String act;
