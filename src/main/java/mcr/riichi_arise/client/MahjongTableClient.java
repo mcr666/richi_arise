@@ -92,7 +92,7 @@ public final class MahjongTableClient {
 	private static final Map<Long, TableRender> TABLES = new HashMap<>();
 	/** 隐藏手牌里的玻璃牌背占位码：牌面数据为"未知"，渲染为玻璃牌背（牌面朝内，看不见） */
 	private static final int GLASS_BACK_CODE = -2;
-	/** 各桌 AI 座位形象（key = 桌 originPacked，value = 座位 → 形象记录：假玩家或桔螈实体） */
+	/** 各桌 AI 座位形象（key = 桌 originPacked，value = 座位 → 形象记录） */
 	private static final Map<Long, Map<Integer, Avatar>> AVATARS = new HashMap<>();
 	/** 各桌牌桌中心（桌 key → 桌心世界坐标），供形象落地后重调视线使用 */
 	private static final Map<Long, Vec3> TABLE_CENTERS = new HashMap<>();
@@ -104,21 +104,19 @@ public final class MahjongTableClient {
 	private static final Map<net.minecraft.resources.ResourceLocation, Boolean> SLIM_CACHE = new HashMap<>();
 
 	/**
-	 * AI 座位形象记录：假玩家（+隐形骑乘载具）或桔螈真实实体。
-	 * 桔螈是模组注册的真实实体，{@code mob} 非空、玩家与载具为 null，直接以实体本身出座位。
+	 * AI 座位形象记录：假玩家（+隐形骑乘载具）。
 	 */
 	private record Avatar(RemotePlayer player,
 			net.minecraft.world.entity.decoration.ArmorStand seat,
-			String form, UUID profileUuid, boolean standing,
-			mcr.riichi_arise.entity.OraxolotlEntity mob) {
+			String form, UUID profileUuid, boolean standing) {
 
-		/** 形象主体（假玩家或桔螈实体） */
+		/** 形象主体（假玩家） */
 		private net.minecraft.world.entity.Entity body() {
-			return this.mob != null ? this.mob : this.player;
+			return this.player;
 		}
 
 		private boolean removed() {
-			return this.mob != null ? this.mob.isRemoved() : this.player.isRemoved();
+			return this.player.isRemoved();
 		}
 	}
 
@@ -1089,7 +1087,7 @@ public final class MahjongTableClient {
 	}
 
 	// ==================================================================
-	// AI 座位形象：假玩家（客户端-only RemotePlayer）/ 桔螈真实实体
+	// AI 座位形象：假玩家（客户端-only RemotePlayer）
 	// ==================================================================
 
 	/**
@@ -1130,30 +1128,19 @@ public final class MahjongTableClient {
 				name = Component.translatable("gui.riichi_arise.lobby.ch_" + form).getString();
 			if (cur == null || cur.removed() || !cur.form().equals(form)
 					|| !cur.profileUuid().equals(uuid)
-					|| (cur.mob() == null && cur.standing() != wantStanding)) {
+					|| cur.standing() != wantStanding) {
 				if (cur != null) {
 					avatars.remove(seat);
 					removeAvatar(cur);
 				}
 				cur = createAvatar(level, form, uuid, name, pos, yaw, wantStanding);
-				if (cur != null) {
+				if (cur != null)
 					avatars.put(seat, cur);
-					if (cur.mob() != null)
-						cur.mob().setSitting(!waiting); // 创建即定好动画阶段：等待待机 / 对局 feral_sit
-				}
 			}
 			// 等待阶段不钉位（保持创建时的随机站位）；开局后钉到座位站位
-			if (cur != null) {
-				if (cur.mob() != null) {
-					cur.mob().setSitting(!waiting);
-					if (!waiting) {
-						pinAvatar(origin.getY(), pos, yaw, cur);
-						lookAtTableCenter(cur, center, pos);
-					}
-				} else if (!waiting) {
-					pinAvatar(origin.getY(), pos, yaw, cur);
-					lookAtTableCenter(cur, center, pos); // 对局中始终看向牌桌中心点
-				}
+			if (cur != null && !waiting) {
+				pinAvatar(origin.getY(), pos, yaw, cur);
+				lookAtTableCenter(cur, center, pos); // 对局中始终看向牌桌中心点
 			}
 		}
 		if (avatars.isEmpty())
@@ -1215,9 +1202,6 @@ public final class MahjongTableClient {
 	 */
 	private static Avatar createAvatar(ClientLevel level, String form, UUID uuid, String name,
 			Vec3 pos, float yaw, boolean standing) {
-		// 桔螈是模组注册的真实实体：直接生成实体本体出座位，不套假玩家/盔甲架载具
-		if ("oraxolotl".equals(form))
-			return createOraxolotlAvatar(level, form, uuid, pos, yaw);
 		GameProfile profile = new GameProfile(uuid, name);
 		Minecraft mc = Minecraft.getInstance();
 		if (mc.getConnection() != null)
@@ -1292,68 +1276,15 @@ public final class MahjongTableClient {
 		}
 		player.setOldPosAndRot();
 		level.addEntity(player);
-		return new Avatar(player, seat, form, uuid, standing, null);
-	}
-
-	/**
-	 * 创建桔螈座位形象：直接生成模组注册的 {@link mcr.riichi_arise.entity.OraxolotlEntity} 本体并加入 ClientLevel。
-	 * 无 AI、无重力、不可推动、不可选中（不挡选牌射线、不响应右键）、不受伤害；
-	 * 动画阶段由 {@link mcr.riichi_arise.entity.OraxolotlEntity#setSitting} 驱动（等待待机 / 对局 feral_sit），
-	 * 水平站位由 pinAvatar 维护，竖直由 settleAvatars 用原版碰撞落定。
-	 */
-	private static Avatar createOraxolotlAvatar(ClientLevel level, String form, UUID uuid, Vec3 pos, float yaw) {
-		mcr.riichi_arise.entity.OraxolotlEntity mob = new mcr.riichi_arise.entity.OraxolotlEntity(
-				mcr.riichi_arise.MahjongEntities.ORAXOLOTL.get(), level) {
-			@Override
-			public boolean isPushable() {
-				return false; // 不被玩家/其他实体挤走
-			}
-
-			@Override
-			public boolean isPickable() {
-				return false; // 不参与实体射线拾取：不挡选牌，也不可被攻击
-			}
-
-			@Override
-			public net.minecraft.world.InteractionResult mobInteract(
-					net.minecraft.world.entity.player.Player player, net.minecraft.world.InteractionHand hand) {
-				return net.minecraft.world.InteractionResult.PASS; // 右键穿透，不触发坐下/起身交互
-			}
-		};
-		mob.setId(--nextAvatarEntityId); // 客户端唯一负数 id，与服务端实体区间隔离
-		mob.setNoAi(true); // 无 AI：不跑寻路/随机漫步（刨土等自主行为随之关闭）
-		mob.setNoGravity(true); // 不自行下落，交由 settleAvatars 用原版碰撞落定
-		mob.setInvulnerable(true);
-		mob.moveTo(pos.x, pos.y, pos.z, yaw, 0.0F);
-		mob.setOldPosAndRot();
-		mob.yBodyRot = yaw;
-		mob.yBodyRotO = yaw;
-		mob.yHeadRot = yaw;
-		mob.yHeadRotO = yaw;
-		level.addEntity(mob);
-		return new Avatar(null, null, form, uuid, false, mob);
+		return new Avatar(player, seat, form, uuid, standing);
 	}
 
 	/**
 	 * 钉住形象在座位站位（面朝桌心）：假玩家坐姿模式更新隐形载具，坐标由 rideTick 挂点跟随；
-	 * 站姿模式每包把假玩家钉到站位水平 x/z；桔螈直接把真实实体本体钉到站位水平 x/z。均同步头身朝向。
-	 * 竖直：站姿/坐姿由原版重力自行落定，桔螈由 {@link #settleAvatars} 用原版碰撞落定（此处保持当前 y 不干预）。
-	 * 水平始终钉住站位 x/z。
+	 * 站姿模式每包把假玩家钉到站位水平 x/z。均同步头身朝向。
+	 * 竖直由原版重力自行落定，水平始终钉住站位 x/z。
 	 */
 	private static void pinAvatar(double baseY, Vec3 pos, float yaw, Avatar avatar) {
-		if (avatar.mob() != null) {
-			// 桔螈真实实体：直接钉住本体水平站位与朝向（竖直由 settleAvatars 落定）
-			mcr.riichi_arise.entity.OraxolotlEntity mob = avatar.mob();
-			if (mob.isRemoved())
-				return;
-			mob.moveTo(pos.x, mob.getY(), pos.z, yaw, 0.0f);
-			mob.setOldPosAndRot();
-			mob.yBodyRot = yaw;
-			mob.yBodyRotO = yaw;
-			mob.yHeadRot = yaw;
-			mob.yHeadRotO = yaw;
-			return;
-		}
 		RemotePlayer player = avatar.player();
 		if (player.isRemoved())
 			return;
@@ -1378,13 +1309,9 @@ public final class MahjongTableClient {
 		player.yHeadRotO = yaw;
 	}
 
-	/** 删除形象实体（假玩家含隐形骑乘载具；桔螈直接移除自身）；无其他假玩家引用同一档案时清理注入的 PlayerInfo */
+	/** 删除形象实体（假玩家含隐形骑乘载具）；无其他假玩家引用同一档案时清理注入的 PlayerInfo */
 	private static void removeAvatar(Avatar avatar) {
 		AVATAR_GROUND.remove(avatar); // 清理落地跟踪
-		if (avatar.mob() != null) {
-			avatar.mob().discard(); // 桔螈：直接移除实体本体，无载具
-			return;
-		}
 		if (avatar.seat() != null)
 			avatar.seat().discard();
 		avatar.player().discard();
@@ -1416,8 +1343,6 @@ public final class MahjongTableClient {
 			Avatar a = avatars.get(seat);
 			if (a == null || a.removed())
 				continue;
-			if (a.mob() != null)
-				continue; // 桔螈真实实体：不做玩家挥手动画
 			boolean acted = !java.util.Objects.equals(prev.rivers()[seat], msg.rivers()[seat])
 					|| !java.util.Objects.equals(prev.melds()[seat], msg.melds()[seat])
 					|| prev.handsExposed()[seat] != msg.handsExposed()[seat];
@@ -1442,8 +1367,8 @@ public final class MahjongTableClient {
 	private static void driveAvatarWaves() {
 		for (Map<Integer, Avatar> seats : AVATARS.values()) {
 			for (Avatar a : seats.values()) {
-				if (a.standing() || a.mob() != null)
-					continue; // 站姿：原版 tick 自行推进挥手动画；桔螈不是玩家，无挥手
+				if (a.standing())
+					continue; // 站姿：原版 tick 自行推进挥手动画
 				net.minecraft.client.player.RemotePlayer p = a.player();
 				if (p.isRemoved())
 					continue;
@@ -1463,16 +1388,15 @@ public final class MahjongTableClient {
 	}
 
 	/**
-	 * 形象落地修正（每 tick）：坐姿载具、站姿假人、桔螈实体都不会跑原版重力
-	 * （{@code RemotePlayer#aiStep} 不调 super；桔螈无 AI/无重力），统一在此处理——
+	 * 形象落地修正（每 tick）：坐姿载具、站姿假人都不会跑原版重力
+	 * （{@code RemotePlayer#aiStep} 不调 super），统一在此处理——
 	 * 先抬出方块（出生点低于地表时就是"沉进地里"），再让悬空的用原版碰撞下落。
 	 */
 	private static void settleAvatars(ClientLevel level) {
 		for (Map<Integer, Avatar> seats : AVATARS.values()) {
 			for (Avatar a : seats.values()) {
-				// 站姿：假人本体；坐姿：隐形载具；桔螈：实体本体
-				net.minecraft.world.entity.Entity body = a.mob() != null ? a.mob()
-						: (a.standing() ? a.player() : a.seat());
+				// 站姿：假人本体；坐姿：隐形载具
+				net.minecraft.world.entity.Entity body = a.standing() ? a.player() : a.seat();
 				if (body == null || body.isRemoved())
 					continue;
 				liftOutOfBlocks(level, body);
@@ -1493,8 +1417,6 @@ public final class MahjongTableClient {
 
 	/** 让假玩家头部朝向牌桌中心点（横向 yaw + 垂直俯角），对局中始终看向桌心 */
 	private static void lookAtTableCenter(Avatar a, Vec3 center, Vec3 pos) {
-		if (a.mob() != null)
-			return; // 桔螈朝向已由 pinAvatar 钉好；坐姿头部姿势固定，无需俯仰
 		net.minecraft.client.player.RemotePlayer p = a.player();
 		if (p.isRemoved())
 			return;

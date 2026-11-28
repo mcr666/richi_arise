@@ -88,6 +88,10 @@ public class MahjongClient {
 		event.registerAboveAll(net.minecraft.resources.ResourceLocation.fromNamespaceAndPath(
 				mcr.riichi_arise.RichiiAriseMod.MODID, "lazurite_point_delta"),
 				(guiGraphics, partialTick) -> MahjongPointDeltaOverlay.render(guiGraphics));
+		// 结算界面叠加层（客户端设置「结算界面停靠左侧」开启时）：左侧面板，不打开 GUI、不接管输入
+		event.registerAboveAll(net.minecraft.resources.ResourceLocation.fromNamespaceAndPath(
+				mcr.riichi_arise.RichiiAriseMod.MODID, "settlement_overlay"),
+				(guiGraphics, partialTick) -> MahjongSettlementScreen.renderOverlay(guiGraphics));
 	}
 
 	/**
@@ -117,14 +121,6 @@ public class MahjongClient {
 	public static void onRegisterRenderers(net.neoforged.neoforge.client.event.EntityRenderersEvent.RegisterRenderers event) {
 		event.registerBlockEntityRenderer(mcr.riichi_arise.MahjongBlockEntities.MAHJONG_TILE.get(),
 				MahjongTileBlockRenderer::new);
-		event.registerEntityRenderer(mcr.riichi_arise.MahjongEntities.ORAXOLOTL.get(), OraxolotlRenderer::new);
-	}
-
-	/** 桔螈模型层（实体渲染与麻将桌 AI 形象共用同一套烘焙模型） */
-	@SubscribeEvent
-	public static void onRegisterLayerDefinitions(
-			net.neoforged.neoforge.client.event.EntityRenderersEvent.RegisterLayerDefinitions event) {
-		event.registerLayerDefinition(OraxolotlModel.LAYER_LOCATION, OraxolotlModel::createBodyLayer);
 	}
 
 	/** 手持风盘（大/小型）时，扫描附近风盘并在每个桌面中心外围生成 astral_burst 粒子圈 */
@@ -132,7 +128,8 @@ public class MahjongClient {
 	public static void onClientTick(ClientTickEvent.Post event) {
 		tickCounter++;
 		MahjongTableClient.tick(); // 牌桌发牌/倒牌动画调度（逐 tick 驱动）
-		MahjongSettlementScreen.tickDeferredOpen(); // 和牌语音播完后再弹结算界面
+		MahjongSettlementScreen.tickDeferredOpen(); // 和牌语音播完后再展示结算界面
+		MahjongSettlementScreen.tickOverlay();     // 结算界面叠加层：计时/播报/自动确认（不打开 GUI 时）
 		MahjongPointDeltaScreen.tickWaiting(); // 点数变化界面"等待其他玩家"省略号动画与确认重发
 		MahjongPointDeltaOverlay.tick();       // 万象修罗左侧叠加层：动画计时与 1s 自动确认
 		Minecraft minecraft = Minecraft.getInstance();

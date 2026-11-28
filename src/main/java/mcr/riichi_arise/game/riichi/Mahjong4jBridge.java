@@ -212,7 +212,8 @@ public final class Mahjong4jBridge {
 	 */
 	/** 场况附加标记（双立直/抢杠/岭上/海底/河底/里宝牌）。
 	 *  宝牌双刃（dualBlade）：宝牌每张 +2 翻（界面/语音条目按翻倍后的番数计）；
-	 *  shadowIndicators 为表指示牌原牌，命中手牌+副露时每张 -1 翻（影牌；里指示牌不算影牌）。 */
+	 *  shadowIndicators/uraShadowIndicators 为表/里指示牌原牌，命中手牌+副露时每张 -1 翻（影牌，
+	 *  里指示牌仅在立直和牌时计入）。 */
 	public record Flags(boolean doubleRiichi, boolean chankan, boolean rinshan,
 			boolean haitei, boolean houtei, List<Integer> uraDoras,
 			boolean dualBlade, List<Integer> shadowIndicators, List<Integer> uraShadowIndicators) {
@@ -552,12 +553,16 @@ public final class Mahjong4jBridge {
 					for (int i = 0; i < uraMul * (flags.dualBlade() ? 2 : 1); i++)
 						uraHits.add(c);
 				}
-				// 宝牌双刃：影牌 = 表指示牌自身，命中手牌+副露每张 -1 翻（里指示牌不算影牌）
+				// 宝牌双刃：影牌 = 指示牌自身（表指示牌恒计；立直和牌时里指示牌同样产生影牌），每张 -1 翻
 				if (flags.dualBlade()) {
 					int shadowMul = 0;
 					for (int s : flags.shadowIndicators())
 						if (mcr.riichi_arise.game.TileFlag.base(s) == c)
 							shadowMul++;
+					if (riichi)
+						for (int s : flags.uraShadowIndicators())
+							if (mcr.riichi_arise.game.TileFlag.base(s) == c)
+								shadowMul++;
 					for (int i = 0; i < shadowMul; i++)
 						shadowHits.add(c);
 				}

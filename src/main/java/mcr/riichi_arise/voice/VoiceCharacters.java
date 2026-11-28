@@ -22,7 +22,7 @@ public final class VoiceCharacters {
 
 	/** 内置角色 id（act 语音随 mod 打包；报番兜底只借用这些角色） */
 	public static final List<String> BUILTIN_IDS = List.of(
-			"linlang", "yiji", "fuji", "bamuwei", "akagi", "washizu", "oraxolotl");
+			"linlang", "yiji", "fuji", "bamuwei", "akagi", "washizu");
 
 	/** 合法角色 id：小写字母/数字/下划线，1~32 位（服务端不知道客户端装了哪些资源包，只校验格式） */
 	private static final Pattern ID_PATTERN = Pattern.compile("[a-z0-9_]{1,32}");
@@ -41,7 +41,6 @@ public final class VoiceCharacters {
 		put("bamuwei", "八木唯");
 		put("akagi", "赤木しげる");
 		put("washizu", "鷲巣巌");
-		put("oraxolotl", "桔螈");
 
 		// —— 其他角色：仅提供中文显示名，语音由资源包提供 ——
 		put("qiancangtou", "浅仓透");

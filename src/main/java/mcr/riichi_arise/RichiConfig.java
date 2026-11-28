@@ -23,6 +23,8 @@ public class RichiConfig {
 	public static final ModConfigSpec.EnumValue<CandidatePosition> CANDIDATE_POSITION;
 	/** 透明牌平放（默认关）：开启后雀士视角中其他家的透明牌以平放姿态渲染，便于查看；仅本地渲染 */
 	public static final ModConfigSpec.BooleanValue FLAT_GLASS_HAND_TILES;
+	/** 结算界面停靠左侧（默认关）：开启后和牌/终局结算界面停靠在屏幕左侧显示，不做屏幕居中与背景变暗 */
+	public static final ModConfigSpec.BooleanValue SETTLEMENT_OVERLAY;
 
 	/** 备选牌区渲染位置（四角预设） */
 	public enum CandidatePosition {
@@ -69,6 +71,10 @@ public class RichiConfig {
 				.comment("Lay other players' transparent (glass) hand tiles flat for seated players. Client-side rendering only; default: false")
 				.translation("gui.riichi_arise.settings.client_flat_glass")
 				.define("flatGlassHandTiles", false);
+		SETTLEMENT_OVERLAY = builder
+				.comment("Dock settlement screens (hand win / final) to the left edge of the screen as an overlay instead of center GUI with dimmed background. Default: false")
+				.translation("gui.riichi_arise.settings.client_settlement_overlay")
+				.define("settlementOverlay", false);
 		builder.pop();
 		SPEC = builder.build();
 	}

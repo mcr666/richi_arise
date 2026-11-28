@@ -101,7 +101,7 @@ public final class YakuVoices {
 	 * 结算列表末尾的宝牌条目随对应语音逐条显现（{@link FanAnnouncer#startedExtras()}）；
 	 * 服务端顺序为表 → 红 → 拔北（三麻）→ 里</li>
 	 * </ul>
-	 * 该角色没有报番音频（如只有 act 语音的桔螈）时借用有报番音频的默认角色，保证能出声（音色不同）。
+	 * 该角色没有报番音频（如只有 act 语音）时借用有报番音频的默认角色，保证能出声（音色不同）。
 	 * 一条役种音频都没有时通知界面回退固定节奏。
 	 * @param source 音源世界坐标（牌桌中心），报番语音按此位置做距离衰减；null = 不做距离衰减
 	 */
@@ -155,7 +155,7 @@ public final class YakuVoices {
 		// 只有宝牌没有役种音频（如役名无对应音频）时也要照常报宝牌，不能整轮丢弃。
 		List<String> files = new ArrayList<>(fanKeys);
 		files.addAll(extraKeys);
-		// 该角色整轮没有报番音频（oraxolotl 等只有 act 语音）：整轮借用默认角色，避免同一轮内音色混用；
+		// 该角色整轮没有报番音频（只有 act 语音的角色）：整轮借用默认角色，避免同一轮内音色混用；
 		// 若只是个别条目缺文件（角色本身有报番音频），保持原角色，缺的那条静默，不做单条借用
 		String id = resolveFanVoice(voiceId, files);
 		com.mojang.logging.LogUtils.getLogger().info("[voice] 报番计划 {} 键={} 役种={} 宝牌={} 文件={}",

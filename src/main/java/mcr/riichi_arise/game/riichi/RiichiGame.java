@@ -80,6 +80,8 @@ public class RiichiGame {
 	private int discardsThisHand;
 	/** 本局是否已有人鸣牌（双立直判定） */
 	private boolean anyCall;
+	/** 四风连打追踪：各家第一张打出的牌（-1 = 尚未打出）；前提是到第四张为止无人鸣牌/拔北（anyCall 仍为 false） */
+	private final int[] firstDiscards = { -1, -1, -1, -1 };
 	/** 摸进的是牌山最后一张（海底捞月判定） */
 	private boolean lastTileHand;
 	/** 打出的是牌山最后一张（河底捞鱼判定） */
@@ -153,7 +155,7 @@ public class RiichiGame {
 	 * 叠加万能牌玩法（配牌每座位 12 普通 + 1 万能，万能牌固定留手仅在和牌时生效）。
 	 */
 	private final boolean lazuriteMode;
-	/** 宝牌双刃：开局翻 3 张指示牌（杠最多加到 5）、宝牌 +2/影牌（表指示牌自身）-1、里指示牌只产生里宝牌不算影牌 */
+	/** 宝牌双刃：开局翻 3 张指示牌（杠最多加到 5）、宝牌 +2/影牌（指示牌自身）-1、立直时里指示牌也产生影牌 */
 	private final boolean dualBladeMode;
 	/** 本局青金石是否进行配牌后的强制换牌（大厅设置 st.swap，默认开；关 = 跳过换牌直接开打） */
 	private final boolean swapEnabled;
@@ -373,6 +375,7 @@ public class RiichiGame {
 		}
 		discardsThisHand = 0;
 		anyCall = false;
+		java.util.Arrays.fill(firstDiscards, -1); // 四风连打追踪每局重置
 		setBanner("");
 		lastTileHand = false;
 		houteiFlag = false;
@@ -1388,6 +1391,9 @@ public class RiichiGame {
 		p.tempFuriten = false; // 同巡振听到自己的打牌为止
 		kuikaeBan[seat] = -1; // 已按规则打出，本巡食替限制解除
 		int code = p.hand.remove(index);
+		// 四风连打：各家第一切记录（此前无人鸣牌/拔北才有效；鸣牌后 anyCall=true 即不再成立）
+		if (!anyCall && !finished[seat] && p.discards.isEmpty())
+			firstDiscards[seat] = mcr.riichi_arise.game.TileFlag.base(code);
 		boolean riichiDeclared = pendingRiichi; // 牌谱事件旗（置位在下方立直块消费）
 		p.sortHand();
 		p.river.add(code);
@@ -1761,18 +1767,65 @@ public class RiichiGame {
 		return -1;
 	}
 
-	/** 窗口超时：清窗口 → 下家 */
+	/** 窗口超时：清窗口 → 下家（各家响应超时跳过也视作无人鸣牌，途中流局照常判定） */
 	private void closeWindowAndAdvance() {
 		claimWindowEnd = 0;
 		claimDiscarder = -1;
 		claimTile = -1;
 		clearAllOptions();
+		if (checkSuuchaRiichi() || checkSuufonRenda())
+			return;
 		advanceTurn();
 	}
 
 	/** 无人鸣牌 → 下家回合（一发标记保留：立直一巡内有效，直到该家再次打牌才过期） */
 	private void advanceTurn() {
 		beginTurn(nextActiveSeat((turn + 1) % pc())); // 三麻轮转跳过北家座位（0→1→2→0）
+	}
+
+	/**
+	 * 四家立直判定（切牌响应窗口关闭且无人响应时调用）：四麻全员宣言立直 → 途中流局，
+	 * 全员亮牌（含未听家）。立直棒留存桌面，庄家连庄、本场+1。三麻无四家立直（雀魂规则）。
+	 * 返回 true 表示已触发流局。
+	 */
+	private boolean checkSuuchaRiichi() {
+		if (pc() != 4)
+			return false; // 三麻只有三家，无四家立直
+		for (int s = 0; s < pc(); s++) {
+			if (finished[s])
+				continue; // 青金石：已和牌退出者不计入
+			if (!ps[s].riichi)
+				return false;
+		}
+		int[] all = new int[pc()];
+		for (int s = 0; s < pc(); s++)
+			all[s] = s;
+		finishRound("message.riichi_arise.suucha_riichi", "", "", "", new int[0], all);
+		broadcast(Component.translatable("message.riichi_arise.suucha_riichi").getString());
+		return true;
+	}
+
+	/**
+	 * 四风连打判定（切牌响应窗口关闭且无人响应时调用）：四麻开局各家第一切均为同一张风牌 → 途中流局。
+	 * 任一副露/拔北（anyCall）后不再成立；第四家的该牌被荣和时不成立。三麻无四风连打。
+	 * 立直棒留存桌面，庄家连庄、本场+1。返回 true 表示已触发流局。
+	 */
+	private boolean checkSuufonRenda() {
+		if (pc() != 4 || anyCall)
+			return false;
+		int wind = -1;
+		for (int s = 0; s < 4; s++) {
+			int f = firstDiscards[s];
+			if (f < 30 || f > 33)
+				return false; // 未打出或非风牌
+			if (wind == -1)
+				wind = f;
+			else if (wind != f)
+				return false;
+		}
+		finishRound("message.riichi_arise.suufon_renda", "", "", "", new int[0]);
+		broadcast(Component.translatable("message.riichi_arise.suufon_renda").getString());
+		return true;
 	}
 
 	/** 青金石之间（修罗之战）：跳过已和牌退出的座位，取下一个仍在局中的座位。
@@ -1805,6 +1858,9 @@ public class RiichiGame {
 
 	/** 本巡推进下家；pause=true（AI 刚立直宣言后打牌）时额外停 1s 再推进，便于看清宣言；副露的 1s 停顿在切牌前 */
 	private void advanceAfterDiscard(boolean pause, int discarder) {
+		// 途中流局判定（切牌无人响应时点）：四家立直 / 四风连打
+		if (checkSuuchaRiichi() || checkSuufonRenda())
+			return;
 		if (!pause) {
 			advanceTurn();
 			return;
@@ -2390,13 +2446,13 @@ public class RiichiGame {
 			pendingChat = Component.translatable("message.riichi_arise.win_ron", names, details).getString() + " " + pay;
 	}
 
-	/** 自摸计分 flags：双立直/岭上开花/海底捞月 + 里宝牌（宝牌双刃另带表指示牌原牌供影牌判定） */
+	/** 自摸计分 flags：双立直/岭上开花/海底捞月 + 里宝牌（宝牌双刃另带表/里指示牌原牌供影牌判定） */
 	private Mahjong4jBridge.Flags tsumoFlags(RiichiPlayer p) {
 		return new Mahjong4jBridge.Flags(p.doubleRiichi, false, rinshanFlag, lastTileHand, false, wall.uraDoras(),
 				dualBladeMode, wall.revealedDoras(), wall.uraIndicatorTiles());
 	}
 
-	/** 荣和计分 flags：双立直/抢杠/河底捞鱼 + 里宝牌（宝牌双刃另带表指示牌原牌供影牌判定） */
+	/** 荣和计分 flags：双立直/抢杠/河底捞鱼 + 里宝牌（宝牌双刃另带表/里指示牌原牌供影牌判定） */
 	private Mahjong4jBridge.Flags ronFlags(RiichiPlayer p) {
 		return new Mahjong4jBridge.Flags(p.doubleRiichi, chankanFlag, false, false, houteiFlag, wall.uraDoras(),
 				dualBladeMode, wall.revealedDoras(), wall.uraIndicatorTiles());
@@ -2825,7 +2881,7 @@ public class RiichiGame {
 			logWaits[seat] = wait;
 		}
 		MahjongGameLog.draw(level, origin, handIndex + 1, logTenpai, logWaits);
-		// 摊牌规则：听牌家推倒亮牌；全员立直时全部亮牌（含未听家）（三麻=两家立直，原四家立直自然不成立）
+		// 摊牌规则：听牌家推倒亮牌；全员立直（四家立直流局）时全部亮牌（含未听家）
 		java.util.List<Integer> faceUp = new ArrayList<>(tenpai);
 		boolean allRiichi = true;
 		for (int s = 0; s < pc(); s++) {

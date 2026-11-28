@@ -20,11 +20,10 @@ public class MahjongLobbyScreen extends Screen {
 
 	private static final int PHASE_WAITING = 0, PHASE_PLAYING = 1, PHASE_FINISHED = 2;
 
-	/** AI 座位角色显示键（顺序与 MahjongLobby.AVATAR_MODES 一致：默认 > 八木唯 > 琳琅 > 福姬 > 瓦西子 > 赤木 > 一姬 > 桔螈） */
+	/** AI 座位角色显示键（顺序与 MahjongLobby.AVATAR_MODES 一致：默认 > 八木唯 > 琳琅 > 福姬 > 瓦西子 > 赤木 > 一姬） */
 	private static final String[] AVATAR_KEYS = { "gui.riichi_arise.lobby.ch_default", "gui.riichi_arise.lobby.ch_bamuwei",
 			"gui.riichi_arise.lobby.ch_linlang", "gui.riichi_arise.lobby.ch_fuji", "gui.riichi_arise.lobby.ch_washizu",
-			"gui.riichi_arise.lobby.ch_akagi", "gui.riichi_arise.lobby.ch_yiji",
-			"gui.riichi_arise.lobby.ch_oraxolotl" };
+			"gui.riichi_arise.lobby.ch_akagi", "gui.riichi_arise.lobby.ch_yiji" };
 
 	private final BlockPos origin;
 	/** 最近一次服务端同步（未收到前显示加载中） */

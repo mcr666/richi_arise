@@ -142,6 +142,7 @@ public class RichiSettingsScreen extends Screen {
 			r.add(clientRow("gui.riichi_arise.settings.client_action_anim", RichiConfig.TILE_MOVE_ANIMATIONS));
 			r.add(clientRow("gui.riichi_arise.settings.client_swap_buttons", RichiConfig.SWAP_HAND_BUTTONS));
 			r.add(clientRow("gui.riichi_arise.settings.client_flat_glass", RichiConfig.FLAT_GLASS_HAND_TILES));
+			r.add(clientRow("gui.riichi_arise.settings.client_settlement_overlay", RichiConfig.SETTLEMENT_OVERLAY));
 			r.add(new Row(CLIENT_CANDIDATE_POS, 0, "gui.riichi_arise.settings.client_candidate_pos",
 					candidatePosText(), true, 0));
 			r.add(new Row(VOICE_VOLUME, 0, "gui.riichi_arise.voice.volume", voiceVolumeText(), true, 0));
@@ -374,6 +375,7 @@ public class RichiSettingsScreen extends Screen {
 			case "gui.riichi_arise.settings.client_swap_buttons" -> RichiConfig.SWAP_HAND_BUTTONS;
 			case "gui.riichi_arise.settings.client_flat_glass" -> RichiConfig.FLAT_GLASS_HAND_TILES;
 			case "gui.riichi_arise.settings.client_spectator_show" -> RichiConfig.SPECTATOR_SHOW_TABLE;
+			case "gui.riichi_arise.settings.client_settlement_overlay" -> RichiConfig.SETTLEMENT_OVERLAY;
 			default -> null;
 		};
 	}

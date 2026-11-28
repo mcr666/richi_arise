@@ -7,10 +7,11 @@ import net.minecraft.network.chat.Component;
 import mcr.riichi_arise.network.MahjongPointDeltaPayload;
 
 /**
- * 万象修罗（青金石）中局点数结算叠加层：不再弹出 GUI 界面，改为停靠在屏幕左侧的 HUD 面板，
- * 对局画面不被打断。动画与 MahjongPointDeltaScreen 的精简时间轴一致：
- * 出现即显示原点数 + 红/绿增减数 → 0.2s 后 0.4s 内点数浮动到最终值 → 名字按排名滑动 →
- * 总超时 1s（20 tick）自动确认（回 settle_confirm 推进服务端）。
+ * 点数变化叠加层：不弹出 GUI 界面，改为停靠在屏幕左侧的 HUD 面板，对局画面与操作都不被打断。
+ * 动画与 MahjongPointDeltaScreen 的时间轴一致：
+ * 出现即显示原点数 + 红/绿增减数 → 延迟后点数浮动到最终值 → 名字按排名滑动 →
+ * 总超时后自动确认（回 settle_confirm 推进服务端）。
+ * 两套时间轴：万象修罗中盘和牌（fast）= 1s 自动确认；普通结算（客户端设置「结算界面停靠左侧」开启）= 延迟 1s + 浮动 1s + 滑动 1s + 3s 自动确认。
  * 确认后叠加层显示"等待其他玩家"，直到服务端推进下发 MODE_CLOSE 清除。
  */
 public final class MahjongPointDeltaOverlay {
@@ -18,7 +19,7 @@ public final class MahjongPointDeltaOverlay {
 	private static final int POINTS_DELAY_TICKS = 4;     // 0.2s：点数开始浮动前
 	private static final int POINTS_DURATION_TICKS = 8;  // 0.4s：浮动到最终点数
 	private static final int REORDER_DURATION_TICKS = 8; // 0.4s：名字按排名滑动
-	/** 总超时：1s 自动确认（从叠加层出现起计） */
+	/** 精简总超时：1s 自动确认（从叠加层出现起计） */
 	private static final int AUTO_CONFIRM_TICKS = 20;
 
 	/** 当前展示的数据（null = 叠加层隐藏） */
@@ -26,15 +27,28 @@ public final class MahjongPointDeltaOverlay {
 	private static int age;
 	/** 已发过确认包（避免重复） */
 	private static boolean confirmSent;
+	/** 本次时间轴（按 fast/普通结算在 open 时选定） */
+	private static int pointsDelay, pointsDuration, reorderDuration, autoConfirm;
 
 	private MahjongPointDeltaOverlay() {
 	}
 
-	/** fast 点数结算推送：打开左侧叠加层（不打开 GUI 界面） */
+	/** 推送点数结算：打开左侧叠加层（不打开 GUI 界面）。fast=万象修罗精简时间轴，否则完整时间轴 */
 	public static void open(MahjongPointDeltaPayload.PointDeltaMessage msg) {
 		data = msg;
 		age = 0;
 		confirmSent = false;
+		if (msg.fast()) {
+			pointsDelay = POINTS_DELAY_TICKS;
+			pointsDuration = POINTS_DURATION_TICKS;
+			reorderDuration = REORDER_DURATION_TICKS;
+			autoConfirm = AUTO_CONFIRM_TICKS;
+		} else {
+			pointsDelay = 20;   // 1s：点数开始浮动前
+			pointsDuration = 20; // 1s：浮动到最终点数
+			reorderDuration = 20; // 1s：名字按排名滑动
+			autoConfirm = 20 + 20 + 20 + 60; // 再 3s 自动确认
+		}
 	}
 
 	/** 服务端推进下一局（MODE_CLOSE）：清除叠加层 */
@@ -54,7 +68,7 @@ public final class MahjongPointDeltaOverlay {
 			return;
 		}
 		age++;
-		if (age >= AUTO_CONFIRM_TICKS && !confirmSent)
+		if (age >= autoConfirm && !confirmSent)
 			confirm();
 		// 确认包周期重发：服务端可能还处于结算阶段，重发保证最终生效
 		if (confirmSent && age % 20 == 1)
@@ -65,7 +79,7 @@ public final class MahjongPointDeltaOverlay {
 		if (data == null || confirmSent)
 			return;
 		confirmSent = true;
-		age = Math.min(age, AUTO_CONFIRM_TICKS); // 进入等待阶段：冻结倒计时
+		age = Math.min(age, autoConfirm); // 进入等待阶段：冻结倒计时
 		sendConfirm(data.originPacked());
 	}
 
@@ -101,9 +115,9 @@ public final class MahjongPointDeltaOverlay {
 
 	/** 点数动画：0.2s 延迟后 0.4s 内从原点数快速浮动到最终点数（ease-out） */
 	private static int animatedPoints(int before, int after) {
-		if (age < POINTS_DELAY_TICKS)
+		if (age < pointsDelay)
 			return before;
-		double p = Math.max(0.0, Math.min(1.0, (age - POINTS_DELAY_TICKS) / (double) POINTS_DURATION_TICKS));
+		double p = Math.max(0.0, Math.min(1.0, (age - pointsDelay) / (double) pointsDuration));
 		double e = 1 - Math.pow(1 - p, 3);
 		return (int) Math.round(before + (after - before) * e);
 	}
@@ -135,7 +149,7 @@ public final class MahjongPointDeltaOverlay {
 		String pt = Component.translatable("gui.riichi_arise.settlement.pt").getString();
 		int[] beforeOrder = rankOrder(data.before());
 		int[] afterOrder = rankOrder(data.after());
-		int reorderStart = POINTS_DELAY_TICKS + POINTS_DURATION_TICKS;
+		int reorderStart = pointsDelay + pointsDuration;
 		for (int seat = 0; seat < n; seat++) {
 			int before = data.before().get(seat);
 			int after = data.after().get(seat);
@@ -145,7 +159,7 @@ public final class MahjongPointDeltaOverlay {
 			int targetRow = indexOf(afterOrder, seat);
 			double rowF = initialRow;
 			if (age >= reorderStart) {
-				double p = Math.min(1.0, (age - reorderStart) / (double) REORDER_DURATION_TICKS);
+				double p = Math.min(1.0, (age - reorderStart) / (double) reorderDuration);
 				double e = p * p * (3 - 2 * p); // smoothstep
 				rowF = initialRow + (targetRow - initialRow) * e;
 			}
@@ -165,7 +179,7 @@ public final class MahjongPointDeltaOverlay {
 					Component.translatable("gui.riichi_arise.points.waiting").getString() + ".".repeat(dots),
 					left + w / 2, hintY, 0xFFAA55);
 		} else {
-			int remain = Math.max(0, (AUTO_CONFIRM_TICKS - age + 19) / 20);
+			int remain = Math.max(0, (autoConfirm - age + 19) / 20);
 			g.drawCenteredString(font,
 					Component.translatable("gui.riichi_arise.points.confirm_in", remain).getString(),
 					left + w / 2, hintY, 0xFFAA55);

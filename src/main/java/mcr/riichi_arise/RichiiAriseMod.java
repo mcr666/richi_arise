@@ -57,8 +57,6 @@ public class RichiiAriseMod {
 		modEventBus.addListener(this::onCommonSetup);
 		// 麻雀内容注册表
 		MahjongItems.REGISTRY.register(modEventBus);
-		MahjongEntities.REGISTRY.register(modEventBus);
-		modEventBus.addListener(MahjongEntities::onEntityAttributeCreation);
 		MahjongBlocks.REGISTRY.register(modEventBus);
 		MahjongBlockEntities.REGISTRY.register(modEventBus);
 		MahjongComponents.COMPONENTS.register(modEventBus);

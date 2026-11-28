@@ -49,8 +49,8 @@ public class MahjongPointDeltaPayload {
 						return;
 					}
 					prepared = message;
-					// 万象修罗（fast）点数结算：走屏幕左侧叠加层，不弹出 GUI 界面
-					if (message.fast())
+					// 万象修罗（fast）或客户端设置「结算界面停靠左侧」：走屏幕左侧叠加层，不弹出 GUI 界面
+					if (message.fast() || mcr.riichi_arise.RichiConfig.SETTLEMENT_OVERLAY.get())
 						mcr.riichi_arise.client.MahjongPointDeltaOverlay.open(message);
 					else
 						mcr.riichi_arise.client.MahjongPointDeltaScreen.open(message);
